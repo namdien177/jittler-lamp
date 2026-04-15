@@ -1,0 +1,22 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "bun-types"
+    ]
+  },
+  "include": [
+    "./**/*.ts",
+    "../apps/desktop/src/companion/config.ts"
+  ],
+  "references": [
+    {
+      "path": "../packages/shared"
+    }
+  ]
+}
