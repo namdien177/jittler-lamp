@@ -1,0 +1,23 @@
+{
+  "name": "@jittle-lamp/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build ./src/index.ts --outdir ./dist --target browser --format esm",
+    "build:types": "bun x tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "zod": "^3.24.4"
+  }
+}
