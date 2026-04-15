@@ -1,0 +1,17 @@
+{
+  "name": "@jittle-lamp/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run ./src/server.ts",
+    "build": "bun run ./scripts/build.ts",
+    "package": "electrobun build",
+    "set-output": "bun run ./src/configure-output.ts",
+    "typecheck": "bun x tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jittle-lamp/shared": "workspace:*",
+    "electrobun": "^0.0.14"
+  }
+}
