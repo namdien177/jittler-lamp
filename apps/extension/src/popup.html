@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>jittle-lamp</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup-shell">
+      <header class="hero">
+        <p class="eyebrow">Local recorder V1</p>
+        <div class="hero-row">
+          <h1>jittle-lamp</h1>
+          <span class="badge" data-role="status-badge">idle</span>
+        </div>
+        <p class="summary" data-role="message-value"></p>
+      </header>
+
+      <section class="card details">
+        <div class="detail-row">
+          <span class="label">Session</span>
+          <span class="value mono" data-role="session-value">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Title</span>
+          <span class="value" data-role="title-value">No active session</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">URL</span>
+          <span class="value mono wrap" data-role="url-value">Open an http(s) page to start recording.</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Events</span>
+          <span class="value" data-role="events-value">0</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Artifacts</span>
+          <span class="value mono wrap pre" data-role="artifact-value">—</span>
+        </div>
+      </section>
+
+      <footer class="actions">
+        <button class="button primary" data-role="start-button" type="button">Start</button>
+        <button class="button secondary" data-role="stop-button" type="button">Stop</button>
+      </footer>
+    </main>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
