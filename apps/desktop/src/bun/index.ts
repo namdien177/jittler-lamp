@@ -1,8 +1,8 @@
 import { BrowserView, BrowserWindow, Utils } from "electrobun/bun";
 
 import { loadResolvedCompanionConfig, saveCompanionConfig } from "../companion/config";
-import { refreshCompanionConfig, startCompanionServer } from "../companion/server";
-import type { DesktopCompanionConfigSnapshot, DesktopRPC } from "../rpc";
+import { getCompanionRuntimeState, refreshCompanionConfig, startCompanionServer } from "../companion/server";
+import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, DesktopRPC } from "../rpc";
 
 let mainWindow: BrowserWindow<DesktopRPC> | null = null;
 
@@ -24,6 +24,7 @@ const rpc = BrowserView.defineRPC<DesktopRPC>({
         };
       },
       getCompanionConfig: async () => toDesktopCompanionConfigSnapshot(await refreshCompanionConfig()),
+      getCompanionRuntime: async () => toDesktopCompanionRuntimeSnapshot(await getCompanionRuntimeState()),
       openPath: async ({ path }) => {
         Utils.openPath(path);
 
@@ -62,8 +63,8 @@ mainWindow = new BrowserWindow({
   frame: {
     x: 120,
     y: 120,
-    width: 1100,
-    height: 760
+    width: 1240,
+    height: 840
   }
 });
 
@@ -77,5 +78,17 @@ function toDesktopCompanionConfigSnapshot(config: Awaited<ReturnType<typeof load
     outputDir: config.outputDir,
     savedOutputDir: config.savedOutputDir,
     source: config.source
+  };
+}
+
+function toDesktopCompanionRuntimeSnapshot(
+  runtime: Awaited<ReturnType<typeof getCompanionRuntimeState>>
+): DesktopCompanionRuntimeSnapshot {
+  return {
+    status: runtime.status,
+    origin: runtime.origin,
+    outputDir: runtime.outputDir,
+    lastError: runtime.lastError,
+    recentWrites: runtime.recentWrites
   };
 }

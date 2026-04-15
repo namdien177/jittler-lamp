@@ -1,6 +1,7 @@
 import {
   appendDraftEvent,
   captureSessionDraftSchema,
+  companionStateSchema,
   contentRuntimeMessageSchema,
   createSessionBundle,
   createSessionDraft,
@@ -10,6 +11,7 @@ import {
   transitionDraftPhase,
   updateDraftPage,
   type CaptureSessionDraft,
+  type CompanionState,
   type PopupResponse,
   type PopupSessionSummary,
   type PopupState
@@ -18,6 +20,8 @@ import {
 const sessionStorageKey = "jittle-lamp.active-session";
 const debuggerProtocolVersion = "1.3";
 const offscreenDocumentPath = "offscreen.html";
+const companionServerOrigin = "http://127.0.0.1:48115";
+const companionHealthTimeoutMs = 1_200;
 const networkBodyCaptureByteLimit = 64 * 1024;
 const networkBodyFetchByteLimit = 512 * 1024;
 
@@ -358,17 +362,11 @@ async function stopRecordingSession(detail: string): Promise<void> {
     await signalContentCaptureEnded(tabId, processingDraft.sessionId);
     await safeDetachDebugger(tabId);
 
-    const readyDraft = transitionDraftPhase(
-      processingDraft,
-      "ready",
-      "Queued local WebM and JSON exports."
-    );
-
     const offscreenResponse = offscreenResponseSchema.parse(
       await chrome.runtime.sendMessage({
         type: "jl/offscreen-stop-and-export",
-        sessionId: readyDraft.sessionId,
-        bundle: createSessionBundle(readyDraft)
+        sessionId: processingDraft.sessionId,
+        bundle: createSessionBundle(processingDraft)
       })
     );
 
@@ -376,7 +374,15 @@ async function stopRecordingSession(detail: string): Promise<void> {
       throw new Error(offscreenResponse.error ?? "Offscreen export failed.");
     }
 
-    await clearDraft();
+    await saveDraft(
+      transitionDraftPhase(
+        processingDraft,
+        "ready",
+        offscreenResponse.destination === "companion"
+          ? `Saved session to the desktop companion folder at ${offscreenResponse.outputDir ?? "the configured output directory"}.`
+          : "Saved session with browser downloads because the desktop companion was unavailable."
+      )
+    );
   } catch (error: unknown) {
     await saveDraft(
       transitionDraftPhase(
@@ -1470,17 +1476,20 @@ async function clearDraft(): Promise<void> {
 }
 
 async function buildPopupResponse(ok: boolean, error?: string): Promise<PopupResponse> {
+  const [activeSession, companion] = await Promise.all([readDraft(), readCompanionState()]);
+
   return {
     ok,
-    state: toPopupState(await readDraft()),
+    state: toPopupState(activeSession, companion),
     error
   };
 }
 
-function toPopupState(activeSession: CaptureSessionDraft | null): PopupState {
+function toPopupState(activeSession: CaptureSessionDraft | null, companion: CompanionState): PopupState {
   if (!activeSession) {
     return {
       activeSession: null,
+      companion,
       canStart: true,
       canStop: false
     };
@@ -1490,6 +1499,7 @@ function toPopupState(activeSession: CaptureSessionDraft | null): PopupState {
 
   return {
     activeSession: toPopupSessionSummary(activeSession),
+    companion,
     canStart: !canStop,
     canStop
   };
@@ -1504,8 +1514,64 @@ function toPopupSessionSummary(activeSession: CaptureSessionDraft): PopupSession
     updatedAt: activeSession.updatedAt,
     page: activeSession.page,
     artifacts: activeSession.artifacts,
-    eventCount: activeSession.events.length
+    eventCount: activeSession.events.length,
+    ...(deriveSessionStatusText(activeSession)
+      ? { statusText: deriveSessionStatusText(activeSession) }
+      : {})
   };
+}
+
+function deriveSessionStatusText(activeSession: CaptureSessionDraft): string | undefined {
+  for (let index = activeSession.events.length - 1; index >= 0; index -= 1) {
+    const payload = activeSession.events[index]?.payload;
+
+    if (!payload) {
+      continue;
+    }
+
+    if (payload.kind === "lifecycle") {
+      return payload.detail;
+    }
+
+    if (payload.kind === "error") {
+      return payload.message;
+    }
+  }
+
+  return undefined;
+}
+
+async function readCompanionState(): Promise<CompanionState> {
+  const checkedAt = new Date().toISOString();
+
+  try {
+    const response = await fetch(`${companionServerOrigin}/health`, {
+      signal: AbortSignal.timeout(companionHealthTimeoutMs)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Desktop companion responded with ${response.status}.`);
+    }
+
+    const payload = (await response.json()) as {
+      origin?: unknown;
+      outputDir?: unknown;
+    };
+
+    return companionStateSchema.parse({
+      status: "online",
+      origin: typeof payload.origin === "string" ? payload.origin : companionServerOrigin,
+      ...(typeof payload.outputDir === "string" ? { outputDir: payload.outputDir } : {}),
+      checkedAt
+    });
+  } catch (error: unknown) {
+    return companionStateSchema.parse({
+      status: "offline",
+      origin: companionServerOrigin,
+      checkedAt,
+      error: errorMessage(error)
+    });
+  }
 }
 
 function isSessionBusy(draft: CaptureSessionDraft): boolean {

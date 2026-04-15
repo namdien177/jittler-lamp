@@ -1,6 +1,11 @@
 import { popupResponseSchema, type PopupResponse, type PopupState } from "@jittle-lamp/shared";
 
+const refreshIntervalMs = 1_500;
+
 const statusBadge = requireElement<HTMLSpanElement>("[data-role='status-badge']");
+const companionStatus = requireElement<HTMLElement>("[data-role='companion-status']");
+const companionRoute = requireElement<HTMLParagraphElement>("[data-role='companion-route']");
+const companionPill = requireElement<HTMLSpanElement>("[data-role='companion-pill']");
 const titleValue = requireElement<HTMLSpanElement>("[data-role='title-value']");
 const urlValue = requireElement<HTMLSpanElement>("[data-role='url-value']");
 const sessionValue = requireElement<HTMLSpanElement>("[data-role='session-value']");
@@ -13,6 +18,9 @@ const stopButton = requireElement<HTMLButtonElement>("[data-role='stop-button']"
 let requestInFlight = false;
 
 void refreshState();
+setInterval(() => {
+  void refreshState();
+}, refreshIntervalMs);
 
 startButton.addEventListener("click", () => {
   void performAction("jl/popup-start-recording");
@@ -29,8 +37,7 @@ async function performAction(type: "jl/popup-start-recording" | "jl/popup-stop-r
 
   requestInFlight = true;
   setButtonsDisabled(true);
-  let nextState = emptyPopupState();
-  let nextError: string | undefined;
+  let transientError: string | undefined;
 
   try {
     if (type === "jl/popup-start-recording") {
@@ -39,28 +46,35 @@ async function performAction(type: "jl/popup-start-recording" | "jl/popup-stop-r
       });
 
       if (!granted) {
-        nextError = "Grant site access to keep interaction capture running across navigations.";
+        transientError = "Grant site access to keep interaction capture running across navigations.";
         return;
       }
     }
 
     const response = await sendPopupMessage(type);
-    nextState = response.state;
-    nextError = response.error;
+
+    if (response.error) {
+      transientError = response.error;
+    }
   } catch (error: unknown) {
-    nextError = error instanceof Error ? error.message : String(error);
+    transientError = error instanceof Error ? error.message : String(error);
   } finally {
     requestInFlight = false;
-    renderState(nextState, nextError);
   }
+
+  await refreshState(transientError);
 }
 
-async function refreshState(): Promise<void> {
+async function refreshState(errorOverride?: string): Promise<void> {
+  if (requestInFlight) {
+    return;
+  }
+
   try {
     const response = await sendPopupMessage("jl/popup-get-state");
-    renderState(response.state, response.error);
+    renderState(response.state, errorOverride ?? response.error);
   } catch (error: unknown) {
-    renderState(emptyPopupState(), error instanceof Error ? error.message : String(error));
+    renderState(emptyPopupState(), errorOverride ?? (error instanceof Error ? error.message : String(error)));
   }
 }
 
@@ -80,7 +94,16 @@ function renderState(state: PopupState, error?: string): void {
   statusBadge.textContent = activeSession?.phase ?? "idle";
   statusBadge.dataset.phase = activeSession?.phase ?? "idle";
 
-  titleValue.textContent = activeSession?.name ?? "No active session";
+  companionStatus.textContent =
+    state.companion.status === "online" ? "Desktop companion online" : "Desktop companion offline";
+  companionRoute.textContent =
+    state.companion.status === "online"
+      ? state.companion.outputDir ?? state.companion.origin
+      : `${state.companion.origin} unavailable`;
+  companionPill.textContent = state.companion.status;
+  companionPill.dataset.status = state.companion.status;
+
+  titleValue.textContent = activeSession?.name ?? "No session yet";
   urlValue.textContent = activeSession?.page.url ?? "Open an http(s) page to start recording.";
   sessionValue.textContent = activeSession?.sessionId ?? "—";
   eventsValue.textContent = String(activeSession?.eventCount ?? 0);
@@ -91,11 +114,20 @@ function renderState(state: PopupState, error?: string): void {
   if (error) {
     messageValue.textContent = error;
     messageValue.dataset.tone = "error";
-  } else if (activeSession) {
-    messageValue.textContent = `Tracking tab ${activeSession.page.tabId ?? "?"} locally.`;
+  } else if (activeSession?.statusText) {
+    messageValue.textContent = activeSession.statusText;
+    messageValue.dataset.tone = "neutral";
+  } else if (activeSession?.phase === "recording") {
+    messageValue.textContent =
+      state.companion.status === "online"
+        ? `Recording the active tab. Stop to save directly into ${state.companion.outputDir ?? "the desktop companion folder"}.`
+        : "Recording the active tab. Stop to download the session through Chromium.";
+    messageValue.dataset.tone = "neutral";
+  } else if (state.companion.status === "online") {
+    messageValue.textContent = `Desktop companion ready. New stopped sessions will save into ${state.companion.outputDir ?? state.companion.origin}.`;
     messageValue.dataset.tone = "neutral";
   } else {
-    messageValue.textContent = "Starts a local-only active-tab session and exports WebM + JSON with browser downloads.";
+    messageValue.textContent = "Desktop companion offline. Stopped sessions will download through Chromium.";
     messageValue.dataset.tone = "neutral";
   }
 
@@ -121,6 +153,11 @@ function requireElement<ElementType extends Element>(selector: string): ElementT
 function emptyPopupState(): PopupState {
   return {
     activeSession: null,
+    companion: {
+      status: "offline",
+      origin: "http://127.0.0.1:48115",
+      checkedAt: new Date().toISOString()
+    },
     canStart: true,
     canStop: false
   };

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   captureSessionDraftSchema,
+  isoTimestampSchema,
   interactionEventSchema,
   pageContextSchema,
   sessionBundleSchema,
@@ -37,11 +38,21 @@ export const popupSessionSummarySchema = captureSessionDraftSchema
     artifacts: true
   })
   .extend({
-    eventCount: z.number().int().nonnegative()
+    eventCount: z.number().int().nonnegative(),
+    statusText: z.string().min(1).optional()
   });
+
+export const companionStateSchema = z.object({
+  status: z.enum(["online", "offline"]),
+  origin: z.string().url(),
+  outputDir: z.string().min(1).optional(),
+  checkedAt: isoTimestampSchema,
+  error: z.string().min(1).optional()
+});
 
 export const popupStateSchema = z.object({
   activeSession: popupSessionSummarySchema.nullable(),
+  companion: companionStateSchema,
   canStart: z.boolean(),
   canStop: z.boolean()
 });
@@ -106,12 +117,15 @@ export const offscreenResponseSchema = z.object({
   ok: z.boolean(),
   recordingBytes: z.number().int().nonnegative().optional(),
   eventBytes: z.number().int().nonnegative().optional(),
+  destination: z.enum(["companion", "downloads"]).optional(),
+  outputDir: z.string().min(1).optional(),
   error: z.string().min(1).optional()
 });
 
 export type PopupRequest = z.infer<typeof popupRequestSchema>;
 export type PopupResponse = z.infer<typeof popupResponseSchema>;
 export type PopupSessionSummary = z.infer<typeof popupSessionSummarySchema>;
+export type CompanionState = z.infer<typeof companionStateSchema>;
 export type PopupState = z.infer<typeof popupStateSchema>;
 export type BackgroundToContentMessage = z.infer<typeof backgroundToContentMessageSchema>;
 export type ContentRuntimeMessage = z.infer<typeof contentRuntimeMessageSchema>;

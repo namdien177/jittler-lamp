@@ -10,6 +10,7 @@ import {
   contentRuntimeMessageSchema,
   createSessionBundle,
   createSessionDraft,
+  offscreenResponseSchema,
   offscreenRequestSchema,
   popupResponseSchema,
   transitionDraftPhase
@@ -21,6 +22,11 @@ describe("extension contracts", () => {
       ok: true,
       state: {
         activeSession: null,
+        companion: {
+          status: "offline",
+          origin: "http://127.0.0.1:48115",
+          checkedAt: "2026-01-01T00:00:00.000Z"
+        },
         canStart: true,
         canStop: false
       }
@@ -57,7 +63,14 @@ describe("extension contracts", () => {
               mimeType: "application/json"
             }
           ],
-          eventCount: 42
+          eventCount: 42,
+          statusText: "Started active-tab recording in the offscreen document."
+        },
+        companion: {
+          status: "online",
+          origin: "http://127.0.0.1:48115",
+          outputDir: "/tmp/jittle-lamp",
+          checkedAt: "2026-01-01T00:00:05.000Z"
         },
         canStart: false,
         canStop: true
@@ -66,6 +79,7 @@ describe("extension contracts", () => {
 
     expect(response.state.activeSession?.eventCount).toBe(42);
     expect(response.state.activeSession?.page.tabId).toBe(7);
+    expect(response.state.companion.outputDir).toBe("/tmp/jittle-lamp");
   });
 
   test("parses session-scoped content runtime messages", () => {
@@ -133,5 +147,18 @@ describe("extension contracts", () => {
     expect(isTrustedCompanionOrigin("chrome-extension://abcdefghijklmnop")).toBeTrue();
     expect(isTrustedCompanionOrigin("https://example.com")).toBeFalse();
     expect(isTrustedCompanionOrigin(null)).toBeFalse();
+  });
+
+  test("parses richer offscreen export responses", () => {
+    const response = offscreenResponseSchema.parse({
+      ok: true,
+      recordingBytes: 1024,
+      eventBytes: 512,
+      destination: "companion",
+      outputDir: "/tmp/jittle-lamp"
+    });
+
+    expect(response.destination).toBe("companion");
+    expect(response.outputDir).toBe("/tmp/jittle-lamp");
   });
 });

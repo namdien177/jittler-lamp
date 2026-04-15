@@ -18,6 +18,21 @@ type ActiveRecorderState = {
   stopPromise: Promise<Blob>;
 };
 
+type CompanionWriteResult =
+  | {
+      saved: true;
+      outputDir: string;
+    }
+  | {
+      saved: false;
+    };
+
+type CompanionHealthPayload = {
+  ok?: boolean;
+  origin?: string;
+  outputDir?: string;
+};
+
 let activeRecorderState: ActiveRecorderState | null = null;
 
 chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
@@ -41,7 +56,14 @@ chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
 
 async function handleRequest(
   request: ReturnType<typeof offscreenRequestSchema.parse>
-): Promise<{ ok: boolean; recordingBytes?: number; eventBytes?: number; error?: string }> {
+): Promise<{
+  ok: boolean;
+  recordingBytes?: number;
+  eventBytes?: number;
+  destination?: "companion" | "downloads";
+  outputDir?: string;
+  error?: string;
+}> {
   switch (request.type) {
     case "jl/offscreen-start-recording":
       await startRecorder(request.sessionId, request.streamId);
@@ -51,9 +73,13 @@ async function handleRequest(
       const recordingBlob = await stopRecorder(request.sessionId);
       const finalized = finalizeBundleForExport(request.bundle, recordingBlob.size);
 
-      const savedToCompanion = await tryWriteArtifactsToCompanion(finalized.bundle, recordingBlob, finalized.jsonBlob);
+      const companionResult = await tryWriteArtifactsToCompanion(
+        finalized.bundle,
+        recordingBlob,
+        finalized.jsonBlob
+      );
 
-      if (!savedToCompanion) {
+      if (!companionResult.saved) {
         await Promise.all([
           downloadBlob(
             recordingBlob,
@@ -71,7 +97,9 @@ async function handleRequest(
       return {
         ok: true,
         recordingBytes: recordingBlob.size,
-        eventBytes: finalized.jsonBlob.size
+        eventBytes: finalized.jsonBlob.size,
+        destination: companionResult.saved ? "companion" : "downloads",
+        ...(companionResult.saved ? { outputDir: companionResult.outputDir } : {})
       };
     }
   }
@@ -81,23 +109,40 @@ async function tryWriteArtifactsToCompanion(
   bundle: SessionBundle,
   recordingBlob: Blob,
   jsonBlob: Blob
-): Promise<boolean> {
+): Promise<CompanionWriteResult> {
   try {
     const healthResponse = await fetch(`${companionServerOrigin}/health`);
 
     if (!healthResponse.ok) {
-      return false;
+      return { saved: false };
     }
+
+    const companionHealth = await readCompanionHealth(healthResponse);
 
     await Promise.all([
       uploadArtifactToCompanion(bundle.sessionId, "recording.webm", recordingBlob, "video/webm"),
       uploadArtifactToCompanion(bundle.sessionId, "session.events.json", jsonBlob, "application/json")
     ]);
 
-    return true;
+    return {
+      saved: true,
+      outputDir: companionHealth.outputDir
+    };
   } catch {
-    return false;
+    return { saved: false };
   }
+}
+
+async function readCompanionHealth(response: Response): Promise<{ outputDir: string }> {
+  const payload = (await response.json()) as CompanionHealthPayload;
+
+  if (typeof payload.outputDir !== "string" || payload.outputDir.trim().length === 0) {
+    throw new Error("Companion health response did not include a writable output directory.");
+  }
+
+  return {
+    outputDir: payload.outputDir
+  };
 }
 
 async function uploadArtifactToCompanion(

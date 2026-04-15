@@ -7,11 +7,13 @@
     "dev": "bun run ./src/server.ts",
     "build": "bun run ./scripts/build.ts",
     "package": "electrobun build",
+    "package:stable": "electrobun build --env=stable",
+    "package:canary": "electrobun build --env=canary",
     "set-output": "bun run ./src/configure-output.ts",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@jittle-lamp/shared": "workspace:*",
-    "electrobun": "^0.0.14"
+    "electrobun": "^1.16.0"
   }
 }
