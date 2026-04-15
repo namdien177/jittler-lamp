@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/shared"
+    },
+    {
+      "path": "./apps/extension"
+    },
+    {
+      "path": "./apps/desktop"
+    },
+    {
+      "path": "./tests"
+    }
+  ]
+}
