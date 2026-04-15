@@ -1,0 +1,16 @@
+{
+  "name": "@jittle-lamp/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run ./scripts/build.ts",
+    "typecheck": "bun x tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jittle-lamp/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.325"
+  }
+}
