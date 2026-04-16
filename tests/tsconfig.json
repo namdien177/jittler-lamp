@@ -12,11 +12,18 @@
   },
   "include": [
     "./**/*.ts",
-    "../apps/desktop/src/companion/config.ts"
+    "../apps/desktop/src/companion/config.ts",
+    "../apps/desktop/src/companion/server.ts",
+    "../apps/desktop/src/companion/sessions-db.ts",
+    "../apps/desktop/src/bun/zip-import.ts",
+    "../apps/extension/src/draft-storage.ts"
   ],
   "references": [
     {
       "path": "../packages/shared"
+    },
+    {
+      "path": "../apps/desktop"
     }
   ]
 }

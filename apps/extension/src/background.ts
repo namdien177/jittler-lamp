@@ -17,7 +17,10 @@ import {
   type PopupState
 } from "@jittle-lamp/shared";
 
+import { createDraftStorageCheckpoint } from "./draft-storage";
+
 const sessionStorageKey = "jittle-lamp.active-session";
+const sessionStorageMetaKey = "jittle-lamp.active-session-meta";
 const debuggerProtocolVersion = "1.3";
 const offscreenDocumentPath = "offscreen.html";
 const companionServerOrigin = "http://127.0.0.1:48115";
@@ -30,6 +33,8 @@ const stoppingTabIds = new Set<number>();
 
 let draftMutationQueue = Promise.resolve();
 let offscreenCreationPromise: Promise<void> | null = null;
+let activeDraftCache: CaptureSessionDraft | null = null;
+let activeDraftEventCount = 0;
 
 type NetworkRequestState = {
   hasBaseRequest?: boolean;
@@ -787,10 +792,18 @@ async function handleDebuggerDetach(
 }
 
 async function ensureContentBridge(tabId: number, sessionId: string): Promise<void> {
-  await chrome.scripting.executeScript({
+  const probeResults = await chrome.scripting.executeScript({
     target: { tabId },
-    files: ["content.js"]
+    func: () => Boolean(window.__jittleLampBootstrapped__)
   });
+  const isBootstrapped = probeResults[0]?.result === true;
+
+  if (!isBootstrapped) {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+  }
 
   await chrome.tabs.sendMessage(tabId, {
     type: "jl/content-begin-capture",
@@ -1448,7 +1461,11 @@ async function getTabMediaStreamId(tabId: number): Promise<string> {
 }
 
 async function readDraft(): Promise<CaptureSessionDraft | null> {
-  const stored = await chrome.storage.session.get(sessionStorageKey);
+  if (activeDraftCache) {
+    return activeDraftCache;
+  }
+
+  const stored = await chrome.storage.session.get([sessionStorageKey, sessionStorageMetaKey]);
   const rawDraft = stored[sessionStorageKey];
 
   if (!rawDraft) {
@@ -1462,17 +1479,37 @@ async function readDraft(): Promise<CaptureSessionDraft | null> {
     return null;
   }
 
-  return parsed.data;
+  activeDraftCache = parsed.data;
+  activeDraftEventCount =
+    typeof stored[sessionStorageMetaKey]?.eventCount === "number"
+      ? Math.max(stored[sessionStorageMetaKey].eventCount, parsed.data.events.length)
+      : parsed.data.events.length;
+
+  return activeDraftCache;
 }
 
 async function saveDraft(draft: CaptureSessionDraft): Promise<void> {
-  await chrome.storage.session.set({
-    [sessionStorageKey]: draft
-  });
+  activeDraftCache = draft;
+  activeDraftEventCount = draft.events.length;
+
+  const checkpoint = createDraftStorageCheckpoint(draft);
+
+  try {
+    await chrome.storage.session.set({
+      [sessionStorageKey]: checkpoint,
+      [sessionStorageMetaKey]: {
+        eventCount: draft.events.length
+      }
+    });
+  } catch (error: unknown) {
+    console.warn(`Unable to checkpoint active session in session storage: ${errorMessage(error)}`);
+  }
 }
 
 async function clearDraft(): Promise<void> {
-  await chrome.storage.session.remove(sessionStorageKey);
+  activeDraftCache = null;
+  activeDraftEventCount = 0;
+  await chrome.storage.session.remove([sessionStorageKey, sessionStorageMetaKey]);
 }
 
 async function buildPopupResponse(ok: boolean, error?: string): Promise<PopupResponse> {
@@ -1514,7 +1551,7 @@ function toPopupSessionSummary(activeSession: CaptureSessionDraft): PopupSession
     updatedAt: activeSession.updatedAt,
     page: activeSession.page,
     artifacts: activeSession.artifacts,
-    eventCount: activeSession.events.length,
+    eventCount: activeDraftEventCount || activeSession.events.length,
     ...(deriveSessionStatusText(activeSession)
       ? { statusText: deriveSessionStatusText(activeSession) }
       : {})
