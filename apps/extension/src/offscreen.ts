@@ -71,7 +71,7 @@ async function handleRequest(
 
     case "jl/offscreen-stop-and-export": {
       const recordingBlob = await stopRecorder(request.sessionId);
-      const finalized = finalizeBundleForExport(request.bundle, recordingBlob.size);
+      const finalized = finalizeBundleForExport(request.bundle, recordingBlob.size, recordingBlob.type || "video/webm");
 
       const companionResult = await tryWriteArtifactsToCompanion(
         finalized.bundle,
@@ -251,7 +251,7 @@ async function stopRecorder(sessionId: string): Promise<Blob> {
 
 function preferredMimeType(): string | undefined {
   const candidates = [
-    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8",
     "video/webm;codecs=vp8,opus",
     "video/webm"
   ];
@@ -261,9 +261,13 @@ function preferredMimeType(): string | undefined {
 
 function finalizeBundleForExport(
   bundle: SessionBundle,
-  recordingBytes: number
+  recordingBytes: number,
+  recordingMimeType: string
 ): { bundle: SessionBundle; jsonBlob: Blob } {
-  let nextBundle = withArtifactBytes(bundle, "recording.webm", recordingBytes);
+  let nextBundle = withRecordingArtifact(bundle, {
+    bytes: recordingBytes,
+    mimeType: recordingMimeType || "video/webm"
+  });
 
   for (let iteration = 0; iteration < 3; iteration += 1) {
     const jsonText = stringifyBundle(nextBundle);
@@ -301,6 +305,26 @@ function withArtifactBytes(
       return {
         ...artifact,
         bytes
+      };
+    })
+  };
+}
+
+function withRecordingArtifact(
+  bundle: SessionBundle,
+  input: { bytes: number; mimeType: string }
+): SessionBundle {
+  return {
+    ...bundle,
+    artifacts: bundle.artifacts.map((artifact) => {
+      if (artifact.kind !== "recording.webm") {
+        return artifact;
+      }
+
+      return {
+        ...artifact,
+        bytes: input.bytes,
+        mimeType: input.mimeType
       };
     })
   };
