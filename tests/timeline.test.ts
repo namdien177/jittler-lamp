@@ -8,13 +8,26 @@ const T0 = "2024-06-01T12:00:00.000Z";
 const T1 = "2024-06-01T12:00:05.000Z";
 const T2 = "2024-06-01T12:00:10.000Z";
 const T3 = "2024-06-01T12:01:00.000Z";
+type BasicInteractionType = "click" | "input" | "submit";
 
 function makeLifecycle(at: string, phase: "idle" | "armed" | "recording" | "processing" | "ready" | "failed", detail = "detail"): SessionEvent {
   return { at, payload: { kind: "lifecycle", phase, detail } };
 }
 
-function makeInteraction(at: string, type: "click" | "input" | "submit" | "navigation", selector?: string): SessionEvent {
+function makeInteraction(at: string, type: BasicInteractionType, selector?: string): SessionEvent {
   return { at, payload: { kind: "interaction", type, ...(selector ? { selector } : {}) } };
+}
+
+function makeNavigation(at: string, selector?: string): SessionEvent {
+  return {
+    at,
+    payload: {
+      kind: "interaction",
+      type: "navigation",
+      url: "https://example.com/next",
+      ...(selector ? { selector } : {})
+    }
+  };
 }
 
 function makeNetwork(at: string, method = "GET", url = "https://example.com/api"): SessionEvent {

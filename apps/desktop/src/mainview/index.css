@@ -1335,6 +1335,10 @@ input {
   z-index: 10001;
 }
 
+.viewer-merge-dialog-backdrop[hidden] {
+  display: none;
+}
+
 .viewer-merge-dialog {
   width: min(420px, calc(100vw - 64px));
   background: var(--surface-raised);

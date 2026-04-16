@@ -12,6 +12,7 @@ import {
   updateDraftPage,
   type CaptureSessionDraft,
   type CompanionState,
+  type ContentRuntimeMessage,
   type NetworkSubtype,
   type PopupResponse,
   type PopupSessionSummary,
@@ -445,12 +446,15 @@ async function handleCompletedTabUpdate(tabId: number): Promise<void> {
         title: tab.title ?? sanitizedUrl,
         url: sanitizedUrl
       }),
-      {
-        kind: "interaction",
-        type: "navigation",
-        selector: sanitizedUrl
-      }
-    );
+        {
+          kind: "interaction",
+          type: "navigation",
+          selector: sanitizedUrl,
+          url: sanitizedUrl,
+          title: tab.title ?? sanitizedUrl,
+          navigationType: "location"
+        }
+      );
     await saveDraft(nextDraft);
   }
 
@@ -505,8 +509,52 @@ async function handleContentRuntimeMessage(
     }
 
     case "jl/interaction":
-      await saveDraft(appendDraftEvent(currentDraft, message.payload));
+      await saveDraft(appendDraftEvent(currentDraft, normalizeInteractionPayload(message.payload)));
       return;
+  }
+}
+
+function normalizeInteractionPayload(message: Extract<ContentRuntimeMessage, { type: "jl/interaction" }>['payload']) {
+  const selector = message.selector ?? message.target?.selector;
+
+  switch (message.type) {
+    case "click":
+      return {
+        ...message,
+        ...(selector ? { selector } : {}),
+        ...(message.x === undefined && message.clientX !== undefined ? { x: message.clientX } : {}),
+        ...(message.y === undefined && message.clientY !== undefined ? { y: message.clientY } : {})
+      };
+
+    case "input": {
+      const preview = message.valuePreview ?? (typeof message.value === "string" ? message.value.slice(0, 240) : undefined);
+      return {
+        ...message,
+        ...(selector ? { selector } : {}),
+        ...(preview ? { valuePreview: preview } : {})
+      };
+    }
+
+    case "submit":
+      return {
+        ...message,
+        ...(selector ? { selector } : {}),
+        ...(message.formSelector === undefined && selector ? { formSelector: selector } : {})
+      };
+
+    case "navigation":
+      return {
+        ...message,
+        ...(selector ? { selector } : {}),
+        ...(message.url ? { url: sanitizeCapturedUrl(message.url) } : {}),
+        ...(message.page?.url ? { page: { ...message.page, url: sanitizeCapturedUrl(message.page.url) } } : {})
+      };
+
+    case "keyboard":
+      return {
+        ...message,
+        ...(selector ? { selector } : {})
+      };
   }
 }
 

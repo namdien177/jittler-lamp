@@ -156,6 +156,9 @@ jobs:
             echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build desktop app before packaging
+        run: bun run --cwd apps/desktop build
+
       - name: Package macOS desktop release
         env:
           ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}

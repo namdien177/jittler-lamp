@@ -119,14 +119,125 @@ export const networkEventSchema = z.object({
   failureText: z.string().min(1).optional()
 });
 
-export const interactionEventSchema = z.object({
+export const interactionPointerTypeSchema = z.enum(["mouse", "pen", "touch"]);
+
+export const interactionModifiersSchema = z.object({
+  alt: z.boolean().default(false),
+  ctrl: z.boolean().default(false),
+  meta: z.boolean().default(false),
+  shift: z.boolean().default(false)
+});
+
+export const interactionRectSchema = z.object({
+  left: z.number().finite(),
+  top: z.number().finite(),
+  width: z.number().finite(),
+  height: z.number().finite()
+});
+
+export const interactionPageMetricsSchema = z.object({
+  viewport: z.object({
+    width: z.number().int().nonnegative(),
+    height: z.number().int().nonnegative()
+  }),
+  document: z.object({
+    width: z.number().int().nonnegative(),
+    height: z.number().int().nonnegative()
+  }),
+  scroll: z.object({
+    x: z.number().finite(),
+    y: z.number().finite()
+  }),
+  devicePixelRatio: z.number().positive().optional(),
+  url: z.string().url().optional(),
+  title: z.string().min(1).optional()
+});
+
+export const interactionTargetSchema = z.object({
+  selector: z.string().min(1).optional(),
+  selectorAlternates: z.array(z.string().min(1)).default([]),
+  tagName: z.string().min(1).optional(),
+  id: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  role: z.string().min(1).nullable().optional(),
+  href: z.string().min(1).optional(),
+  textPreview: z.string().max(240).optional(),
+  inputType: z.string().min(1).optional(),
+  rect: interactionRectSchema.optional()
+});
+
+const baseInteractionSchema = z.object({
   kind: z.literal("interaction"),
-  type: z.enum(["click", "input", "submit", "navigation"]),
   selector: z.string().min(1).optional(),
   valuePreview: z.string().max(240).optional(),
-  x: z.number().finite().optional(),
-  y: z.number().finite().optional()
+  target: interactionTargetSchema.optional(),
+  page: interactionPageMetricsSchema.optional()
 });
+
+export const clickInteractionEventSchema = baseInteractionSchema.extend({
+  type: z.literal("click"),
+  x: z.number().finite().optional(),
+  y: z.number().finite().optional(),
+  clientX: z.number().finite().optional(),
+  clientY: z.number().finite().optional(),
+  pageX: z.number().finite().optional(),
+  pageY: z.number().finite().optional(),
+  button: z.number().int().optional(),
+  buttons: z.number().int().optional(),
+  clickCount: z.number().int().nonnegative().optional(),
+  pointerType: interactionPointerTypeSchema.optional(),
+  modifiers: interactionModifiersSchema.optional()
+});
+
+export const inputInteractionEventSchema = baseInteractionSchema.extend({
+  type: z.literal("input"),
+  inputType: z.string().min(1).optional(),
+  inputKind: z.enum(["text", "textarea", "select", "checkbox", "radio", "contenteditable", "other"]).optional(),
+  value: z.string().optional(),
+  valueLength: z.number().int().nonnegative().optional(),
+  redacted: z.boolean().optional(),
+  checked: z.boolean().optional(),
+  selectedIndex: z.number().int().optional(),
+  selectionStart: z.number().int().nonnegative().nullable().optional(),
+  selectionEnd: z.number().int().nonnegative().nullable().optional(),
+  isComposing: z.boolean().optional()
+});
+
+export const submitInteractionEventSchema = baseInteractionSchema.extend({
+  type: z.literal("submit"),
+  formSelector: z.string().min(1).optional(),
+  submitterSelector: z.string().min(1).optional(),
+  method: z.string().min(1).optional(),
+  action: z.string().url().optional()
+});
+
+export const navigationInteractionEventSchema = baseInteractionSchema.extend({
+  type: z.literal("navigation"),
+  url: z.string().url(),
+  title: z.string().min(1).optional(),
+  navigationType: z.enum(["pushState", "replaceState", "popstate", "hashchange", "location", "submit"]).optional(),
+  referrer: z.string().url().optional()
+});
+
+export const keyboardInteractionEventSchema = baseInteractionSchema.extend({
+  type: z.literal("keyboard"),
+  eventType: z.enum(["keydown", "keyup"]),
+  key: z.string().min(1),
+  code: z.string().min(1).optional(),
+  location: z.number().int().nonnegative().optional(),
+  repeat: z.boolean().optional(),
+  isComposing: z.boolean().optional(),
+  redacted: z.boolean().optional(),
+  modifiers: interactionModifiersSchema.optional()
+});
+
+export const interactionEventSchema = z.discriminatedUnion("type", [
+  clickInteractionEventSchema,
+  inputInteractionEventSchema,
+  submitInteractionEventSchema,
+  navigationInteractionEventSchema,
+  keyboardInteractionEventSchema
+]);
 
 export const errorEventSchema = z.object({
   kind: z.literal("error"),
@@ -141,7 +252,7 @@ export const lifecycleEventSchema = z.object({
   detail: z.string().min(1)
 });
 
-export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
+export const sessionEventPayloadSchema = z.union([
   consoleEventSchema,
   networkEventSchema,
   interactionEventSchema,
@@ -154,7 +265,7 @@ export const sessionEventSchema = z.object({
   payload: sessionEventPayloadSchema
 });
 
-export const archiveActionPayloadSchema = z.discriminatedUnion("kind", [
+export const archiveActionPayloadSchema = z.union([
   interactionEventSchema,
   errorEventSchema,
   lifecycleEventSchema

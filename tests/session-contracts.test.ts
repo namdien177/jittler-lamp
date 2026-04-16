@@ -153,6 +153,63 @@ describe("session contracts", () => {
     expect(networkEvent.response?.body?.disposition).toBe("truncated");
   });
 
+  test("preserves replay-capable interaction metadata in exported actions", () => {
+    const draft = appendDraftEvent(
+      createSessionDraft({
+        page: {
+          title: "Example",
+          url: "https://example.com/form"
+        },
+        now: new Date("2026-01-01T00:00:00.000Z")
+      }),
+      {
+        kind: "interaction",
+        type: "click",
+        selector: "button > span",
+        x: 40,
+        y: 24,
+        clientX: 40,
+        clientY: 24,
+        pageX: 120,
+        pageY: 144,
+        button: 0,
+        buttons: 1,
+        clickCount: 1,
+        pointerType: "mouse",
+        modifiers: { alt: false, ctrl: false, meta: false, shift: true },
+        page: {
+          viewport: { width: 1440, height: 900 },
+          document: { width: 1440, height: 2200 },
+          scroll: { x: 0, y: 120 },
+          devicePixelRatio: 2,
+          url: "https://example.com/form",
+          title: "Example"
+        },
+        target: {
+          selector: "button > span",
+          selectorAlternates: ["#submit", "button[name=submit]"],
+          tagName: "span",
+          role: null,
+          textPreview: "Submit",
+          rect: { left: 20, top: 12, width: 100, height: 32 }
+        }
+      },
+      new Date("2026-01-01T00:00:01.000Z")
+    );
+
+    const archive = sessionArchiveSchema.parse(createSessionArchive(draft));
+    const action = archive.sections.actions.find((entry) => entry.payload.kind === "interaction" && entry.payload.type === "click");
+
+    if (!action || action.payload.kind !== "interaction" || action.payload.type !== "click") {
+      throw new Error("Expected a click interaction in the exported actions.");
+    }
+
+    expect(action.payload.target?.rect?.width).toBe(100);
+    expect(action.payload.page?.scroll.y).toBe(120);
+    expect(action.payload.modifiers?.shift).toBeTrue();
+    expect(action.payload.pointerType).toBe("mouse");
+  });
+
   test("sanitizes captured urls before storing them", () => {
     expect(sanitizeCapturedUrl("https://example.com/path?q=secret#frag")).toBe("https://example.com/path");
 

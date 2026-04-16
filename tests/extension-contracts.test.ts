@@ -91,7 +91,32 @@ describe("extension contracts", () => {
         type: "click",
         selector: "button.primary",
         x: 12,
-        y: 24
+        y: 24,
+        clientX: 12,
+        clientY: 24,
+        pageX: 12,
+        pageY: 48,
+        button: 0,
+        buttons: 1,
+        clickCount: 1,
+        modifiers: {
+          alt: false,
+          ctrl: true,
+          meta: false,
+          shift: false
+        },
+        page: {
+          viewport: { width: 1280, height: 720 },
+          document: { width: 1280, height: 1600 },
+          scroll: { x: 0, y: 24 }
+        },
+        target: {
+          selector: "button.primary",
+          selectorAlternates: ["#submit"],
+          tagName: "button",
+          textPreview: "Submit",
+          rect: { left: 10, top: 20, width: 120, height: 32 }
+        }
       }
     });
 
@@ -101,6 +126,53 @@ describe("extension contracts", () => {
     }
 
     expect(message.payload.type).toBe("click");
+  });
+
+  test("parses richer keyboard interaction runtime messages", () => {
+    const message = contentRuntimeMessageSchema.parse({
+      type: "jl/interaction",
+      sessionId: "jl_test1234",
+      payload: {
+        kind: "interaction",
+        type: "keyboard",
+        selector: "form > input:text",
+        eventType: "keydown",
+        key: "Enter",
+        code: "Enter",
+        location: 0,
+        repeat: false,
+        isComposing: false,
+        modifiers: {
+          alt: false,
+          ctrl: false,
+          meta: false,
+          shift: false
+        },
+        page: {
+          viewport: { width: 1280, height: 720 },
+          document: { width: 1280, height: 1600 },
+          scroll: { x: 0, y: 24 }
+        },
+        target: {
+          selector: "form > input:text",
+          selectorAlternates: ["input[name=email]"],
+          tagName: "input",
+          inputType: "email",
+          rect: { left: 100, top: 200, width: 280, height: 36 }
+        }
+      }
+    });
+
+    if (!("payload" in message)) {
+      throw new Error("Expected an interaction message.");
+    }
+
+    expect(message.payload.type).toBe("keyboard");
+    if (message.payload.type !== "keyboard") {
+      throw new Error("Expected a keyboard payload.");
+    }
+    expect(message.payload.key).toBe("Enter");
+    expect(message.payload.target?.inputType).toBe("email");
   });
 
   test("parses offscreen export requests with full session archives", () => {
