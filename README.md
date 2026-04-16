@@ -83,18 +83,21 @@ The desktop app is packaged through Electrobun using:
 
 - `apps/desktop/electrobun.config.ts`
 - `bun run --cwd apps/desktop package`
+- `bun run --cwd apps/desktop package:stable`
 
-The basic packaging command is:
+The basic local packaging command is:
 
 ```bash
 bun run --cwd apps/desktop package
 ```
 
-That is the repo-defined release hook for creating the standalone macOS application bundle.
+That creates a local unsigned development app bundle under the Electrobun build folder. In this repo, the output is:
+
+- `apps/desktop/build/dev-macos-arm64/jittle-lamp-dev.app`
 
 #### Unsigned / local-use build
 
-The current repo does not check in signing or notarization settings, so the default packaging path should be treated as the local or unsigned build path.
+The current repo does not check in signing or notarization settings, so the default `package` path should be treated as the local unsigned build path.
 
 Use:
 
@@ -105,6 +108,7 @@ bun run --cwd apps/desktop package
 Notes:
 
 - this is the correct path for local testing and internal packaging experiments
+- it currently produces a standalone `.app` bundle in the `build/` directory, not a signed distribution artifact
 - if an unsigned app is downloaded from another machine, macOS Gatekeeper may block it until quarantine is removed
 - if needed, you can clear quarantine manually on macOS with:
 
@@ -114,7 +118,13 @@ xattr -cr /Applications/jittle-lamp.app
 
 #### Signed / distributable build
 
-For a proper distributable macOS release, you need to add Electrobun signing/notarization configuration and provide Apple credentials before running the same package command.
+For a proper distributable macOS release, use the stable packaging script:
+
+```bash
+bun run --cwd apps/desktop package:stable
+```
+
+Electrobun stable builds are the right place for DMG/update artifacts. For a signed public release, you still need to add signing/notarization configuration and provide Apple credentials before running that command.
 
 At a high level:
 
@@ -123,10 +133,10 @@ At a high level:
 3. Re-run:
 
 ```bash
-bun run --cwd apps/desktop package
+bun run --cwd apps/desktop package:stable
 ```
 
-Repo caveat: the current project does **not** yet check in a completed signing/notarization setup, artifact naming convention, or publish pipeline for the macOS app. So the release section should describe the package command and clearly state that signing is a configuration step you still need to add for public distribution.
+Repo caveat: the current project does **not** yet check in a completed signing/notarization setup or publish pipeline for the macOS app. So the signed/distributable path is available conceptually, but you still need to add the signing configuration before using it for public distribution.
 
 ### 3. Release notes specific to this repo
 
