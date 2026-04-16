@@ -1,0 +1,182 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.15"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate release tag format
+        id: version
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a stable semantic version tag like v1.2.3, received ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce tag on main HEAD
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          MAIN_SHA="$(git rev-parse origin/main)"
+
+          if [[ "${GITHUB_SHA}" != "${MAIN_SHA}" ]]; then
+            echo "Release tags must point at the current main HEAD." >&2
+            echo "tag sha:  ${GITHUB_SHA}" >&2
+            echo "main sha: ${MAIN_SHA}" >&2
+            exit 1
+          fi
+
+      - name: Check version sync against tag
+        run: bun run release:check-version "${{ github.ref_name }}"
+
+      - name: Typecheck workspace
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build workspace
+        run: bun run build
+
+  build-extension:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.15"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build extension bundle
+        run: bun run build:shared && bun run build:extension
+
+      - name: Package extension release asset
+        run: bun run release:package-extension "${{ needs.validate-tag.outputs.version }}"
+
+      - name: Upload extension asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-extension
+          path: release-artifacts/*.zip
+
+  build-desktop:
+    needs: validate-tag
+    runs-on: macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.15"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare App Store Connect API key
+        if: ${{ secrets.ELECTROBUN_APPLE_API_KEY_P8 != '' }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/electrobun"
+          cat <<'EOF' > "$RUNNER_TEMP/electrobun/AuthKey.p8"
+          ${{ secrets.ELECTROBUN_APPLE_API_KEY_P8 }}
+          EOF
+
+      - name: Determine signing mode
+        id: signing
+        env:
+          ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
+          ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+          ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+          ELECTROBUN_APPLEAPIKEY: ${{ secrets.ELECTROBUN_APPLEAPIKEY }}
+          ELECTROBUN_APPLEAPIISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
+          ELECTROBUN_APPLEAPIKEYPATH: ${{ runner.temp }}/electrobun/AuthKey.p8
+        shell: bash
+        run: |
+          if [[ -n "$ELECTROBUN_DEVELOPER_ID" && -n "$ELECTROBUN_TEAMID" ]] && [[ ( -n "$ELECTROBUN_APPLEID" && -n "$ELECTROBUN_APPLEIDPASS" ) || ( -n "$ELECTROBUN_APPLEAPIKEY" && -n "$ELECTROBUN_APPLEAPIISSUER" && -f "$ELECTROBUN_APPLEAPIKEYPATH" ) ]]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package macOS desktop release
+        env:
+          ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
+          ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+          ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+          ELECTROBUN_APPLEAPIKEY: ${{ secrets.ELECTROBUN_APPLEAPIKEY }}
+          ELECTROBUN_APPLEAPIISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
+          ELECTROBUN_APPLEAPIKEYPATH: ${{ runner.temp }}/electrobun/AuthKey.p8
+        run: bun run --cwd apps/desktop package:stable
+
+      - name: Collect macOS release artifact
+        env:
+          JL_MACOS_SIGNED: ${{ steps.signing.outputs.signed }}
+        run: bun run release:collect-desktop "${{ needs.validate-tag.outputs.version }}"
+
+      - name: Upload desktop asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-desktop
+          path: release-artifacts/*
+
+  publish-release:
+    needs:
+      - build-extension
+      - build-desktop
+      - validate-tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ github.ref_name }}" release-artifacts/* --title "${{ github.ref_name }}" --generate-notes

@@ -1,6 +1,6 @@
 import type { RPCSchema } from "electrobun/bun";
 
-import type { SessionBundle } from "@jittle-lamp/shared";
+import type { ArchiveAnnotation, SessionArchive } from "@jittle-lamp/shared";
 
 import type { ResolvedCompanionConfig } from "./companion/config";
 import type { CompanionArtifactWrite, CompanionRuntimeState } from "./companion/server";
@@ -25,7 +25,7 @@ export type { SessionArtifact, SessionRecord } from "./companion/sessions-db";
  */
 export type ViewerPayload = {
   source: "library" | "zip" | "local";
-  bundle: SessionBundle;
+  archive: SessionArchive;
   videoPath: string;
   notes: string;
   tempId?: string;
@@ -167,6 +167,17 @@ export type DesktopRPC = {
         };
         response: {
           ok: true;
+        };
+      };
+      saveSessionReviewState: {
+        params: {
+          sessionId: string;
+          notes: string;
+          annotations: ArchiveAnnotation[];
+        };
+        response: {
+          ok: true;
+          archive: SessionArchive;
         };
       };
     };

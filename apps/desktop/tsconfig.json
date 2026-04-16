@@ -8,10 +8,12 @@
       "DOM"
     ],
     "types": [
-      "bun-types"
+      "bun-types",
+      "node"
     ]
   },
   "include": [
+    "../../scripts/**/*.ts",
     "electrobun.config.ts",
     "scripts/**/*.ts",
     "src/**/*.ts"

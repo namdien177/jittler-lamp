@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import {
   appendDraftEvent,
-  createSessionBundle,
+  createSessionArchive,
   createSessionDraft,
   sanitizeCapturedUrl,
-  sessionBundleSchema,
+  sessionArchiveSchema,
   sessionSchemaVersion,
   transitionDraftPhase
 } from "@jittle-lamp/shared";
@@ -23,7 +23,7 @@ describe("session contracts", () => {
 
     expect(draft.artifacts.map((artifact) => artifact.kind)).toEqual([
       "recording.webm",
-      "session.events.json"
+      "session.archive.json"
     ]);
     expect(draft.name).toBe("Example");
     expect(draft.page.tabId).toBe(7);
@@ -53,12 +53,14 @@ describe("session contracts", () => {
       new Date("2026-01-01T00:00:02.000Z")
     );
 
-    const bundle = sessionBundleSchema.parse(createSessionBundle(draft));
+    const archive = sessionArchiveSchema.parse(createSessionArchive(draft));
 
-    expect(bundle.schemaVersion).toBe(sessionSchemaVersion);
-    expect(bundle.phase).toBe("ready");
-    expect(bundle.events).toHaveLength(3);
-    expect(bundle.artifacts[0]?.relativePath.endsWith("recording.webm")).toBeTrue();
+    expect(archive.schemaVersion).toBe(sessionSchemaVersion);
+    expect(archive.phase).toBe("ready");
+    expect(archive.sections.actions).toHaveLength(3);
+    expect(archive.sections.console).toHaveLength(0);
+    expect(archive.sections.network).toHaveLength(0);
+    expect(archive.artifacts[0]?.relativePath.endsWith("recording.webm")).toBeTrue();
   });
 
   test("preserves richer network payloads in exported bundles", () => {
@@ -136,10 +138,10 @@ describe("session contracts", () => {
       new Date("2026-01-01T00:00:01.000Z")
     );
 
-    const bundle = sessionBundleSchema.parse(createSessionBundle(draft));
-    const networkEvent = bundle.events[1]?.payload;
+    const archive = sessionArchiveSchema.parse(createSessionArchive(draft));
+    const networkEvent = archive.sections.network[0]?.payload;
 
-    if (!networkEvent || networkEvent.kind !== "network") {
+    if (!networkEvent) {
       throw new Error("Expected a network event in the exported bundle.");
     }
 

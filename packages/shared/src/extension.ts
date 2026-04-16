@@ -5,7 +5,7 @@ import {
   isoTimestampSchema,
   interactionEventSchema,
   pageContextSchema,
-  sessionBundleSchema,
+  sessionArchiveSchema,
   sessionIdSchema
 } from "./session";
 
@@ -105,7 +105,7 @@ export const offscreenStartRecordingRequestSchema = z.object({
 export const offscreenStopAndExportRequestSchema = z.object({
   type: z.literal("jl/offscreen-stop-and-export"),
   sessionId: sessionIdSchema,
-  bundle: sessionBundleSchema
+  archive: sessionArchiveSchema
 });
 
 export const offscreenRequestSchema = z.discriminatedUnion("type", [

@@ -13,12 +13,17 @@
     "build:extension": "bun run --cwd apps/extension build",
     "build:desktop": "bun run --cwd apps/desktop build",
     "build:web": "bun run --cwd apps/evidence-web build",
+    "release:check-version": "bun run ./scripts/release/check-version-sync.ts",
+    "release:set-version": "bun run ./scripts/release/set-version.ts",
+    "release:package-extension": "bun run ./scripts/release/package-extension.ts",
+    "release:collect-desktop": "bun run ./scripts/release/collect-desktop-artifact.ts",
     "typecheck": "bun x tsc --noEmit -p tsconfig.typecheck.json",
     "test": "bun test",
-    "clean": "rm -rf apps/desktop/dist apps/extension/dist apps/evidence-web/dist packages/shared/dist"
+    "clean": "rm -rf apps/desktop/dist apps/desktop/artifacts apps/extension/dist apps/evidence-web/dist packages/shared/dist release-artifacts"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.325",
+    "@types/node": "^24.5.2",
     "bun-types": "latest",
     "fflate": "^0.8.2",
     "typescript": "^5.8.3"

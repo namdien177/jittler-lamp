@@ -6,3 +6,4 @@ artifacts/
 coverage/
 *.log
 *.tsbuildinfo
+release-artifacts/

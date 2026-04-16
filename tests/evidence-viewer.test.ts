@@ -4,15 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { strToU8, unzipSync, zipSync } from "fflate";
+import { sessionArchiveSchema } from "@jittle-lamp/shared";
 
-import { _testOverrideDb, getSessionNotes, loadLibrarySession, scanLibrarySessions, setSessionNotes } from "../apps/desktop/src/companion/sessions-db";
+import { _testOverrideDb, getSessionNotes, loadLibrarySession, saveLibrarySessionReviewState, scanLibrarySessions, setSessionNotes } from "../apps/desktop/src/companion/sessions-db";
 import { buildSessionZip, clearTempSession, importZipBundle, loadLocalSession } from "../apps/desktop/src/bun/zip-import";
+import { buildReviewedArchive, buildReviewedSessionZip } from "../apps/evidence-web/src/archive-export";
 
 const NOW = new Date("2024-06-01T12:00:00.000Z").toISOString();
 const SESSION_ID = "jl_test_session_001";
 
 const VALID_BUNDLE = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   sessionId: SESSION_ID,
   name: "Test Session",
   createdAt: NOW,
@@ -24,14 +26,22 @@ const VALID_BUNDLE = {
   },
   artifacts: [
     { kind: "recording.webm", relativePath: `${SESSION_ID}/recording.webm`, mimeType: "video/webm" },
-    { kind: "session.events.json", relativePath: `${SESSION_ID}/session.events.json`, mimeType: "application/json" }
+    { kind: "session.archive.json", relativePath: `${SESSION_ID}/session.archive.json`, mimeType: "application/json" }
   ],
-  events: [
-    {
-      at: NOW,
-      payload: { kind: "lifecycle", phase: "ready", detail: "Session complete." }
-    }
-  ],
+  sections: {
+    actions: [
+      {
+        id: `${SESSION_ID}:actions:000000`,
+        seq: 0,
+        at: NOW,
+        tags: [],
+        payload: { kind: "lifecycle", phase: "ready", detail: "Session complete." }
+      }
+    ],
+    console: [],
+    network: []
+  },
+  annotations: [],
   notes: []
 };
 
@@ -41,7 +51,7 @@ function makeZip(bundleOverride?: object): Uint8Array {
   const webmBytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]);
 
   return zipSync({
-    "session.events.json": eventsBytes,
+    "session.archive.json": eventsBytes,
     "recording.webm": webmBytes
   });
 }
@@ -62,7 +72,7 @@ describe("scanLibrarySessions", () => {
   test("returns a SessionRecord for a valid session folder", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(sessionFolder, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     const records = await scanLibrarySessions(outputDir);
@@ -78,16 +88,16 @@ describe("scanLibrarySessions", () => {
   test("skips folders missing recording.webm", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(sessionFolder, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
 
     const records = await scanLibrarySessions(outputDir);
     expect(records).toHaveLength(0);
   });
 
-  test("skips folders with invalid session.events.json", async () => {
+  test("skips folders with invalid session.archive.json", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), JSON.stringify({ bad: "data" }));
+    await writeFile(join(sessionFolder, "session.archive.json"), JSON.stringify({ bad: "data" }));
     await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     const records = await scanLibrarySessions(outputDir);
@@ -97,7 +107,7 @@ describe("scanLibrarySessions", () => {
   test("skips folders with malformed JSON", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), "not json {{{{");
+    await writeFile(join(sessionFolder, "session.archive.json"), "not json {{{{");
     await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     const records = await scanLibrarySessions(outputDir);
@@ -112,7 +122,7 @@ describe("scanLibrarySessions", () => {
   test("joins notes from SQLite when present", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(sessionFolder, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     setSessionNotes(SESSION_ID, "My test note");
@@ -138,14 +148,14 @@ describe("loadLibrarySession", () => {
   test("returns a ViewerPayload with source=library for a valid session", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(sessionFolder, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     const payload = await loadLibrarySession(SESSION_ID, outputDir);
 
     expect(payload.source).toBe("library");
-    expect(payload.bundle.sessionId).toBe(SESSION_ID);
-    expect(payload.bundle.schemaVersion).toBe(2);
+    expect(payload.archive.sessionId).toBe(SESSION_ID);
+    expect(payload.archive.schemaVersion).toBe(3);
     expect(payload.videoPath).toEndWith("recording.webm");
     expect(payload.notes).toBe("");
     expect(payload.tempId).toBeUndefined();
@@ -154,13 +164,31 @@ describe("loadLibrarySession", () => {
   test("includes persisted notes in the payload", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(sessionFolder, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     setSessionNotes(SESSION_ID, "Reviewer note here");
 
     const payload = await loadLibrarySession(SESSION_ID, outputDir);
     expect(payload.notes).toBe("Reviewer note here");
+  });
+
+  test("falls back to archive notes and hydrates SQLite when DB notes are empty", async () => {
+    const sessionFolder = join(outputDir, SESSION_ID);
+    await mkdir(sessionFolder, { recursive: true });
+    await writeFile(
+      join(sessionFolder, "session.archive.json"),
+      JSON.stringify({
+        ...VALID_BUNDLE,
+        notes: ["Archive note"]
+      })
+    );
+    await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
+
+    const payload = await loadLibrarySession(SESSION_ID, outputDir);
+
+    expect(payload.notes).toBe("Archive note");
+    expect(getSessionNotes(SESSION_ID)).toBe("Archive note");
   });
 
   test("throws when session folder does not exist", async () => {
@@ -172,10 +200,10 @@ describe("loadLibrarySession", () => {
     }
   });
 
-  test("throws when session.events.json is invalid", async () => {
+  test("throws when session.archive.json is invalid", async () => {
     const sessionFolder = join(outputDir, SESSION_ID);
     await mkdir(sessionFolder, { recursive: true });
-    await writeFile(join(sessionFolder, "session.events.json"), JSON.stringify({ bad: true }));
+    await writeFile(join(sessionFolder, "session.archive.json"), JSON.stringify({ bad: true }));
     await writeFile(join(sessionFolder, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     try {
@@ -226,14 +254,57 @@ describe("setSessionNotes / getSessionNotes", () => {
   });
 });
 
+describe("saveLibrarySessionReviewState", () => {
+  let outputDir: string;
+
+  beforeEach(async () => {
+    outputDir = join(tmpdir(), `jl-test-review-${Date.now()}`);
+    await mkdir(join(outputDir, SESSION_ID), { recursive: true });
+    await writeFile(join(outputDir, SESSION_ID, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(outputDir, SESSION_ID, "recording.webm"), new Uint8Array([0x1a, 0x45]));
+    _testOverrideDb(":memory:");
+  });
+
+  afterEach(async () => {
+    await rm(outputDir, { recursive: true, force: true });
+  });
+
+  test("writes notes and annotations back into the portable archive", async () => {
+    const nextArchive = await saveLibrarySessionReviewState({
+      sessionId: SESSION_ID,
+      outputDir,
+      notes: "Saved reviewer note",
+      annotations: [
+        {
+          id: "merge-1",
+          kind: "merge-group",
+          memberIds: [`${SESSION_ID}:actions:000000`, `${SESSION_ID}:actions:000001`],
+          tags: ["greeting"],
+          label: "Entering hello",
+          createdAt: NOW
+        }
+      ]
+    });
+
+    expect(nextArchive.notes).toEqual(["Saved reviewer note"]);
+    expect(nextArchive.annotations).toHaveLength(1);
+    expect(getSessionNotes(SESSION_ID)).toBe("Saved reviewer note");
+
+    const persistedText = await Bun.file(join(outputDir, SESSION_ID, "session.archive.json")).text();
+    const persisted = JSON.parse(persistedText) as { notes: string[]; annotations: unknown[] };
+    expect(persisted.notes).toEqual(["Saved reviewer note"]);
+    expect(persisted.annotations).toHaveLength(1);
+  });
+});
+
 describe("importZipBundle", () => {
   test("returns a ViewerPayload with source=zip", async () => {
     const zip = makeZip();
     const payload = await importZipBundle(zip);
 
     expect(payload.source).toBe("zip");
-    expect(payload.bundle.sessionId).toBe(SESSION_ID);
-    expect(payload.bundle.schemaVersion).toBe(2);
+    expect(payload.archive.sessionId).toBe(SESSION_ID);
+    expect(payload.archive.schemaVersion).toBe(3);
     expect(payload.videoPath).toContain("jittle-lamp-temp");
     expect(payload.videoPath).toEndWith(".webm");
     expect(payload.notes).toBe("");
@@ -246,22 +317,22 @@ describe("importZipBundle", () => {
     await clearTempSession(payload.tempId!);
   });
 
-  test("throws when session.events.json is missing from ZIP", async () => {
+  test("throws when session.archive.json is missing from ZIP", async () => {
     const webmBytes = new Uint8Array([0x1a, 0x45]);
     const zip = zipSync({ "recording.webm": webmBytes });
 
     try {
       await importZipBundle(zip);
-      throw new Error("Expected importZipBundle to reject when session.events.json is missing.");
+      throw new Error("Expected importZipBundle to reject when session.archive.json is missing.");
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect(String(error)).toContain("ZIP is missing session.events.json");
+      expect(String(error)).toContain("ZIP is missing session.archive.json");
     }
   });
 
   test("throws when recording.webm is missing from ZIP", async () => {
     const eventsBytes = strToU8(JSON.stringify(VALID_BUNDLE));
-    const zip = zipSync({ "session.events.json": eventsBytes });
+    const zip = zipSync({ "session.archive.json": eventsBytes });
 
     try {
       await importZipBundle(zip);
@@ -272,7 +343,18 @@ describe("importZipBundle", () => {
     }
   });
 
-  test("throws when session.events.json fails schema validation", async () => {
+  test("accepts nested archive and video entries inside ZIPs", async () => {
+    const nestedZip = zipSync({
+      [`${SESSION_ID}/session.archive.json`]: strToU8(JSON.stringify(VALID_BUNDLE)),
+      [`${SESSION_ID}/recording.webm`]: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])
+    });
+
+    const payload = await importZipBundle(nestedZip);
+    expect(payload.archive.sessionId).toBe(SESSION_ID);
+    await clearTempSession(payload.tempId!);
+  });
+
+  test("throws when session.archive.json fails schema validation", async () => {
     const zip = makeZip({ schemaVersion: 99, bad: "data" });
     try {
       await importZipBundle(zip);
@@ -292,13 +374,60 @@ describe("importZipBundle", () => {
     await Promise.all([clearTempSession(a.tempId!), clearTempSession(b.tempId!)]);
   });
 
-  test("ZIP payload has no notes and is not editable via setSessionNotes", () => {
+  test("ZIP payload has no notes and is not editable via setSessionNotes", async () => {
     const zip = makeZip();
-    void importZipBundle(zip).then(async (payload) => {
-      expect(payload.source).toBe("zip");
-      expect(payload.notes).toBe("");
-      await clearTempSession(payload.tempId!);
+    const payload = await importZipBundle(zip);
+    expect(payload.source).toBe("zip");
+    expect(payload.notes).toBe("");
+    await clearTempSession(payload.tempId!);
+  });
+});
+
+describe("web review-state export helpers", () => {
+  test("buildReviewedArchive updates annotations and timestamp", () => {
+    const next = buildReviewedArchive({
+      archive: sessionArchiveSchema.parse(VALID_BUNDLE),
+      mergeGroups: [
+        {
+          id: "merge-1",
+          kind: "merge-group",
+          memberIds: [`${SESSION_ID}:actions:000000`, `${SESSION_ID}:actions:000001`],
+          tags: ["greeting"],
+          label: "Entering hello",
+          createdAt: NOW
+        }
+      ],
+      now: new Date("2024-06-01T12:05:00.000Z")
     });
+
+    expect(next.annotations).toHaveLength(1);
+    expect(next.updatedAt).toBe("2024-06-01T12:05:00.000Z");
+  });
+
+  test("buildReviewedSessionZip round-trips updated annotations", () => {
+    const zipBytes = buildReviewedSessionZip({
+      archive: sessionArchiveSchema.parse(VALID_BUNDLE),
+      mergeGroups: [
+        {
+          id: "merge-1",
+          kind: "merge-group",
+          memberIds: [`${SESSION_ID}:actions:000000`, `${SESSION_ID}:actions:000001`],
+          tags: [],
+          label: "Merged",
+          createdAt: NOW
+        }
+      ],
+      recordingBytes: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]),
+      now: new Date("2024-06-01T12:06:00.000Z")
+    });
+
+    const files = unzipSync(zipBytes);
+    const archiveText = new TextDecoder().decode(files["session.archive.json"]!);
+    const archive = JSON.parse(archiveText) as { updatedAt: string; annotations: unknown[] };
+
+    expect(files["recording.webm"]).toBeDefined();
+    expect(archive.updatedAt).toBe("2024-06-01T12:06:00.000Z");
+    expect(archive.annotations).toHaveLength(1);
   });
 });
 
@@ -336,21 +465,21 @@ describe("loadLocalSession", () => {
   });
 
   test("returns a ViewerPayload with source=local for a valid folder", async () => {
-    await writeFile(join(folderPath, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(folderPath, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]));
 
     const payload = await loadLocalSession(folderPath);
 
     expect(payload.source).toBe("local");
-    expect(payload.bundle.sessionId).toBe(SESSION_ID);
-    expect(payload.bundle.schemaVersion).toBe(2);
+    expect(payload.archive.sessionId).toBe(SESSION_ID);
+    expect(payload.archive.schemaVersion).toBe(3);
     expect(payload.videoPath).toEndWith("recording.webm");
     expect(payload.notes).toBe("");
     expect(payload.tempId).toBeUndefined();
   });
 
   test("videoPath points to the original file, no temp copy created", async () => {
-    await writeFile(join(folderPath, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(folderPath, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     const payload = await loadLocalSession(folderPath);
@@ -360,7 +489,7 @@ describe("loadLocalSession", () => {
   });
 
   test("notes are always empty for local sessions", async () => {
-    await writeFile(join(folderPath, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(folderPath, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     const payload = await loadLocalSession(folderPath);
@@ -368,20 +497,20 @@ describe("loadLocalSession", () => {
     expect(payload.notes).toBe("");
   });
 
-  test("throws when session.events.json is missing", async () => {
+  test("throws when session.archive.json is missing", async () => {
     await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     try {
       await loadLocalSession(folderPath);
-      throw new Error("Expected loadLocalSession to throw for missing session.events.json.");
+      throw new Error("Expected loadLocalSession to throw for missing session.archive.json.");
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect(String(error)).toContain("missing session.events.json");
+      expect(String(error)).toContain("missing session.archive.json");
     }
   });
 
   test("throws when recording.webm is missing", async () => {
-    await writeFile(join(folderPath, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(folderPath, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
 
     try {
       await loadLocalSession(folderPath);
@@ -392,8 +521,8 @@ describe("loadLocalSession", () => {
     }
   });
 
-  test("throws when session.events.json fails schema validation", async () => {
-    await writeFile(join(folderPath, "session.events.json"), JSON.stringify({ bad: "data" }));
+  test("throws when session.archive.json fails schema validation", async () => {
+    await writeFile(join(folderPath, "session.archive.json"), JSON.stringify({ bad: "data" }));
     await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45]));
 
     try {
@@ -412,7 +541,7 @@ describe("buildSessionZip / export round-trip", () => {
   beforeEach(async () => {
     folderPath = join(tmpdir(), `jl-test-export-${Date.now()}`);
     await mkdir(folderPath, { recursive: true });
-    await writeFile(join(folderPath, "session.events.json"), JSON.stringify(VALID_BUNDLE));
+    await writeFile(join(folderPath, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
     await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]));
   });
 
@@ -429,13 +558,13 @@ describe("buildSessionZip / export round-trip", () => {
     expect(zipBytes[1]).toBe(0x4b);
   });
 
-  test("exported ZIP contains exactly recording.webm and session.events.json at root", async () => {
+  test("exported ZIP contains exactly recording.webm and session.archive.json at root", async () => {
     const zipBytes = await buildSessionZip(folderPath);
 
     const files = unzipSync(zipBytes);
     const keys = Object.keys(files).sort();
 
-    expect(keys).toEqual(["recording.webm", "session.events.json"]);
+    expect(keys).toEqual(["recording.webm", "session.archive.json"]);
   });
 
   test("export round-trip: buildSessionZip then importZipBundle produces identical bundle", async () => {
@@ -443,9 +572,9 @@ describe("buildSessionZip / export round-trip", () => {
     const payload = await importZipBundle(zipBytes);
 
     expect(payload.source).toBe("zip");
-    expect(payload.bundle.sessionId).toBe(SESSION_ID);
-    expect(payload.bundle.schemaVersion).toBe(2);
-    expect(payload.bundle.createdAt).toBe(NOW);
+    expect(payload.archive.sessionId).toBe(SESSION_ID);
+    expect(payload.archive.schemaVersion).toBe(3);
+    expect(payload.archive.createdAt).toBe(NOW);
 
     const videoStat = await stat(payload.videoPath);
     expect(videoStat.size).toBe(4);

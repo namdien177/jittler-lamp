@@ -7,15 +7,18 @@
       "ES2023"
     ],
     "types": [
-      "bun-types"
+      "bun-types",
+      "node"
     ]
   },
   "include": [
+    "../scripts/**/*.ts",
     "./**/*.ts",
     "../apps/desktop/src/companion/config.ts",
     "../apps/desktop/src/companion/server.ts",
     "../apps/desktop/src/companion/sessions-db.ts",
     "../apps/desktop/src/bun/zip-import.ts",
+    "../apps/evidence-web/src/archive-export.ts",
     "../apps/extension/src/draft-storage.ts"
   ],
   "references": [

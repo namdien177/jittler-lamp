@@ -3,7 +3,7 @@ import {
   captureSessionDraftSchema,
   companionStateSchema,
   contentRuntimeMessageSchema,
-  createSessionBundle,
+  createSessionArchive,
   createSessionDraft,
   offscreenResponseSchema,
   popupRequestSchema,
@@ -12,6 +12,7 @@ import {
   updateDraftPage,
   type CaptureSessionDraft,
   type CompanionState,
+  type NetworkSubtype,
   type PopupResponse,
   type PopupSessionSummary,
   type PopupState
@@ -41,6 +42,7 @@ type NetworkRequestState = {
   method: string;
   url: string;
   startedAtMs: number;
+  subtype?: NetworkSubtype;
   status?: number;
   statusText?: string;
   requestHeaders?: NetworkHeaderEntry[];
@@ -127,6 +129,7 @@ type CdpRequestWillBeSentExtraInfoParams = {
 
 type CdpResponseReceivedParams = {
   requestId?: string;
+  type?: string;
   response?: CdpResponseMetadata;
 };
 
@@ -368,12 +371,12 @@ async function stopRecordingSession(detail: string): Promise<void> {
     await safeDetachDebugger(tabId);
 
     const offscreenResponse = offscreenResponseSchema.parse(
-      await chrome.runtime.sendMessage({
-        type: "jl/offscreen-stop-and-export",
-        sessionId: processingDraft.sessionId,
-        bundle: createSessionBundle(processingDraft)
-      })
-    );
+        await chrome.runtime.sendMessage({
+          type: "jl/offscreen-stop-and-export",
+          sessionId: processingDraft.sessionId,
+          archive: createSessionArchive(processingDraft)
+        })
+      );
 
     if (!offscreenResponse.ok) {
       throw new Error(offscreenResponse.error ?? "Offscreen export failed.");
@@ -613,6 +616,7 @@ async function handleDebuggerEvent(
 
       if (requestState) {
         applyResponseMetadata(requestState, payload.response);
+        requestState.subtype = deriveNetworkSubtype(payload.type);
       }
       return;
     }
@@ -988,6 +992,7 @@ function buildNetworkEventPayload(input: {
     kind: "network" as const,
     method: requestState.method,
     url: requestState.url,
+    ...(requestState.subtype ? { subtype: requestState.subtype } : {}),
     ...(typeof requestState.status === "number" ? { status: requestState.status } : {}),
     ...(requestState.statusText ? { statusText: requestState.statusText } : {}),
     durationMs,
@@ -1009,6 +1014,31 @@ function buildNetworkEventPayload(input: {
       : {}),
     ...(requestState.failureText ? { failureText: requestState.failureText } : {})
   };
+}
+
+function deriveNetworkSubtype(resourceType: string | undefined): NetworkSubtype {
+  switch ((resourceType ?? "").toLowerCase()) {
+    case "xhr":
+      return "xhr";
+    case "fetch":
+      return "fetch";
+    case "document":
+      return "document";
+    case "stylesheet":
+      return "stylesheet";
+    case "script":
+      return "script";
+    case "image":
+      return "image";
+    case "font":
+      return "font";
+    case "media":
+      return "media";
+    case "websocket":
+      return "websocket";
+    default:
+      return "other";
+  }
 }
 
 async function captureNetworkBodies(

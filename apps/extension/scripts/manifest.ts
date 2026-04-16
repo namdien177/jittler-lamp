@@ -1,7 +1,9 @@
+import { getWorkspaceVersion } from "../../../scripts/release/workspace-version";
+
 export const extensionManifest = {
   manifest_version: 3,
   name: "jittle-lamp",
-  version: "0.1.0",
+  version: getWorkspaceVersion(),
   description: "Local-first active-tab recorder for Chromium browser sessions.",
   minimum_chrome_version: "123",
   action: {

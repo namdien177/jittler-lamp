@@ -1,11 +1,12 @@
 # jittle-lamp
 
-`jittle-lamp` is a local-first Jam.dev alternative built around a Chromium MV3 extension, a shared TypeScript package, and a minimal Electrobun desktop companion.
+`jittle-lamp` is a local-first Jam.dev alternative built around a Chromium MV3 extension recorder, a macOS desktop companion/viewer, a small evidence web viewer, and a shared TypeScript package.
 
 ## Workspace layout
 
 - `apps/extension` — Chromium MV3 extension recorder for active-tab capture orchestration and local export.
-- `apps/desktop` — Electrobun desktop shell for local session import and later playback/review.
+- `apps/desktop` — Electrobun desktop companion and local session viewer for folders and ZIP imports.
+- `apps/evidence-web` — lightweight browser viewer for exported session bundles.
 - `packages/shared` — strict TypeScript schemas and helpers shared by the extension and desktop app.
 - `docs` — scope, assumptions, and architecture notes for V1.
 - `tests` — repository-level smoke tests.
@@ -22,7 +23,8 @@ V1 now implements a local-only recorder path with:
 - sanitized page URLs and interaction metadata without raw typed field values
 - richer debugger-backed network events including request/response headers, cookies, bodies, and best-effort omission/truncation metadata
 - optional local companion server that writes artifacts directly into a configured machine folder
-- a minimal desktop shell that validates the same shared bundle shape used by the extension
+- a desktop viewer that can open local session folders, import ZIP bundles, save notes, and inspect the recorded timeline/network payloads
+- a browser-based evidence viewer build for the same bundle shape
 
 See `docs/v1-scope.md` for more detail.
 
@@ -33,17 +35,102 @@ bun install
 bun run typecheck
 bun run test
 bun run build
+bun run release:check-version
 ```
+
+## How to use the software
+
+### 1. Record a session with the extension
+
+1. Run `bun run build` or `bun run --cwd apps/extension build`.
+2. Open `chrome://extensions` in Chromium.
+3. Turn on **Developer mode**.
+4. Click **Load unpacked** and select `apps/extension/dist`.
+5. Open an `http://` or `https://` page, open the extension popup, and press **Start**.
+6. Interact with the page, then press **Stop**.
+
+By default Chromium prompts you to save the local artifacts:
+
+- `recording.webm`
+- `session.events.json`
+
+If the desktop companion server is running, the extension can write those artifacts directly into the configured output folder instead.
+
+### 2. Use the desktop companion and viewer
+
+The desktop app can act as both the optional localhost companion and the local session viewer.
+
+- `bun run --cwd apps/desktop dev` starts the local companion server on `http://127.0.0.1:48115`
+- `bun run --cwd apps/desktop set-output "/absolute/path"` updates the saved output folder
+- `bun run --cwd apps/desktop package` builds a local macOS desktop app bundle
+
+Inside the desktop app, the current UI supports:
+
+- **Open Local…** to inspect a session folder
+- **Import ZIP…** to open an exported ZIP bundle
+- **Choose folder…** / **Open folder** in Settings to manage the companion output route
+- session playback, timeline review, network detail inspection, tag editing, and note saving
+
+### 3. Use the browser evidence viewer
+
+Build the lightweight evidence viewer with:
+
+```bash
+bun run --cwd apps/evidence-web build
+```
+
+That emits a static viewer into `apps/evidence-web/dist` for opening exported session bundles in a browser-oriented UI.
 
 ## Release
 
-### 1. Chromium extension release
+### Automated release flow
 
-This repo builds the extension into a Chromium-loadable MV3 folder at:
+This repo now includes GitHub Actions automation for stable releases.
 
-- `apps/extension/dist`
+- pushing a tag that matches `vX.Y.Z`
+- on the current `main` branch HEAD
+- with all workspace versions already synced to `X.Y.Z`
 
-Build it with either of these commands:
+triggers a release workflow that:
+
+1. runs `bun install`, `bun run release:check-version`, `bun run typecheck`, `bun test`, and `bun run build`
+2. packages the Chromium extension into a release ZIP
+3. builds a macOS desktop distribution artifact on `macos-14`
+4. creates a GitHub Release with GitHub-generated release notes
+
+The release notes/changelog are generated automatically by GitHub when the release is created. There is no manual changelog editing step in the normal tag flow.
+
+### 1. Prepare a release version
+
+Use the root version as the release source of truth. The extension manifest and desktop Electrobun config now read that root version automatically, and the workspace `package.json` files are checked for sync.
+
+To bump versions before a release:
+
+```bash
+bun run release:set-version 0.1.1
+bun install
+```
+
+Then commit the version bump, merge it to `main`, and create the release tag:
+
+```bash
+git tag v0.1.1
+git push origin main --tags
+```
+
+### 2. Chromium extension release asset
+
+The release workflow builds the extension from `apps/extension/dist` and publishes:
+
+- `jittle-lamp-extension-vX.Y.Z.zip`
+
+This ZIP is for **extract + Load unpacked** usage in Chromium-based browsers. It is not:
+
+- a signed Chrome Web Store package
+- a `.crx` package
+- a Chrome Web Store publish flow
+
+Local build commands remain:
 
 ```bash
 bun run build
@@ -51,7 +138,7 @@ bun run build
 bun run --cwd apps/extension build
 ```
 
-That build generates a release-ready unpacked extension directory containing:
+That build generates the unpacked extension directory containing:
 
 - `manifest.json`
 - `background.js`
@@ -62,86 +149,73 @@ That build generates a release-ready unpacked extension directory containing:
 - `popup.css`
 - `offscreen.html`
 
-To install it into a Chromium browser:
+To install the released extension ZIP:
+
+1. Download `jittle-lamp-extension-vX.Y.Z.zip` from the GitHub Release.
+2. Extract it.
+3. Open `chrome://extensions`.
+4. Turn on **Developer mode**.
+5. Click **Load unpacked**.
+6. Select the extracted folder.
+
+To install from a local build instead:
 
 1. Open `chrome://extensions` or the equivalent extensions page in your Chromium-based browser.
 2. Turn on **Developer mode**.
 3. Click **Load unpacked**.
 4. Select `apps/extension/dist`.
 
-If you want to share a release artifact internally, zip the contents of `apps/extension/dist` and have the recipient extract it before using **Load unpacked**. This repo does **not** currently define:
+### 3. macOS desktop release asset
 
-- a signed Chrome Web Store package flow
-- a `.crx` packaging flow
-- a publish/release automation flow
+The release workflow builds a macOS desktop artifact on a macOS runner and publishes a filename that explicitly states whether it is signed:
 
-So the documented release target today is the unpacked build folder.
+- `jittle-lamp-desktop-vX.Y.Z-macos-arm64-signed.dmg`
+- or `jittle-lamp-desktop-vX.Y.Z-macos-arm64-unsigned.dmg`
 
-### 2. macOS `.app` release
+The current workflow always produces an **arm64** macOS artifact. It does not claim Intel/universal support.
 
-The desktop app is packaged through Electrobun using:
+#### Unsigned releases
 
-- `apps/desktop/electrobun.config.ts`
-- `bun run --cwd apps/desktop package`
-- `bun run --cwd apps/desktop package:stable`
+If Apple signing credentials are not configured in GitHub Actions, the workflow still builds an unsigned DMG. That is useful for internal download/testing, but it is **not** the same thing as a frictionless public macOS installer.
 
-The basic local packaging command is:
-
-```bash
-bun run --cwd apps/desktop package
-```
-
-That creates a local unsigned development app bundle under the Electrobun build folder. In this repo, the output is:
-
-- `apps/desktop/build/dev-macos-arm64/jittle-lamp-dev.app`
-
-#### Unsigned / local-use build
-
-The current repo does not check in signing or notarization settings, so the default `package` path should be treated as the local unsigned build path.
-
-Use:
-
-```bash
-bun run --cwd apps/desktop package
-```
-
-Notes:
-
-- this is the correct path for local testing and internal packaging experiments
-- it currently produces a standalone `.app` bundle in the `build/` directory, not a signed distribution artifact
-- if an unsigned app is downloaded from another machine, macOS Gatekeeper may block it until quarantine is removed
-- if needed, you can clear quarantine manually on macOS with:
+Unsigned macOS releases may still be blocked by Gatekeeper after download. If needed, a user can remove quarantine manually after installing the app:
 
 ```bash
 xattr -cr /Applications/jittle-lamp.app
 ```
 
-#### Signed / distributable build
+#### Signed and notarized releases
 
-For a proper distributable macOS release, use the stable packaging script:
+If the required Apple credentials are available in GitHub Actions, the desktop build enables Electrobun code signing + notarization automatically and the published DMG filename switches to `signed`.
+
+The workflow supports these secrets:
+
+- `ELECTROBUN_DEVELOPER_ID`
+- `ELECTROBUN_TEAMID`
+- either `ELECTROBUN_APPLEID` + `ELECTROBUN_APPLEIDPASS`
+- or `ELECTROBUN_APPLEAPIKEY` + `ELECTROBUN_APPLEAPIISSUER` + `ELECTROBUN_APPLE_API_KEY_P8`
+
+The API-key path is preferred for CI. The workflow writes `ELECTROBUN_APPLE_API_KEY_P8` into a temporary `.p8` file and points Electrobun at it automatically.
+
+Local desktop packaging commands remain:
 
 ```bash
+bun run --cwd apps/desktop package
 bun run --cwd apps/desktop package:stable
 ```
 
-Electrobun stable builds are the right place for DMG/update artifacts. For a signed public release, you still need to add signing/notarization configuration and provide Apple credentials before running that command.
+With the checked-in config, Electrobun writes build output into:
 
-At a high level:
+- `apps/desktop/build/`
+- `apps/desktop/artifacts/`
 
-1. Add the relevant macOS signing/notarization settings to `apps/desktop/electrobun.config.ts`.
-2. Provide your Apple Developer signing credentials and team configuration through the environment Electrobun expects.
-3. Re-run:
+The release workflow collects the install-oriented artifact from `apps/desktop/artifacts/`.
 
-```bash
-bun run --cwd apps/desktop package:stable
-```
+### 4. Release notes specific to this repo
 
-Repo caveat: the current project does **not** yet check in a completed signing/notarization setup or publish pipeline for the macOS app. So the signed/distributable path is available conceptually, but you still need to add the signing configuration before using it for public distribution.
-
-### 3. Release notes specific to this repo
-
-- The root `bun run build` command is the workspace build/validation path. It is not the same thing as desktop packaging.
-- The extension version and desktop version are currently kept in multiple files manually, so version bumps should be done carefully before a release.
+- The release workflow only accepts stable tags that match `vX.Y.Z`.
+- The tag must point at the current `main` HEAD.
+- `bun run release:check-version` fails if any workspace package version drifts from the root release version.
 - The extension companion integration assumes the local companion server runs on `http://127.0.0.1:48115`.
 - The desktop companion output folder can be changed locally through the desktop UI or the CLI helper:
 

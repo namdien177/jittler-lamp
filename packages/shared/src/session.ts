@@ -1,10 +1,11 @@
 import { z } from "zod";
 
-export const sessionSchemaVersion = 2;
+export const sessionSchemaVersion = 3;
 
 export const isoTimestampSchema = z.string().datetime({ offset: true });
 export const sessionIdSchema = z.string().min(8).max(128);
 export const nonEmptyPathSchema = z.string().min(1);
+export const archiveEntryIdSchema = z.string().min(1);
 
 export const capturePhaseSchema = z.enum([
   "idle",
@@ -15,10 +16,7 @@ export const capturePhaseSchema = z.enum([
   "failed"
 ]);
 
-export const artifactKindSchema = z.enum([
-  "recording.webm",
-  "session.events.json"
-]);
+export const artifactKindSchema = z.enum(["recording.webm", "session.archive.json"]);
 
 export const sessionArtifactSchema = z.object({
   kind: artifactKindSchema,
@@ -83,10 +81,24 @@ export const networkBodyCaptureSchema = z.object({
   reason: z.string().min(1).optional()
 });
 
+export const networkSubtypeSchema = z.enum([
+  "xhr",
+  "fetch",
+  "document",
+  "stylesheet",
+  "script",
+  "image",
+  "font",
+  "media",
+  "websocket",
+  "other"
+]);
+
 export const networkEventSchema = z.object({
   kind: z.literal("network"),
   method: z.string().min(1),
   url: z.string().url(),
+  subtype: networkSubtypeSchema.optional(),
   status: z.number().int().min(100).max(599).optional(),
   statusText: z.string().min(1).optional(),
   durationMs: z.number().nonnegative().optional(),
@@ -142,7 +154,47 @@ export const sessionEventSchema = z.object({
   payload: sessionEventPayloadSchema
 });
 
-export const sessionBundleSchema = z.object({
+export const archiveActionPayloadSchema = z.discriminatedUnion("kind", [
+  interactionEventSchema,
+  errorEventSchema,
+  lifecycleEventSchema
+]);
+
+export const archiveActionSchema = z.object({
+  id: archiveEntryIdSchema,
+  seq: z.number().int().nonnegative(),
+  at: isoTimestampSchema,
+  tags: z.array(z.string().min(1)).default([]),
+  payload: archiveActionPayloadSchema
+});
+
+export const archiveConsoleEntrySchema = z.object({
+  id: archiveEntryIdSchema,
+  seq: z.number().int().nonnegative(),
+  at: isoTimestampSchema,
+  payload: consoleEventSchema
+});
+
+export const archiveNetworkEntrySchema = z.object({
+  id: archiveEntryIdSchema,
+  seq: z.number().int().nonnegative(),
+  at: isoTimestampSchema,
+  subtype: networkSubtypeSchema,
+  payload: networkEventSchema
+});
+
+export const actionMergeGroupSchema = z.object({
+  id: archiveEntryIdSchema,
+  kind: z.literal("merge-group"),
+  memberIds: z.array(archiveEntryIdSchema).min(2),
+  tags: z.array(z.string().min(1)).default([]),
+  label: z.string().min(1),
+  createdAt: isoTimestampSchema
+});
+
+export const archiveAnnotationSchema = z.discriminatedUnion("kind", [actionMergeGroupSchema]);
+
+export const sessionArchiveSchema = z.object({
   schemaVersion: z.literal(sessionSchemaVersion),
   sessionId: sessionIdSchema,
   name: z.string().min(1),
@@ -151,7 +203,12 @@ export const sessionBundleSchema = z.object({
   phase: capturePhaseSchema,
   page: pageContextSchema,
   artifacts: z.array(sessionArtifactSchema),
-  events: z.array(sessionEventSchema),
+  sections: z.object({
+    actions: z.array(archiveActionSchema).default([]),
+    console: z.array(archiveConsoleEntrySchema).default([]),
+    network: z.array(archiveNetworkEntrySchema).default([])
+  }),
+  annotations: z.array(archiveAnnotationSchema).default([]),
   notes: z.array(z.string()).default([])
 });
 
@@ -167,10 +224,16 @@ export const captureSessionDraftSchema = z.object({
   notes: z.array(z.string()).default([])
 });
 
+export type NetworkSubtype = z.infer<typeof networkSubtypeSchema>;
 export type CapturePhase = z.infer<typeof capturePhaseSchema>;
 export type SessionArtifact = z.infer<typeof sessionArtifactSchema>;
 export type SessionEvent = z.infer<typeof sessionEventSchema>;
-export type SessionBundle = z.infer<typeof sessionBundleSchema>;
+export type SessionArchive = z.infer<typeof sessionArchiveSchema>;
+export type ArchiveAction = z.infer<typeof archiveActionSchema>;
+export type ArchiveConsoleEntry = z.infer<typeof archiveConsoleEntrySchema>;
+export type ArchiveNetworkEntry = z.infer<typeof archiveNetworkEntrySchema>;
+export type ArchiveAnnotation = z.infer<typeof archiveAnnotationSchema>;
+export type ActionMergeGroup = z.infer<typeof actionMergeGroupSchema>;
 export type CaptureSessionDraft = z.infer<typeof captureSessionDraftSchema>;
 
 export function sanitizeCapturedUrl(input: string): string {
@@ -212,8 +275,8 @@ export function createSessionArtifacts(sessionId: string): SessionArtifact[] {
       mimeType: "video/webm"
     },
     {
-      kind: "session.events.json",
-      relativePath: `${sessionId}/session.events.json`,
+      kind: "session.archive.json",
+      relativePath: `${sessionId}/session.archive.json`,
       mimeType: "application/json"
     }
   ];
@@ -320,8 +383,63 @@ export function transitionDraftPhase(
   );
 }
 
-export function createSessionBundle(draft: CaptureSessionDraft): SessionBundle {
-  return sessionBundleSchema.parse({
+export function generateArchiveEntryId(
+  sessionId: string,
+  section: "actions" | "console" | "network",
+  index: number
+): string {
+  return `${sessionId}:${section}:${String(index).padStart(6, "0")}`;
+}
+
+export function createSessionArchive(draft: CaptureSessionDraft): SessionArchive {
+  const actions: ArchiveAction[] = [];
+  const consoleEntries: ArchiveConsoleEntry[] = [];
+  const networkEntries: ArchiveNetworkEntry[] = [];
+
+  for (let index = 0; index < draft.events.length; index += 1) {
+    const event = draft.events[index];
+    if (!event) continue;
+
+    const seq = index;
+
+    switch (event.payload.kind) {
+      case "interaction":
+      case "error":
+      case "lifecycle":
+        actions.push({
+          id: generateArchiveEntryId(draft.sessionId, "actions", actions.length),
+          seq,
+          at: event.at,
+          tags: [],
+          payload: event.payload
+        });
+        break;
+
+      case "console":
+        consoleEntries.push({
+          id: generateArchiveEntryId(draft.sessionId, "console", consoleEntries.length),
+          seq,
+          at: event.at,
+          payload: event.payload
+        });
+        break;
+
+      case "network":
+        networkEntries.push({
+          id: generateArchiveEntryId(draft.sessionId, "network", networkEntries.length),
+          seq,
+          at: event.at,
+          subtype: event.payload.subtype ?? "other",
+          payload: {
+            ...event.payload,
+            subtype: event.payload.subtype ?? "other"
+          }
+        });
+        break;
+    }
+  }
+
+  return sessionArchiveSchema.parse({
     schemaVersion: sessionSchemaVersion,
     sessionId: draft.sessionId,
     name: draft.name,
@@ -330,7 +448,12 @@ export function createSessionBundle(draft: CaptureSessionDraft): SessionBundle {
     phase: draft.phase,
     page: draft.page,
     artifacts: draft.artifacts,
-    events: draft.events,
+    sections: {
+      actions,
+      console: consoleEntries,
+      network: networkEntries
+    },
+    annotations: [],
     notes: draft.notes
   });
 }

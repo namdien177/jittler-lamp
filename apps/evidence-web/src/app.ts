@@ -1,40 +1,49 @@
 import { unzipSync } from "fflate";
-import { sessionBundleSchema } from "@jittle-lamp/shared";
-import type { SessionBundle, SessionEvent } from "@jittle-lamp/shared";
-
-type TimelineKind = "lifecycle" | "interaction" | "network" | "console" | "error";
-
-type TimelineItem = {
-  offsetMs: number;
-  event: SessionEvent;
-  kind: TimelineKind;
-  label: string;
-};
+import { sessionArchiveSchema } from "@jittle-lamp/shared";
+import type { SessionArchive } from "@jittle-lamp/shared";
+import type { ActionMergeGroup, NetworkSubtype } from "@jittle-lamp/shared";
+import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "../../desktop/src/mainview/timeline";
+import type { TimelineItem, TimelineSection } from "../../desktop/src/mainview/timeline";
+import { buildReviewedArchive, buildReviewedSessionZip } from "./archive-export";
 
 type AppPhase = "idle" | "loading" | "error" | "viewing";
 
 type AppState = {
   phase: AppPhase;
   error: string | null;
-  bundle: SessionBundle | null;
+  archive: SessionArchive | null;
   videoUrl: string | null;
+  recordingBytes: Uint8Array | null;
   timeline: TimelineItem[];
   activeTimelineIndex: number;
   networkDetailIndex: number | null;
   feedback: string | null;
   feedbackTone: "neutral" | "success" | "error";
+  activeSection: TimelineSection;
+  networkSubtypeFilter: NetworkSubtype | "all";
+  autoFollow: boolean;
+  selectedActionIds: Set<string>;
+  anchorActionId: string | null;
+  mergeGroups: ActionMergeGroup[];
 };
 
 const state: AppState = {
   phase: "idle",
   error: null,
-  bundle: null,
+  archive: null,
   videoUrl: null,
+  recordingBytes: null,
   timeline: [],
   activeTimelineIndex: -1,
   networkDetailIndex: null,
   feedback: null,
-  feedbackTone: "neutral"
+  feedbackTone: "neutral",
+  activeSection: "actions",
+  networkSubtypeFilter: "all",
+  autoFollow: true,
+  selectedActionIds: new Set(),
+  anchorActionId: null,
+  mergeGroups: []
 };
 
 let videoEl: HTMLVideoElement;
@@ -42,70 +51,10 @@ let dropArea: HTMLElement;
 let fileInput: HTMLInputElement;
 let appRoot: HTMLElement;
 let delegatedEventsBound = false;
+let isAutoScrolling = false;
 
-function deriveAnchorMs(events: ReadonlyArray<SessionEvent>): number {
-  for (const event of events) {
-    if (event.payload.kind === "lifecycle" && event.payload.phase === "recording") {
-      return new Date(event.at).getTime();
-    }
-  }
-  let earliest = Infinity;
-  for (const event of events) {
-    const t = new Date(event.at).getTime();
-    if (t < earliest) earliest = t;
-  }
-  return earliest === Infinity ? 0 : earliest;
-}
-
-function buildTimeline(events: ReadonlyArray<SessionEvent>): TimelineItem[] {
-  const anchorMs = deriveAnchorMs(events);
-  const items: TimelineItem[] = events.map((event) => {
-    const offsetMs = new Date(event.at).getTime() - anchorMs;
-    const kind = event.payload.kind as TimelineKind;
-    const label = buildLabel(event);
-    return { offsetMs, event, kind, label };
-  });
-  items.sort((a, b) => a.offsetMs - b.offsetMs);
-  return items;
-}
-
-function findActiveIndex(items: ReadonlyArray<TimelineItem>, currentTimeMs: number): number {
-  let result = -1;
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (item !== undefined && item.offsetMs <= currentTimeMs) {
-      result = i;
-    } else {
-      break;
-    }
-  }
-  return result;
-}
-
-function formatOffset(offsetMs: number): string {
-  const prefix = offsetMs < 0 ? "-" : "";
-  const abs = Math.abs(offsetMs);
-  const totalSeconds = Math.floor(abs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${prefix}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function buildLabel(event: SessionEvent): string {
-  const p = event.payload;
-  switch (p.kind) {
-    case "lifecycle":
-      return `${p.phase}: ${p.detail}`;
-    case "interaction":
-      return p.selector !== undefined ? `${p.type} ${p.selector}` : p.type;
-    case "network":
-      return `${p.method} ${p.url}`;
-    case "console":
-      return p.message;
-    case "error":
-      return p.message;
-  }
-}
+let ctxTargetId: string | null = null;
+let ctxIsMerged = false;
 
 function escapeHtml(str: string): string {
   return str
@@ -164,7 +113,19 @@ async function copyValue(value: string, label: string): Promise<void> {
 function setFeedback(text: string, tone: "neutral" | "success" | "error"): void {
   state.feedback = text;
   state.feedbackTone = tone;
-  render();
+  renderFeedback();
+}
+
+function renderFeedback(): void {
+  const el = appRoot.querySelector<HTMLElement>("[data-role='viewer-feedback']");
+  if (!el) return;
+  if (state.feedback) {
+    el.textContent = state.feedback;
+    el.className = `feedback feedback-${state.feedbackTone}`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
 }
 
 async function handleFile(file: File): Promise<void> {
@@ -184,29 +145,38 @@ async function handleFile(file: File): Promise<void> {
     for (const [path, content] of Object.entries(files)) {
       const name = path.split("/").pop();
       if (name === "recording.webm") webmData = content;
-      if (name === "session.events.json") jsonData = content;
+       if (name === "session.archive.json") jsonData = content;
     }
 
-    if (!jsonData) throw new Error("session.events.json not found in ZIP.");
+    if (!jsonData) throw new Error("session.archive.json not found in ZIP.");
     if (!webmData) throw new Error("recording.webm not found in ZIP.");
 
     const text = new TextDecoder().decode(jsonData);
-    const bundle = sessionBundleSchema.parse(JSON.parse(text));
+    const archive = sessionArchiveSchema.parse(JSON.parse(text));
 
     if (state.videoUrl) {
       URL.revokeObjectURL(state.videoUrl);
     }
 
-    const recordingArtifact = bundle.artifacts.find((artifact) => artifact.kind === "recording.webm");
+    const recordingArtifact = archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
     const stableBuffer = Uint8Array.from(webmData).buffer;
     const blob = new Blob([stableBuffer], { type: recordingArtifact?.mimeType || "video/webm" });
     const videoUrl = URL.createObjectURL(blob);
 
-    state.bundle = bundle;
+    state.archive = archive;
     state.videoUrl = videoUrl;
-    state.timeline = buildTimeline(bundle.events);
+    state.recordingBytes = Uint8Array.from(webmData);
+    state.timeline = buildTimeline(archive);
     state.activeTimelineIndex = -1;
     state.networkDetailIndex = null;
+    state.activeSection = "actions";
+    state.networkSubtypeFilter = "all";
+    state.autoFollow = true;
+    state.selectedActionIds = new Set();
+    state.anchorActionId = null;
+    state.mergeGroups = (archive.annotations ?? []).filter(
+      (a): a is ActionMergeGroup => a.kind === "merge-group"
+    );
     state.phase = "viewing";
     state.feedback = null;
   } catch (err) {
@@ -279,81 +249,164 @@ function renderDropZone(): void {
 }
 
 function renderViewer(): void {
-  const bundle = state.bundle;
-  if (!bundle) return;
+  const archive = state.archive;
+  if (!archive) return;
+
+  const isNetworkSection = state.activeSection === "network";
 
   appRoot.innerHTML = `
     <div class="viewer">
       <div class="viewer-header">
         <div class="viewer-header-left">
-          <span class="viewer-title">${escapeHtml(bundle.name)}</span>
-          <span class="viewer-meta">${escapeHtml(bundle.page.url)}</span>
+          <span class="viewer-title">${escapeHtml(archive.name)}</span>
+          <span class="viewer-meta">${escapeHtml(archive.page.url)}</span>
         </div>
         <div class="viewer-header-right">
-          ${state.feedback ? `<span class="feedback feedback-${state.feedbackTone}">${escapeHtml(state.feedback)}</span>` : ""}
-          <button class="btn-ghost" id="btn-close" type="button">Close</button>
+          <span data-role="viewer-feedback" class="feedback feedback-${state.feedbackTone}"${state.feedback ? "" : " hidden"}>${state.feedback ? escapeHtml(state.feedback) : ""}</span>
+          <button class="btn-ghost" data-role="btn-export" type="button">Export Updated ZIP</button>
+          <button class="btn-ghost" data-role="btn-close" type="button">Close</button>
         </div>
       </div>
       <div class="viewer-body">
         <div class="viewer-left">
-          <video id="viewer-video" class="viewer-video" controls></video>
-          <div class="viewer-timeline" id="viewer-timeline"></div>
+          <video data-role="viewer-video" class="viewer-video" controls></video>
+          <div class="viewer-section-tabs" data-role="viewer-section-tabs">
+            <button class="section-tab" data-role="section-tab" data-section="actions" data-active="${state.activeSection === "actions" ? "true" : "false"}">Actions</button>
+            <button class="section-tab" data-role="section-tab" data-section="console" data-active="${state.activeSection === "console" ? "true" : "false"}">Console</button>
+            <button class="section-tab" data-role="section-tab" data-section="network" data-active="${state.activeSection === "network" ? "true" : "false"}">Network</button>
+          </div>
+          <div class="viewer-network-filter" data-role="viewer-network-filter"${isNetworkSection ? "" : " hidden"}>
+            ${renderNetworkFilterBar()}
+          </div>
+          <div class="viewer-section-body" data-role="viewer-section-body">
+            <div class="viewer-timeline" data-role="viewer-timeline">${renderTimelineHtml()}</div>
+            <button class="viewer-focus-btn" data-role="viewer-focus-btn"${state.autoFollow ? " hidden" : ""}>↓ Focus</button>
+          </div>
         </div>
         <div class="viewer-right">
-          <div class="network-detail" id="network-detail" hidden></div>
+          <div class="network-detail" data-role="network-detail"${state.networkDetailIndex === null ? " hidden" : ""}>${state.networkDetailIndex !== null ? renderNetworkDetailHtml() : ""}</div>
         </div>
       </div>
     </div>
+    <div class="viewer-context-menu" data-role="viewer-context-menu" hidden>
+      <button class="context-menu-item" data-role="ctx-merge" type="button">Merge Actions…</button>
+      <button class="context-menu-item" data-role="ctx-unmerge" type="button">Un-merge</button>
+    </div>
   `;
 
-  videoEl = appRoot.querySelector("#viewer-video") as HTMLVideoElement;
+  videoEl = appRoot.querySelector("[data-role='viewer-video']") as HTMLVideoElement;
   videoEl.src = state.videoUrl ?? "";
 
   videoEl.addEventListener("timeupdate", () => {
     const currentMs = videoEl.currentTime * 1000;
-    const newIndex = findActiveIndex(state.timeline, currentMs);
+    const section = state.activeSection;
+    if (section === "actions") return;
+    const items = buildSectionTimeline(state.archive!, section, state.networkSubtypeFilter);
+    const newIndex = findActiveIndex(items, currentMs);
     if (newIndex !== state.activeTimelineIndex) {
       state.activeTimelineIndex = newIndex;
       updateTimelineHighlight();
     }
   });
-
-  appRoot.querySelector("#btn-close")?.addEventListener("click", () => {
-    if (state.videoUrl) {
-      URL.revokeObjectURL(state.videoUrl);
-      state.videoUrl = null;
-    }
-    state.phase = "idle";
-    state.bundle = null;
-    state.timeline = [];
-    state.activeTimelineIndex = -1;
-    state.networkDetailIndex = null;
-    state.feedback = null;
-    render();
-  });
-
-  renderTimeline();
-  renderNetworkDetail();
-
 }
 
-function renderTimeline(): void {
-  const container = appRoot.querySelector("#viewer-timeline");
-  if (!container) return;
+function renderNetworkFilterBar(): string {
+  const subtypes: Array<{ value: NetworkSubtype | "all"; label: string; emphasis?: boolean }> = [
+    { value: "all", label: "All" },
+    { value: "xhr", label: "XHR", emphasis: true },
+    { value: "fetch", label: "Fetch", emphasis: true },
+    { value: "document", label: "Doc" },
+    { value: "script", label: "Script" },
+    { value: "image", label: "Img" },
+    { value: "font", label: "Font" },
+    { value: "media", label: "Media" },
+    { value: "websocket", label: "WS" },
+    { value: "other", label: "Other" }
+  ];
 
-  if (state.timeline.length === 0) {
-    container.innerHTML = `<span class="viewer-timeline-empty">No events recorded.</span>`;
-    return;
+  return subtypes
+    .map((s) => {
+      const isActive = s.value === state.networkSubtypeFilter;
+      const emphClass = s.emphasis ? " subtype-emphasis" : "";
+      return `<button class="subtype-filter${emphClass}" data-role="subtype-filter" data-subtype="${s.value}" data-active="${isActive ? "true" : "false"}" type="button">${s.label}</button>`;
+    })
+    .join("");
+}
+
+function renderTimelineHtml(): string {
+  const archive = state.archive;
+  if (!archive) return `<span class="viewer-timeline-empty">No events recorded.</span>`;
+
+  const section = state.activeSection;
+  const items = buildSectionTimeline(archive, section, state.networkSubtypeFilter);
+
+  if (section === "actions") {
+    const mergedMemberIds = new Set(state.mergeGroups.flatMap((g) => g.memberIds));
+    const rows: string[] = [];
+    const seenGroupIds = new Set<string>();
+
+    for (const item of items) {
+      const group = state.mergeGroups.find((g) => g.memberIds.includes(item.id));
+
+      if (group) {
+        if (seenGroupIds.has(group.id)) continue;
+        seenGroupIds.add(group.id);
+
+        const memberItems = items.filter((i) => group.memberIds.includes(i.id));
+        const firstMs = Math.min(...memberItems.map((i) => i.offsetMs));
+        const lastMs = Math.max(...memberItems.map((i) => i.offsetMs));
+        const tagChips = group.tags.map((t) => `<span class="tl-tag">${escapeHtml(t)}</span>`).join("");
+        const isSelected = state.selectedActionIds.has(group.id);
+
+        rows.push(`<button
+          class="timeline-item timeline-item-merged"
+          type="button"
+          data-role="timeline-item"
+          data-item-id="${escapeHtml(group.id)}"
+          data-section="actions"
+          data-merged="true"
+          data-active="false"
+          data-selected="${isSelected ? "true" : "false"}"
+        ><span class="timeline-offset">${escapeHtml(formatOffset(firstMs))}–${escapeHtml(formatOffset(lastMs))}</span><span class="tl-merged-badge">merged</span><span class="timeline-label">${escapeHtml(group.label)}</span>${tagChips ? `<span class="tl-tags">${tagChips}</span>` : ""}</button>`);
+        continue;
+      }
+
+      if (mergedMemberIds.has(item.id)) continue;
+
+      const isSelected = state.selectedActionIds.has(item.id);
+      const tagChips = (item.tags ?? []).map((t) => `<span class="tl-tag">${escapeHtml(t)}</span>`).join("");
+
+      rows.push(`<button
+        class="timeline-item"
+        type="button"
+        data-role="timeline-item"
+        data-item-id="${escapeHtml(item.id)}"
+        data-offset-ms="${item.offsetMs}"
+        data-section="actions"
+        data-kind="${escapeHtml(item.kind)}"
+        data-active="false"
+        data-selected="${isSelected ? "true" : "false"}"
+      ><span class="timeline-offset">${escapeHtml(formatOffset(item.offsetMs))}</span><span class="timeline-label">${escapeHtml(item.label)}</span>${tagChips ? `<span class="tl-tags">${tagChips}</span>` : ""}</button>`);
+    }
+
+    return rows.length > 0 ? rows.join("") : `<span class="viewer-timeline-empty">No actions recorded.</span>`;
   }
 
-  container.innerHTML = state.timeline
+  if (items.length === 0) {
+    return `<span class="viewer-timeline-empty">No ${section} events recorded.</span>`;
+  }
+
+  return items
     .map((item, idx) => {
       const isActive = idx === state.activeTimelineIndex;
       return `<button
         class="timeline-item"
         type="button"
         data-role="timeline-item"
+        data-item-id="${escapeHtml(item.id)}"
         data-index="${idx}"
+        data-offset-ms="${item.offsetMs}"
+        data-section="${escapeHtml(section)}"
         data-kind="${escapeHtml(item.kind)}"
         data-active="${isActive ? "true" : "false"}"
       ><span class="timeline-offset">${escapeHtml(formatOffset(item.offsetMs))}</span><span class="timeline-label">${escapeHtml(item.label)}</span></button>`;
@@ -362,36 +415,37 @@ function renderTimeline(): void {
 }
 
 function updateTimelineHighlight(): void {
-  const container = appRoot.querySelector("#viewer-timeline");
+  const container = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
   if (!container) return;
-  container.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item']").forEach((btn, idx) => {
-    btn.dataset.active = idx === state.activeTimelineIndex ? "true" : "false";
+
+  const section = state.activeSection;
+  if (section === "actions") return;
+
+  const buttons = container.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item']");
+  let activeBtn: HTMLButtonElement | null = null;
+
+  buttons.forEach((btn, idx) => {
+    const isActive = idx === state.activeTimelineIndex;
+    btn.dataset.active = isActive ? "true" : "false";
+    if (isActive) activeBtn = btn;
   });
+
+  if (state.autoFollow && activeBtn !== null) {
+    isAutoScrolling = true;
+    (activeBtn as HTMLButtonElement).scrollIntoView({ block: "nearest", behavior: "smooth" });
+    setTimeout(() => { isAutoScrolling = false; }, 300);
+  }
 }
 
-function renderNetworkDetail(): void {
-  const container = appRoot.querySelector<HTMLElement>("#network-detail");
-  if (!container) return;
-
+function renderNetworkDetailHtml(): string {
   const idx = state.networkDetailIndex;
-  if (idx === null) {
-    container.hidden = true;
-    return;
-  }
+  if (idx === null) return "";
 
   const item = state.timeline[idx];
-  if (!item || item.kind !== "network") {
-    container.hidden = true;
-    return;
-  }
+  if (!item || item.kind !== "network") return "";
 
-  const p = item.event.payload;
-  if (p.kind !== "network") {
-    container.hidden = true;
-    return;
-  }
-
-  container.hidden = false;
+  const p = item.payload;
+  if (p.kind !== "network") return "";
 
   const statusCode = p.status ?? null;
   const isSuccess = statusCode !== null && statusCode >= 200 && statusCode < 300;
@@ -422,10 +476,10 @@ function renderNetworkDetail(): void {
     ? renderBodyCapture(p.response.body)
     : `<span class="network-body-empty">No response body</span>`;
 
-  container.innerHTML = `
+  return `
     <div class="network-detail-header">
       <span class="network-detail-title">Network Request</span>
-      <button class="btn-ghost btn-sm" type="button" id="btn-close-detail">✕</button>
+      <button class="btn-ghost btn-sm" type="button" data-role="btn-close-detail">✕</button>
     </div>
     <div class="network-detail-body">
       <div class="network-detail-section">
@@ -454,11 +508,77 @@ function renderNetworkDetail(): void {
       </div>
     </div>
   `;
+}
 
-  container.querySelector("#btn-close-detail")?.addEventListener("click", () => {
-    state.networkDetailIndex = null;
-    renderNetworkDetail();
+function hideContextMenu(): void {
+  const menu = appRoot.querySelector<HTMLElement>("[data-role='viewer-context-menu']");
+  if (menu) menu.hidden = true;
+  ctxTargetId = null;
+  ctxIsMerged = false;
+}
+
+function showContextMenu(x: number, y: number, targetId: string, isMerged: boolean): void {
+  const menu = appRoot.querySelector<HTMLElement>("[data-role='viewer-context-menu']");
+  if (!menu) return;
+
+  ctxTargetId = targetId;
+  ctxIsMerged = isMerged;
+
+  const mergeBtn = menu.querySelector<HTMLElement>("[data-role='ctx-merge']");
+  const unmergeBtn = menu.querySelector<HTMLElement>("[data-role='ctx-unmerge']");
+
+  if (mergeBtn) mergeBtn.hidden = isMerged;
+  if (unmergeBtn) unmergeBtn.hidden = !isMerged;
+
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.hidden = false;
+}
+
+function getSelectedMergeableActionIds(): string[] {
+  if (!state.archive) {
+    return [];
+  }
+
+  return getContiguousMergeableActionIds(state.archive, state.mergeGroups, state.selectedActionIds);
+}
+
+function getReviewedArchive(): SessionArchive | null {
+  if (!state.archive) return null;
+  return buildReviewedArchive({
+    archive: state.archive,
+    mergeGroups: state.mergeGroups
   });
+}
+
+function downloadUpdatedZip(): void {
+  if (!state.archive || !state.recordingBytes) {
+    setFeedback("Nothing loaded to export.", "error");
+    return;
+  }
+
+  const zipBytes = buildReviewedSessionZip({
+    archive: state.archive,
+    mergeGroups: state.mergeGroups,
+    recordingBytes: state.recordingBytes
+  });
+
+  const blob = new Blob([Uint8Array.from(zipBytes).buffer], { type: "application/zip" });
+  const downloadUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = downloadUrl;
+  anchor.download = `${state.archive.sessionId}-reviewed.zip`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(downloadUrl);
+
+  const nextArchive = getReviewedArchive();
+  if (nextArchive) {
+    state.archive = nextArchive;
+  }
+
+  setFeedback("Updated ZIP exported.", "success");
 }
 
 function init(): void {
@@ -476,32 +596,258 @@ function bindDelegatedEvents(): void {
 
   appRoot.addEventListener("click", (event) => {
     const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
 
-    if (!(target instanceof HTMLElement)) {
-      return;
+    const menu = appRoot.querySelector<HTMLElement>("[data-role='viewer-context-menu']");
+    if (menu && !menu.hidden) {
+      if (!menu.contains(target)) {
+        hideContextMenu();
+        return;
+      }
     }
 
     const btn = target.closest<HTMLButtonElement>("[data-role]");
     if (!btn) return;
 
-    if (btn.dataset.role === "timeline-item") {
+    const role = btn.dataset.role;
+
+    if (role === "btn-close") {
+      if (state.videoUrl) {
+        URL.revokeObjectURL(state.videoUrl);
+        state.videoUrl = null;
+      }
+      state.phase = "idle";
+      state.archive = null;
+      state.recordingBytes = null;
+      state.timeline = [];
+      state.activeTimelineIndex = -1;
+      state.networkDetailIndex = null;
+      state.feedback = null;
+      state.activeSection = "actions";
+      state.networkSubtypeFilter = "all";
+      state.autoFollow = true;
+      state.selectedActionIds = new Set();
+      state.anchorActionId = null;
+      state.mergeGroups = [];
+      render();
+      return;
+    }
+
+    if (role === "btn-export") {
+      downloadUpdatedZip();
+      return;
+    }
+
+    if (role === "btn-close-detail") {
+      state.networkDetailIndex = null;
+      const detailEl = appRoot.querySelector<HTMLElement>("[data-role='network-detail']");
+      if (detailEl) {
+        detailEl.hidden = true;
+        detailEl.innerHTML = "";
+      }
+      return;
+    }
+
+    if (role === "section-tab") {
+      const section = btn.dataset.section as TimelineSection | undefined;
+      if (!section) return;
+      state.activeSection = section;
+      state.activeTimelineIndex = -1;
+      state.networkDetailIndex = null;
+
+      appRoot.querySelectorAll<HTMLButtonElement>("[data-role='section-tab']").forEach((tab) => {
+        tab.dataset.active = tab.dataset.section === section ? "true" : "false";
+      });
+
+      const filterBar = appRoot.querySelector<HTMLElement>("[data-role='viewer-network-filter']");
+      if (filterBar) filterBar.hidden = section !== "network";
+
+      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
+      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+
+      const detailEl = appRoot.querySelector<HTMLElement>("[data-role='network-detail']");
+      if (detailEl) { detailEl.hidden = true; detailEl.innerHTML = ""; }
+      return;
+    }
+
+    if (role === "subtype-filter") {
+      const subtype = btn.dataset.subtype as NetworkSubtype | "all" | undefined;
+      if (!subtype) return;
+      state.networkSubtypeFilter = subtype;
+
+      appRoot.querySelectorAll<HTMLButtonElement>("[data-role='subtype-filter']").forEach((b) => {
+        b.dataset.active = b.dataset.subtype === subtype ? "true" : "false";
+      });
+
+      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
+      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+      return;
+    }
+
+    if (role === "viewer-focus-btn") {
+      state.autoFollow = true;
+      btn.hidden = true;
+      return;
+    }
+
+    if (role === "ctx-merge") {
+      hideContextMenu();
+      const selectedIds = getSelectedMergeableActionIds();
+      if (selectedIds.length < 2) {
+        setFeedback("Select 2 or more consecutive actions to merge.", "neutral");
+        return;
+      }
+      const label = window.prompt("Merge group label:", "Merged actions");
+      if (!label) return;
+
+      const newGroup: ActionMergeGroup = {
+        id: `merge-${Date.now()}`,
+        kind: "merge-group",
+        memberIds: selectedIds,
+        tags: [],
+        label,
+        createdAt: new Date().toISOString()
+      };
+      state.mergeGroups = [...state.mergeGroups, newGroup];
+      state.archive = getReviewedArchive();
+      state.selectedActionIds = new Set();
+      state.anchorActionId = null;
+
+      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
+      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+      return;
+    }
+
+    if (role === "ctx-unmerge") {
+      hideContextMenu();
+      if (!ctxTargetId) return;
+      state.mergeGroups = state.mergeGroups.filter((g) => g.id !== ctxTargetId);
+      state.archive = getReviewedArchive();
+      state.selectedActionIds = new Set();
+
+      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
+      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+      return;
+    }
+
+    if (role === "timeline-item") {
+      const section = btn.dataset.section as TimelineSection | undefined;
+      const itemId = btn.dataset.itemId;
+      const isMerged = btn.dataset.merged === "true";
+
+      if (section === "actions") {
+        if (event.metaKey || event.ctrlKey) {
+          if (!itemId) return;
+          const next = new Set(state.selectedActionIds);
+          if (next.has(itemId)) {
+            next.delete(itemId);
+          } else {
+            next.add(itemId);
+            state.anchorActionId = itemId;
+          }
+          state.selectedActionIds = next;
+          btn.dataset.selected = state.selectedActionIds.has(itemId) ? "true" : "false";
+          return;
+        }
+
+        if (event.shiftKey && state.anchorActionId && itemId) {
+          const rangeIds = buildVisibleActionRangeSelection(state.archive!, state.mergeGroups, state.anchorActionId, itemId);
+          if (rangeIds.length > 0) {
+            state.selectedActionIds = new Set(rangeIds);
+            appRoot.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item'][data-section='actions']").forEach((b) => {
+              const bid = b.dataset.itemId;
+              if (bid) b.dataset.selected = state.selectedActionIds.has(bid) ? "true" : "false";
+            });
+          }
+          return;
+        }
+
+        if (itemId) {
+          state.selectedActionIds = new Set([itemId]);
+          state.anchorActionId = itemId;
+          appRoot.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item'][data-section='actions']").forEach((b) => {
+            b.dataset.selected = b.dataset.itemId === itemId ? "true" : "false";
+          });
+        }
+
+        if (!isMerged && btn.dataset.offsetMs) {
+          const offsetMs = Number(btn.dataset.offsetMs);
+          if (videoEl) videoEl.currentTime = offsetMs / 1000;
+        }
+        return;
+      }
+
       const idx = Number(btn.dataset.index);
-      const item = state.timeline[idx];
+      const item = state.timeline.find((t) => t.id === itemId);
       if (!item) return;
-      videoEl.currentTime = item.offsetMs / 1000;
+
+      if (videoEl) videoEl.currentTime = item.offsetMs / 1000;
       state.activeTimelineIndex = idx;
-      state.networkDetailIndex = item.kind === "network" && state.networkDetailIndex !== idx ? idx : null;
-      renderNetworkDetail();
+
+      if (section === "network") {
+        const networkIdx = state.timeline.indexOf(item);
+        const isAlreadyOpen = state.networkDetailIndex === networkIdx;
+        state.networkDetailIndex = isAlreadyOpen ? null : networkIdx;
+
+        const detailEl = appRoot.querySelector<HTMLElement>("[data-role='network-detail']");
+        if (detailEl) {
+          if (state.networkDetailIndex === null) {
+            detailEl.hidden = true;
+            detailEl.innerHTML = "";
+          } else {
+            detailEl.hidden = false;
+            detailEl.innerHTML = renderNetworkDetailHtml();
+          }
+        }
+      }
+
       updateTimelineHighlight();
       return;
     }
 
-    if (btn.dataset.role === "copy-value") {
+    if (role === "copy-value") {
       const value = btn.dataset.copyValue ?? "";
       const label = btn.dataset.copyLabel ?? "value";
       void copyValue(value, label);
     }
   });
+
+  appRoot.addEventListener("contextmenu", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const btn = target.closest<HTMLButtonElement>("[data-role='timeline-item'][data-section='actions']");
+    if (!btn) return;
+
+    event.preventDefault();
+
+    const itemId = btn.dataset.itemId;
+    const isMerged = btn.dataset.merged === "true";
+    if (!itemId) return;
+
+    if (!state.selectedActionIds.has(itemId)) {
+      state.selectedActionIds = new Set([itemId]);
+      state.anchorActionId = itemId;
+      appRoot.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item'][data-section='actions']").forEach((b) => {
+        b.dataset.selected = b.dataset.itemId === itemId ? "true" : "false";
+      });
+    }
+
+    showContextMenu(event.clientX, event.clientY, itemId, isMerged);
+  });
+
+  appRoot.addEventListener("scroll", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (!target.closest("[data-role='viewer-section-body']")) return;
+    if (isAutoScrolling) return;
+
+    if (state.autoFollow) {
+      state.autoFollow = false;
+      const focusBtn = appRoot.querySelector<HTMLElement>("[data-role='viewer-focus-btn']");
+      if (focusBtn) focusBtn.hidden = false;
+    }
+  }, true);
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -12,7 +12,7 @@ import {
   resolveArtifactDestinationPath
 } from "./config";
 
-type ArtifactName = "recording.webm" | "session.events.json";
+type ArtifactName = "recording.webm" | "session.archive.json";
 
 type CompanionServerOptions = {
   quiet?: boolean;
@@ -175,7 +175,7 @@ export async function handleCompanionRequest(request: Request): Promise<Response
       return serveRegisteredMedia(mediaMatch[1], request);
     }
 
-    const artifactMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(recording\.webm|session\.events\.json)$/);
+    const artifactMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(recording\.webm|session\.archive\.json)$/);
 
     if (request.method === "PUT" && artifactMatch) {
       if (!isTrustedCompanionOrigin(requestOrigin)) {

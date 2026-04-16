@@ -1,47 +1,104 @@
-import type { SessionEvent } from "@jittle-lamp/shared";
+import type { ActionMergeGroup, NetworkSubtype, SessionArchive } from "@jittle-lamp/shared";
 
 export type TimelineKind = "lifecycle" | "interaction" | "network" | "console" | "error";
+export type TimelineSection = "actions" | "console" | "network";
 
 export type TimelineItem = {
+  id: string;
   offsetMs: number;
-  event: SessionEvent;
+  seq: number;
+  at: string;
   kind: TimelineKind;
+  section: TimelineSection;
   label: string;
+  subtype?: NetworkSubtype;
+  tags?: string[];
+  payload:
+    | SessionArchive["sections"]["actions"][number]["payload"]
+    | SessionArchive["sections"]["console"][number]["payload"]
+    | SessionArchive["sections"]["network"][number]["payload"];
 };
 
-export function deriveAnchorMs(events: ReadonlyArray<SessionEvent>): number {
-  for (const event of events) {
-    if (event.payload.kind === "lifecycle" && event.payload.phase === "recording") {
-      return new Date(event.at).getTime();
+export type VisibleActionRow = {
+  id: string;
+  memberActionIds: string[];
+};
+
+export function deriveAnchorMs(archive: SessionArchive): number {
+  const timestamps = [archive.createdAt, ...archive.sections.actions.map((entry) => entry.at)];
+
+  for (const action of archive.sections.actions) {
+    if (action.payload.kind === "lifecycle" && action.payload.phase === "recording") {
+      return new Date(action.at).getTime();
     }
   }
 
   let earliest = Infinity;
-  for (const event of events) {
-    const t = new Date(event.at).getTime();
-    if (t < earliest) earliest = t;
+  for (const timestamp of timestamps) {
+    const value = new Date(timestamp).getTime();
+    if (value < earliest) earliest = value;
   }
 
   return earliest === Infinity ? 0 : earliest;
 }
 
-export function buildTimeline(events: ReadonlyArray<SessionEvent>): TimelineItem[] {
-  const anchorMs = deriveAnchorMs(events);
+export function buildTimeline(archive: SessionArchive): TimelineItem[] {
+  const anchorMs = deriveAnchorMs(archive);
 
-  const items: TimelineItem[] = events.map((event) => {
-    const offsetMs = new Date(event.at).getTime() - anchorMs;
-    const kind = event.payload.kind as TimelineKind;
-    const label = buildLabel(event);
-    return { offsetMs, event, kind, label };
-  });
+  const items: TimelineItem[] = [
+    ...archive.sections.actions.map((entry) => ({
+      id: entry.id,
+      offsetMs: new Date(entry.at).getTime() - anchorMs,
+      seq: entry.seq,
+      at: entry.at,
+      kind: entry.payload.kind,
+      section: "actions" as const,
+      label: buildActionLabel(entry.payload),
+      tags: entry.tags,
+      payload: entry.payload
+    })),
+    ...archive.sections.console.map((entry) => ({
+      id: entry.id,
+      offsetMs: new Date(entry.at).getTime() - anchorMs,
+      seq: entry.seq,
+      at: entry.at,
+      kind: "console" as const,
+      section: "console" as const,
+      label: entry.payload.message,
+      payload: entry.payload
+    })),
+    ...archive.sections.network.map((entry) => ({
+      id: entry.id,
+      offsetMs: new Date(entry.at).getTime() - anchorMs,
+      seq: entry.seq,
+      at: entry.at,
+      kind: "network" as const,
+      section: "network" as const,
+      label: `${entry.payload.method} ${entry.payload.url}`,
+      subtype: entry.subtype,
+      payload: entry.payload
+    }))
+  ];
 
-  items.sort((a, b) => a.offsetMs - b.offsetMs);
+  items.sort((a, b) => a.offsetMs - b.offsetMs || a.seq - b.seq);
   return items;
+}
+
+export function buildSectionTimeline(
+  archive: SessionArchive,
+  section: TimelineSection,
+  subtypeFilter: NetworkSubtype | "all" = "all"
+): TimelineItem[] {
+  const mixed = buildTimeline(archive).filter((item) => item.section === section);
+  if (section !== "network" || subtypeFilter === "all") {
+    return mixed;
+  }
+  return mixed.filter((item) => item.subtype === subtypeFilter);
 }
 
 export function findActiveIndex(items: ReadonlyArray<TimelineItem>, currentTimeMs: number): number {
   let result = -1;
-  for (let i = 0; i < items.length; i++) {
+  for (let i = 0; i < items.length; i += 1) {
     const item = items[i];
     if (item !== undefined && item.offsetMs <= currentTimeMs) {
       result = i;
@@ -61,18 +118,109 @@ export function formatOffset(offsetMs: number): string {
   return `${prefix}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function buildLabel(event: SessionEvent): string {
-  const p = event.payload;
-  switch (p.kind) {
+export function buildVisibleActionRows(
+  archive: SessionArchive,
+  mergeGroups: ReadonlyArray<ActionMergeGroup>
+): VisibleActionRow[] {
+  const actionItems = buildSectionTimeline(archive, "actions");
+  const rows: VisibleActionRow[] = [];
+  const seenGroupIds = new Set<string>();
+  const mergedMemberIds = new Set(mergeGroups.flatMap((group) => group.memberIds));
+
+  for (const item of actionItems) {
+    const group = mergeGroups.find((candidate) => candidate.memberIds.includes(item.id));
+    if (group) {
+      if (seenGroupIds.has(group.id)) {
+        continue;
+      }
+      seenGroupIds.add(group.id);
+      rows.push({
+        id: group.id,
+        memberActionIds: [...group.memberIds]
+      });
+      continue;
+    }
+
+    if (mergedMemberIds.has(item.id)) {
+      continue;
+    }
+
+    rows.push({
+      id: item.id,
+      memberActionIds: [item.id]
+    });
+  }
+
+  return rows;
+}
+
+export function buildVisibleActionRangeSelection(
+  archive: SessionArchive,
+  mergeGroups: ReadonlyArray<ActionMergeGroup>,
+  anchorId: string,
+  targetId: string
+): string[] {
+  const visibleRows = buildVisibleActionRows(archive, mergeGroups);
+  const visibleIds = visibleRows.map((row) => row.id);
+  const anchorIdx = visibleIds.indexOf(anchorId);
+  const targetIdx = visibleIds.indexOf(targetId);
+
+  if (anchorIdx === -1 || targetIdx === -1) {
+    return [];
+  }
+
+  const lo = Math.min(anchorIdx, targetIdx);
+  const hi = Math.max(anchorIdx, targetIdx);
+  return visibleIds.slice(lo, hi + 1);
+}
+
+export function getContiguousMergeableActionIds(
+  archive: SessionArchive,
+  mergeGroups: ReadonlyArray<ActionMergeGroup>,
+  selectedIds: Iterable<string>
+): string[] {
+  const visibleRows = buildVisibleActionRows(archive, mergeGroups);
+  const selected = new Set(selectedIds);
+  const selectedRows = visibleRows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => selected.has(row.id));
+
+  if (selectedRows.length !== selected.size) {
+    return [];
+  }
+
+  if (selectedRows.length < 2) {
+    return [];
+  }
+
+  if (selectedRows.some(({ row }) => row.memberActionIds.length !== 1)) {
+    return [];
+  }
+
+  const firstIndex = selectedRows[0]?.index ?? -1;
+  const lastIndex = selectedRows.at(-1)?.index ?? -1;
+
+  if (firstIndex === -1 || lastIndex === -1) {
+    return [];
+  }
+
+  if (lastIndex - firstIndex + 1 !== selectedRows.length) {
+    return [];
+  }
+
+  return selectedRows.map(({ row }) => row.memberActionIds[0]!).filter(Boolean);
+}
+
+function buildActionLabel(
+  payload:
+    | SessionArchive["sections"]["actions"][number]["payload"]
+): string {
+  switch (payload.kind) {
     case "lifecycle":
-      return `${p.phase}: ${p.detail}`;
+      return `${payload.phase}: ${payload.detail}`;
     case "interaction":
-      return p.selector !== undefined ? `${p.type} ${p.selector}` : p.type;
-    case "network":
-      return `${p.method} ${p.url}`;
-    case "console":
-      return p.message;
+      return payload.selector !== undefined ? `${payload.type} ${payload.selector}` : payload.type;
     case "error":
-      return p.message;
+      return payload.message;
   }
 }

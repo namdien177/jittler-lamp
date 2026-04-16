@@ -1,8 +1,9 @@
 import { Electroview } from "electrobun/view";
 
 import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, DesktopRPC, SessionRecord, ViewerPayload } from "../rpc";
-import { buildTimeline, findActiveIndex, formatOffset } from "./timeline";
-import type { TimelineItem } from "./timeline";
+import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "./timeline";
+import type { TimelineItem, TimelineSection } from "./timeline";
+import type { ActionMergeGroup, ArchiveAnnotation, NetworkSubtype } from "@jittle-lamp/shared";
 
 type DesktopBridge = {
   rpc: {
@@ -25,6 +26,7 @@ type DesktopBridge = {
       removeSessionTag(params: { sessionId: string; tag: string }): Promise<{ ok: true }>;
       saveOutputDirectory(params: { outputDir: string }): Promise<DesktopCompanionConfigSnapshot>;
       setSessionNotes(params: { sessionId: string; notes: string }): Promise<{ ok: true }>;
+      saveSessionReviewState(params: { sessionId: string; notes: string; annotations: ArchiveAnnotation[] }): Promise<{ ok: true; archive: ViewerPayload["archive"] }>;
     };
   };
 };
@@ -42,6 +44,12 @@ type ViewerState = {
   notesSaving: boolean;
   notesDirty: boolean;
   isOpening: boolean;
+  activeSection: TimelineSection;
+  networkSubtypeFilter: NetworkSubtype | "all";
+  autoFollow: boolean;
+  selectedActionIds: Set<string>;
+  anchorActionId: string | null;
+  mergeGroups: ActionMergeGroup[];
 };
 
 type ViewState = {
@@ -113,6 +121,7 @@ let pendingDeleteTimer: ReturnType<typeof setTimeout> | null = null;
 let viewerVideoLoadVersion = 0;
 let viewerVideoEventLog: VideoEventLogEntry[] = [];
 let lastVideoLoadAttempt: VideoLoadAttempt | null = null;
+let isAutoScrolling = false;
 
 const viewerState: ViewerState = {
   open: false,
@@ -123,7 +132,13 @@ const viewerState: ViewerState = {
   notesValue: "",
   notesSaving: false,
   notesDirty: false,
-  isOpening: false
+  isOpening: false,
+  activeSection: "actions",
+  networkSubtypeFilter: "all",
+  autoFollow: true,
+  selectedActionIds: new Set(),
+  anchorActionId: null,
+  mergeGroups: []
 };
 
 const state: ViewState = {
@@ -156,7 +171,7 @@ const appRoot = app;
 appRoot.innerHTML = `
   <div class="app-shell">
     <div class="top-bar">
-      <span class="app-name">jittle-lamp</span>
+        <span class="app-name">Jittle Lamp</span>
       <div class="top-bar-right">
         <span class="status-pill" data-role="runtime-pill" data-status="starting">Starting</span>
         <span class="output-path" data-role="output-path">—</span>
@@ -257,9 +272,26 @@ appRoot.innerHTML = `
             </div>
           </div>
           <div class="viewer-right">
-            <div class="viewer-timeline-section">
-              <span class="viewer-panel-label">Timeline</span>
+            <div class="viewer-section-tabs" data-role="viewer-section-tabs">
+              <button class="section-tab" type="button" data-role="section-tab" data-section="actions" data-active="true">Actions</button>
+              <button class="section-tab" type="button" data-role="section-tab" data-section="console">Console</button>
+              <button class="section-tab" type="button" data-role="section-tab" data-section="network">Network</button>
+            </div>
+            <div class="viewer-network-filter" data-role="viewer-network-filter" hidden>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="all" data-active="true">All</button>
+              <button class="subtype-filter subtype-emphasis" type="button" data-role="subtype-filter" data-subtype="xhr">XHR</button>
+              <button class="subtype-filter subtype-emphasis" type="button" data-role="subtype-filter" data-subtype="fetch">Fetch</button>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="document">Doc</button>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="script">Script</button>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="image">Img</button>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="font">Font</button>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="media">Media</button>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="websocket">WS</button>
+              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="other">Other</button>
+            </div>
+            <div class="viewer-section-body" data-role="viewer-section-body">
               <div class="viewer-timeline" data-role="viewer-timeline"></div>
+              <button class="viewer-focus-btn" type="button" data-role="viewer-focus-btn" hidden>↓ Focus</button>
             </div>
             <div class="viewer-network-detail" data-role="viewer-network-detail" hidden>
               <div class="viewer-network-detail-header">
@@ -269,6 +301,10 @@ appRoot.innerHTML = `
               <div class="viewer-network-detail-body" data-role="viewer-network-detail-body"></div>
             </div>
           </div>
+        </div>
+        <div class="viewer-context-menu" data-role="viewer-context-menu" hidden>
+          <button class="context-menu-item" type="button" data-role="ctx-merge">Merge Actions…</button>
+          <button class="context-menu-item" type="button" data-role="ctx-unmerge">Un-merge</button>
         </div>
       </div>
     </div>
@@ -312,6 +348,13 @@ const viewerNotesSave = queryElement<HTMLButtonElement>("[data-role='viewer-note
 const viewerNetworkDetail = queryElement<HTMLDivElement>("[data-role='viewer-network-detail']");
 const viewerDetailClose = queryElement<HTMLButtonElement>("[data-role='viewer-detail-close']");
 const viewerNetworkDetailBody = queryElement<HTMLDivElement>("[data-role='viewer-network-detail-body']");
+const viewerSectionTabs = queryElement<HTMLDivElement>("[data-role='viewer-section-tabs']");
+const viewerNetworkFilter = queryElement<HTMLDivElement>("[data-role='viewer-network-filter']");
+const viewerSectionBody = queryElement<HTMLDivElement>("[data-role='viewer-section-body']");
+const viewerFocusBtn = queryElement<HTMLButtonElement>("[data-role='viewer-focus-btn']");
+const viewerContextMenu = queryElement<HTMLDivElement>("[data-role='viewer-context-menu']");
+const ctxMergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-merge']");
+const ctxUnmergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-unmerge']");
 
 gearBtn.addEventListener("click", () => {
   openDrawer();
@@ -364,12 +407,7 @@ viewerNotesSave.addEventListener("click", () => {
 });
 
 viewerVideo.addEventListener("timeupdate", () => {
-  const currentTimeMs = viewerVideo.currentTime * 1000;
-  const nextActive = findActiveIndex(viewerState.timeline, currentTimeMs);
-  if (nextActive !== viewerState.activeIndex) {
-    viewerState.activeIndex = nextActive;
-    updateTimelineHighlight();
-  }
+  updateTimelineHighlight();
 });
 
 for (const mediaEventName of [
@@ -409,13 +447,153 @@ viewerTimeline.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
   const item = event.target.closest<HTMLButtonElement>("[data-role='timeline-item']");
   if (!item) return;
-  const idx = Number(item.dataset.index);
-  if (!Number.isFinite(idx)) return;
-  const timelineItem = viewerState.timeline[idx];
+  const itemId = item.dataset.itemId ?? "";
+  const offsetMs = Number(item.dataset.offsetMs);
+
+  if (Number.isFinite(offsetMs)) {
+    viewerVideo.currentTime = Math.max(0, offsetMs / 1000);
+  }
+
+  if (item.dataset.section === "actions") {
+    if (event.metaKey || event.ctrlKey) {
+      if (viewerState.selectedActionIds.has(itemId)) {
+        viewerState.selectedActionIds.delete(itemId);
+      } else {
+        viewerState.selectedActionIds.add(itemId);
+        viewerState.anchorActionId = itemId;
+      }
+      renderViewerTimeline();
+      return;
+    }
+
+    if (event.shiftKey && viewerState.anchorActionId) {
+      const rangeIds = buildVisibleActionRangeSelection(
+        viewerState.payload!.archive,
+        viewerState.mergeGroups,
+        viewerState.anchorActionId,
+        itemId
+      );
+      if (rangeIds.length > 0) {
+        viewerState.selectedActionIds = new Set(rangeIds);
+        renderViewerTimeline();
+        return;
+      }
+    }
+
+    viewerState.selectedActionIds = new Set([itemId]);
+    viewerState.anchorActionId = itemId;
+    renderViewerTimeline();
+    return;
+  }
+
+  const fullTimelineIndex = viewerState.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
+  if (fullTimelineIndex === -1) return;
+  const timelineItem = viewerState.timeline[fullTimelineIndex];
   if (!timelineItem) return;
-  viewerVideo.currentTime = Math.max(0, timelineItem.offsetMs / 1000);
-  viewerState.networkDetailIndex = timelineItem.kind === "network" && viewerState.networkDetailIndex !== idx ? idx : null;
+  viewerState.networkDetailIndex =
+    timelineItem.kind === "network" && viewerState.networkDetailIndex !== fullTimelineIndex ? fullTimelineIndex : null;
   renderViewerNetworkDetail();
+});
+
+viewerTimeline.addEventListener("contextmenu", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const item = event.target.closest<HTMLButtonElement>("[data-role='timeline-item']");
+  if (!item || item.dataset.section !== "actions") return;
+  event.preventDefault();
+
+  const itemId = item.dataset.itemId ?? "";
+  if (!viewerState.selectedActionIds.has(itemId)) {
+    viewerState.selectedActionIds = new Set([itemId]);
+    viewerState.anchorActionId = itemId;
+    renderViewerTimeline();
+  }
+
+  const isMerged = item.dataset.merged === "true";
+  ctxMergeBtn.hidden = isMerged || getSelectedActionEntryIds().length < 2;
+  ctxUnmergeBtn.hidden = !isMerged;
+
+  viewerContextMenu.hidden = false;
+  viewerContextMenu.style.left = `${event.clientX}px`;
+  viewerContextMenu.style.top = `${event.clientY}px`;
+});
+
+viewerSectionTabs.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const tab = event.target.closest<HTMLButtonElement>("[data-role='section-tab']");
+  if (!tab) return;
+  const section = tab.dataset.section as TimelineSection | undefined;
+  if (!section) return;
+  viewerState.activeSection = section;
+  viewerState.networkDetailIndex = null;
+  renderViewerSectionTabs();
+  renderViewerNetworkFilter();
+  renderViewerTimeline();
+  renderViewerNetworkDetail();
+});
+
+viewerNetworkFilter.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const btn = event.target.closest<HTMLButtonElement>("[data-role='subtype-filter']");
+  if (!btn) return;
+  const subtype = btn.dataset.subtype as NetworkSubtype | "all" | undefined;
+  if (!subtype) return;
+  viewerState.networkSubtypeFilter = subtype;
+  renderViewerNetworkFilter();
+  renderViewerTimeline();
+});
+
+viewerSectionBody.addEventListener("scroll", () => {
+  if (isAutoScrolling) return;
+  if (viewerState.autoFollow) {
+    viewerState.autoFollow = false;
+    viewerFocusBtn.hidden = false;
+  }
+});
+
+viewerFocusBtn.addEventListener("click", () => {
+  viewerState.autoFollow = true;
+  viewerFocusBtn.hidden = true;
+  updateTimelineHighlight();
+});
+
+ctxMergeBtn.addEventListener("click", () => {
+  hideContextMenu();
+  const label = prompt("Merge group label:");
+  if (!label?.trim()) return;
+
+  const selectedActionIds = getSelectedActionEntryIds();
+  if (selectedActionIds.length < 2) {
+    state.feedback = { tone: "error", text: "Select at least two actions before merging." };
+    render();
+    return;
+  }
+
+  const group: ActionMergeGroup = {
+    id: `mg-${Date.now()}`,
+    kind: "merge-group",
+    memberIds: selectedActionIds,
+    tags: [],
+    label: label.trim(),
+    createdAt: new Date().toISOString()
+  };
+  viewerState.mergeGroups = [...viewerState.mergeGroups, group];
+  viewerState.selectedActionIds = new Set();
+  void persistViewerReviewState("Merged actions.");
+});
+
+ctxUnmergeBtn.addEventListener("click", () => {
+  hideContextMenu();
+  const targetId = [...viewerState.selectedActionIds][0];
+  if (!targetId) return;
+  viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
+  viewerState.selectedActionIds = new Set();
+  void persistViewerReviewState("Merge removed.");
+});
+
+document.addEventListener("click", (event) => {
+  if (!viewerContextMenu.hidden && event.target instanceof Element && !viewerContextMenu.contains(event.target)) {
+    hideContextMenu();
+  }
 });
 
 drawerClose.addEventListener("click", () => {
@@ -740,7 +918,7 @@ function renderSessions(filtered: SessionRecord[]): void {
           : session.sessionId;
 
       const hasWebm = session.artifacts.some((a) => a.artifactName === "recording.webm");
-      const hasJson = session.artifacts.some((a) => a.artifactName === "session.events.json");
+      const hasJson = session.artifacts.some((a) => a.artifactName === "session.archive.json");
       const isPending = state.pendingDeleteId === session.sessionId;
       const isEditing = state.editingTagSessionId === session.sessionId;
 
@@ -1148,14 +1326,27 @@ async function handleViewSession(sessionId: string): Promise<void> {
 }
 
 function openViewer(payload: ViewerPayload): void {
+  const previousPayload = viewerState.payload;
+  if (previousPayload?.source === "zip" && previousPayload.tempId !== undefined && desktopBridge) {
+    void desktopBridge.rpc.request.clearTempSession({ tempId: previousPayload.tempId }).catch(() => undefined);
+  }
+
   viewerState.open = true;
   viewerState.payload = payload;
-  viewerState.timeline = buildTimeline(payload.bundle.events);
+  viewerState.timeline = buildTimeline(payload.archive);
   viewerState.activeIndex = -1;
   viewerState.networkDetailIndex = null;
   viewerState.notesValue = payload.notes;
   viewerState.notesDirty = false;
   viewerState.notesSaving = false;
+  viewerState.activeSection = "actions";
+  viewerState.networkSubtypeFilter = "all";
+  viewerState.autoFollow = true;
+  viewerState.selectedActionIds = new Set();
+  viewerState.anchorActionId = null;
+  viewerState.mergeGroups = (payload.archive.annotations ?? []).filter(
+    (a): a is ActionMergeGroup => a.kind === "merge-group"
+  );
 
   renderViewer();
 }
@@ -1171,7 +1362,15 @@ async function closeViewer(): Promise<void> {
   viewerState.notesValue = "";
   viewerState.notesDirty = false;
   viewerState.notesSaving = false;
+  viewerState.activeSection = "actions";
+  viewerState.networkSubtypeFilter = "all";
+  viewerState.autoFollow = true;
+  viewerState.selectedActionIds = new Set();
+  viewerState.anchorActionId = null;
+  viewerState.mergeGroups = [];
 
+  hideContextMenu();
+  viewerFocusBtn.hidden = true;
   viewerVideo.pause();
   viewerVideoLoadVersion += 1;
   viewerVideo.src = "";
@@ -1188,12 +1387,12 @@ function renderViewer(): void {
   if (!payload) return;
 
   viewerOverlay.dataset.open = "true";
-  viewerTitle.textContent = payload.bundle.name;
+  viewerTitle.textContent = payload.archive.name;
   const sourceLabels: Record<string, string> = { library: "Library", zip: "ZIP", local: "Local" };
   viewerSourceBadge.textContent = sourceLabels[payload.source] ?? payload.source;
   viewerSourceBadge.dataset.source = payload.source;
 
-  const recordingArtifact = payload.bundle.artifacts.find((artifact) => artifact.kind === "recording.webm");
+  const recordingArtifact = payload.archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
   void loadViewerVideoSource(payload.videoPath, recordingArtifact?.mimeType || "video/webm");
 
   const isReadOnly = payload.source !== "library";
@@ -1211,35 +1410,143 @@ function renderViewer(): void {
   viewerNotesSave.hidden = isReadOnly;
   viewerNotesSave.disabled = !viewerState.notesDirty || viewerState.notesSaving;
 
+  renderViewerSectionTabs();
+  renderViewerNetworkFilter();
   renderViewerTimeline();
   renderViewerNetworkDetail();
 }
 
 function renderViewerTimeline(): void {
-  if (viewerState.timeline.length === 0) {
+  const payload = viewerState.payload;
+  if (!payload) {
     viewerTimeline.innerHTML = `<span class="viewer-timeline-empty">No events recorded.</span>`;
     return;
   }
 
-  viewerTimeline.innerHTML = viewerState.timeline
-    .map((item, idx) => {
-      const isActive = idx === viewerState.activeIndex;
-      return `<button
+  const section = viewerState.activeSection;
+  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter);
+
+  if (section === "actions") {
+    const mergedMemberIds = new Set(viewerState.mergeGroups.flatMap((g) => g.memberIds));
+
+    const rows: string[] = [];
+    const seenGroupIds = new Set<string>();
+
+    for (const item of items) {
+      const group = viewerState.mergeGroups.find((g) => g.memberIds.includes(item.id));
+
+      if (group) {
+        if (seenGroupIds.has(group.id)) continue;
+        seenGroupIds.add(group.id);
+
+        const memberItems = items.filter((i) => group.memberIds.includes(i.id));
+        const firstMs = Math.min(...memberItems.map((i) => i.offsetMs));
+        const lastMs = Math.max(...memberItems.map((i) => i.offsetMs));
+        const tagChips = group.tags.map((t) => `<span class="tl-tag">${escapeHtml(t)}</span>`).join("");
+        const isSelected = viewerState.selectedActionIds.has(group.id);
+
+        rows.push(`<button
+          class="timeline-item timeline-item-merged"
+          type="button"
+          data-role="timeline-item"
+          data-item-id="${escapeHtml(group.id)}"
+          data-section="actions"
+          data-merged="true"
+          data-active="false"
+          data-selected="${isSelected ? "true" : "false"}"
+        ><span class="timeline-offset">${escapeHtml(formatOffset(firstMs))}–${escapeHtml(formatOffset(lastMs))}</span><span class="tl-merged-badge">merged</span><span class="timeline-label">${escapeHtml(group.label)}</span>${tagChips ? `<span class="tl-tags">${tagChips}</span>` : ""}</button>`);
+        continue;
+      }
+
+      if (mergedMemberIds.has(item.id)) continue;
+
+      const isSelected = viewerState.selectedActionIds.has(item.id);
+      const tagChips = (item.tags ?? []).map((t) => `<span class="tl-tag">${escapeHtml(t)}</span>`).join("");
+
+      rows.push(`<button
         class="timeline-item"
         type="button"
         data-role="timeline-item"
-        data-index="${idx}"
+        data-item-id="${escapeHtml(item.id)}"
+        data-offset-ms="${item.offsetMs}"
+        data-section="actions"
         data-kind="${escapeHtml(item.kind)}"
-        data-active="${isActive ? "true" : "false"}"
-      ><span class="timeline-offset">${escapeHtml(formatOffset(item.offsetMs))}</span><span class="timeline-label">${escapeHtml(item.label)}</span></button>`;
-    })
-    .join("");
+        data-active="false"
+        data-selected="${isSelected ? "true" : "false"}"
+      ><span class="timeline-offset">${escapeHtml(formatOffset(item.offsetMs))}</span><span class="timeline-label">${escapeHtml(item.label)}</span>${tagChips ? `<span class="tl-tags">${tagChips}</span>` : ""}</button>`);
+    }
+
+    viewerTimeline.innerHTML = rows.length > 0 ? rows.join("") : `<span class="viewer-timeline-empty">No actions recorded.</span>`;
+  } else {
+    if (items.length === 0) {
+      viewerTimeline.innerHTML = `<span class="viewer-timeline-empty">No ${section} events recorded.</span>`;
+      return;
+    }
+
+    viewerTimeline.innerHTML = items
+      .map((item, idx) => {
+        const isActive = idx === viewerState.activeIndex;
+        return `<button
+          class="timeline-item"
+          type="button"
+          data-role="timeline-item"
+          data-item-id="${escapeHtml(item.id)}"
+          data-index="${idx}"
+          data-offset-ms="${item.offsetMs}"
+          data-section="${escapeHtml(section)}"
+          data-kind="${escapeHtml(item.kind)}"
+          data-active="${isActive ? "true" : "false"}"
+        ><span class="timeline-offset">${escapeHtml(formatOffset(item.offsetMs))}</span><span class="timeline-label">${escapeHtml(item.label)}</span></button>`;
+      })
+      .join("");
+  }
 }
 
 function updateTimelineHighlight(): void {
-  viewerTimeline.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item']").forEach((btn, idx) => {
-    btn.dataset.active = idx === viewerState.activeIndex ? "true" : "false";
+  const payload = viewerState.payload;
+  if (!payload) return;
+
+  const section = viewerState.activeSection;
+  if (section === "actions") return;
+
+  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter);
+  const currentTimeMs = viewerVideo.currentTime * 1000;
+  const nextActive = findActiveIndex(items, currentTimeMs);
+  viewerState.activeIndex = nextActive;
+
+  const buttons = viewerTimeline.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item']");
+  let activeBtn: HTMLButtonElement | null = null;
+
+  buttons.forEach((btn, idx) => {
+    const isActive = idx === nextActive;
+    btn.dataset.active = isActive ? "true" : "false";
+    if (isActive) activeBtn = btn;
   });
+
+  if (viewerState.autoFollow && activeBtn !== null) {
+    isAutoScrolling = true;
+    (activeBtn as HTMLButtonElement).scrollIntoView({ block: "nearest", behavior: "smooth" });
+    setTimeout(() => { isAutoScrolling = false; }, 300);
+  }
+}
+
+function renderViewerSectionTabs(): void {
+  viewerSectionTabs.querySelectorAll<HTMLButtonElement>("[data-role='section-tab']").forEach((tab) => {
+    tab.dataset.active = tab.dataset.section === viewerState.activeSection ? "true" : "false";
+  });
+}
+
+function renderViewerNetworkFilter(): void {
+  const isNetwork = viewerState.activeSection === "network";
+  viewerNetworkFilter.hidden = !isNetwork;
+  if (!isNetwork) return;
+  viewerNetworkFilter.querySelectorAll<HTMLButtonElement>("[data-role='subtype-filter']").forEach((btn) => {
+    btn.dataset.active = btn.dataset.subtype === viewerState.networkSubtypeFilter ? "true" : "false";
+  });
+}
+
+function hideContextMenu(): void {
+  viewerContextMenu.hidden = true;
 }
 
 function renderViewerNetworkDetail(): void {
@@ -1255,7 +1562,7 @@ function renderViewerNetworkDetail(): void {
     return;
   }
 
-  const p = item.event.payload;
+  const p = item.payload;
   if (p.kind !== "network") {
     viewerNetworkDetail.hidden = true;
     return;
@@ -1502,12 +1809,7 @@ async function saveViewerNotes(): Promise<void> {
   viewerNotesSave.textContent = "Saving…";
 
   try {
-    await desktopBridge.rpc.request.setSessionNotes({
-      sessionId: payload.bundle.sessionId,
-      notes: viewerState.notesValue
-    });
-    viewerState.notesDirty = false;
-    viewerState.payload = { ...payload, notes: viewerState.notesValue };
+    await persistViewerReviewState("Notes saved.");
   } catch (error) {
     state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to save notes.") };
     render();
@@ -1515,6 +1817,52 @@ async function saveViewerNotes(): Promise<void> {
     viewerState.notesSaving = false;
     viewerNotesSave.textContent = "Save notes";
     viewerNotesSave.disabled = !viewerState.notesDirty;
+  }
+}
+
+function getSelectedActionEntryIds(): string[] {
+  const payload = viewerState.payload;
+  if (!payload) {
+    return [];
+  }
+
+  return getContiguousMergeableActionIds(payload.archive, viewerState.mergeGroups, viewerState.selectedActionIds);
+}
+
+async function persistViewerReviewState(successText?: string): Promise<void> {
+  const payload = viewerState.payload;
+  if (!payload) return;
+
+  if (payload.source !== "library" || !desktopBridge) {
+    renderViewerTimeline();
+    renderViewerNetworkDetail();
+    if (successText) {
+      state.feedback = { tone: "neutral", text: successText };
+      render();
+    }
+    return;
+  }
+
+  const response = await desktopBridge.rpc.request.saveSessionReviewState({
+    sessionId: payload.archive.sessionId,
+    notes: viewerState.notesValue,
+    annotations: viewerState.mergeGroups
+  });
+
+  viewerState.notesDirty = false;
+  viewerState.payload = {
+    ...payload,
+    archive: response.archive,
+    notes: viewerState.notesValue
+  };
+  viewerState.timeline = buildTimeline(response.archive);
+  viewerState.mergeGroups = response.archive.annotations.filter((annotation): annotation is ActionMergeGroup => annotation.kind === "merge-group");
+  renderViewerTimeline();
+  renderViewerNetworkDetail();
+
+  if (successText) {
+    state.feedback = { tone: "success", text: successText };
+    render();
   }
 }
 

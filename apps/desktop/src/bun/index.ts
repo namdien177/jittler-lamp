@@ -5,7 +5,7 @@ import { BrowserView, BrowserWindow, Utils } from "electrobun/bun";
 
 import { loadResolvedCompanionConfig, saveCompanionConfig } from "../companion/config";
 import { deleteSession, getCompanionConfigState, getCompanionRuntimeState, refreshCompanionConfig, registerMediaPlayback, startCompanionServer } from "../companion/server";
-import { addSessionTag, getSessionNotes, listAllTags, loadLibrarySession, removeSessionTag, scanLibrarySessions, setSessionNotes } from "../companion/sessions-db";
+import { addSessionTag, getSessionNotes, listAllTags, loadLibrarySession, removeSessionTag, saveLibrarySessionReviewState, scanLibrarySessions, setSessionNotes } from "../companion/sessions-db";
 import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, DesktopRPC } from "../rpc";
 import { buildSessionZip, clearTempSession, importZipBundle, loadLocalSession } from "./zip-import";
 
@@ -146,6 +146,16 @@ const rpc = BrowserView.defineRPC<DesktopRPC>({
       setSessionNotes: async ({ sessionId, notes }) => {
         setSessionNotes(sessionId, notes);
         return { ok: true as const };
+      },
+      saveSessionReviewState: async ({ sessionId, notes, annotations }) => {
+        const config = await getCompanionConfigState();
+        const archive = await saveLibrarySessionReviewState({
+          sessionId,
+          outputDir: config.outputDir,
+          notes,
+          annotations
+        });
+        return { ok: true as const, archive };
       }
     },
     messages: {}
@@ -157,7 +167,7 @@ void startCompanionServer().catch((error: unknown) => {
 });
 
 mainWindow = new BrowserWindow({
-  title: "jittle-lamp",
+  title: "Jittle Lamp",
   rpc,
   url: "views://mainview/index.html",
   frame: {

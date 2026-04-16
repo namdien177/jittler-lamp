@@ -9,10 +9,12 @@
     ],
     "types": [
       "bun-types",
+      "node",
       "chrome"
     ]
   },
   "include": [
+    "../../scripts/**/*.ts",
     "src/**/*.ts",
     "scripts/**/*.ts"
   ],

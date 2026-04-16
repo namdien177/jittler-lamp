@@ -1,4 +1,4 @@
-import { offscreenRequestSchema, type SessionBundle } from "@jittle-lamp/shared";
+import { offscreenRequestSchema, type SessionArchive } from "@jittle-lamp/shared";
 
 const companionServerOrigin = "http://127.0.0.1:48115";
 
@@ -71,10 +71,10 @@ async function handleRequest(
 
     case "jl/offscreen-stop-and-export": {
       const recordingBlob = await stopRecorder(request.sessionId);
-      const finalized = finalizeBundleForExport(request.bundle, recordingBlob.size, recordingBlob.type || "video/webm");
+      const finalized = finalizeArchiveForExport(request.archive, recordingBlob.size, recordingBlob.type || "video/webm");
 
       const companionResult = await tryWriteArtifactsToCompanion(
-        finalized.bundle,
+        finalized.archive,
         recordingBlob,
         finalized.jsonBlob
       );
@@ -83,12 +83,12 @@ async function handleRequest(
         await Promise.all([
           downloadBlob(
             recordingBlob,
-            artifactPath(finalized.bundle, "recording.webm"),
+            artifactPath(finalized.archive, "recording.webm"),
             "video/webm"
           ),
           downloadBlob(
             finalized.jsonBlob,
-            artifactPath(finalized.bundle, "session.events.json"),
+            artifactPath(finalized.archive, "session.archive.json"),
             "application/json"
           )
         ]);
@@ -106,7 +106,7 @@ async function handleRequest(
 }
 
 async function tryWriteArtifactsToCompanion(
-  bundle: SessionBundle,
+  archive: SessionArchive,
   recordingBlob: Blob,
   jsonBlob: Blob
 ): Promise<CompanionWriteResult> {
@@ -120,8 +120,8 @@ async function tryWriteArtifactsToCompanion(
     const companionHealth = await readCompanionHealth(healthResponse);
 
     await Promise.all([
-      uploadArtifactToCompanion(bundle.sessionId, "recording.webm", recordingBlob, "video/webm"),
-      uploadArtifactToCompanion(bundle.sessionId, "session.events.json", jsonBlob, "application/json")
+      uploadArtifactToCompanion(archive.sessionId, "recording.webm", recordingBlob, "video/webm"),
+      uploadArtifactToCompanion(archive.sessionId, "session.archive.json", jsonBlob, "application/json")
     ]);
 
     return {
@@ -147,7 +147,7 @@ async function readCompanionHealth(response: Response): Promise<{ outputDir: str
 
 async function uploadArtifactToCompanion(
   sessionId: string,
-  artifactName: "recording.webm" | "session.events.json",
+  artifactName: "recording.webm" | "session.archive.json",
   blob: Blob,
   contentType: string
 ): Promise<void> {
@@ -259,45 +259,45 @@ function preferredMimeType(): string | undefined {
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate));
 }
 
-function finalizeBundleForExport(
-  bundle: SessionBundle,
+function finalizeArchiveForExport(
+  archive: SessionArchive,
   recordingBytes: number,
   recordingMimeType: string
-): { bundle: SessionBundle; jsonBlob: Blob } {
-  let nextBundle = withRecordingArtifact(bundle, {
+): { archive: SessionArchive; jsonBlob: Blob } {
+  let nextArchive = withRecordingArtifact(archive, {
     bytes: recordingBytes,
     mimeType: recordingMimeType || "video/webm"
   });
 
   for (let iteration = 0; iteration < 3; iteration += 1) {
-    const jsonText = stringifyBundle(nextBundle);
+    const jsonText = stringifyArchive(nextArchive);
     const jsonBlob = new Blob([jsonText], { type: "application/json" });
-    const updatedBundle = withArtifactBytes(nextBundle, "session.events.json", jsonBlob.size);
+    const updatedArchive = withArtifactBytes(nextArchive, "session.archive.json", jsonBlob.size);
 
-    if (artifactBytes(updatedBundle, "session.events.json") === artifactBytes(nextBundle, "session.events.json")) {
+    if (artifactBytes(updatedArchive, "session.archive.json") === artifactBytes(nextArchive, "session.archive.json")) {
       return {
-        bundle: updatedBundle,
-        jsonBlob: new Blob([stringifyBundle(updatedBundle)], { type: "application/json" })
+        archive: updatedArchive,
+        jsonBlob: new Blob([stringifyArchive(updatedArchive)], { type: "application/json" })
       };
     }
 
-    nextBundle = updatedBundle;
+    nextArchive = updatedArchive;
   }
 
   return {
-    bundle: nextBundle,
-    jsonBlob: new Blob([stringifyBundle(nextBundle)], { type: "application/json" })
+    archive: nextArchive,
+    jsonBlob: new Blob([stringifyArchive(nextArchive)], { type: "application/json" })
   };
 }
 
 function withArtifactBytes(
-  bundle: SessionBundle,
-  kind: "recording.webm" | "session.events.json",
+  archive: SessionArchive,
+  kind: "recording.webm" | "session.archive.json",
   bytes: number
-): SessionBundle {
+): SessionArchive {
   return {
-    ...bundle,
-    artifacts: bundle.artifacts.map((artifact) => {
+    ...archive,
+    artifacts: archive.artifacts.map((artifact) => {
       if (artifact.kind !== kind) {
         return artifact;
       }
@@ -311,12 +311,12 @@ function withArtifactBytes(
 }
 
 function withRecordingArtifact(
-  bundle: SessionBundle,
+  archive: SessionArchive,
   input: { bytes: number; mimeType: string }
-): SessionBundle {
+): SessionArchive {
   return {
-    ...bundle,
-    artifacts: bundle.artifacts.map((artifact) => {
+    ...archive,
+    artifacts: archive.artifacts.map((artifact) => {
       if (artifact.kind !== "recording.webm") {
         return artifact;
       }
@@ -331,27 +331,27 @@ function withRecordingArtifact(
 }
 
 function artifactBytes(
-  bundle: SessionBundle,
-  kind: "recording.webm" | "session.events.json"
+  archive: SessionArchive,
+  kind: "recording.webm" | "session.archive.json"
 ): number | undefined {
-  return bundle.artifacts.find((artifact) => artifact.kind === kind)?.bytes;
+  return archive.artifacts.find((artifact) => artifact.kind === kind)?.bytes;
 }
 
 function artifactPath(
-  bundle: SessionBundle,
-  kind: "recording.webm" | "session.events.json"
+  archive: SessionArchive,
+  kind: "recording.webm" | "session.archive.json"
 ): string {
-  const artifact = bundle.artifacts.find((entry) => entry.kind === kind);
+  const artifact = archive.artifacts.find((entry) => entry.kind === kind);
 
   if (artifact) {
     return artifact.relativePath;
   }
 
-  return `${bundle.sessionId}/${kind}`;
+  return `${archive.sessionId}/${kind}`;
 }
 
-function stringifyBundle(bundle: SessionBundle): string {
-  return `${JSON.stringify(bundle, null, 2)}\n`;
+function stringifyArchive(archive: SessionArchive): string {
+  return `${JSON.stringify(archive, null, 2)}\n`;
 }
 
 async function downloadBlob(blob: Blob, filename: string, mimeType: string): Promise<void> {

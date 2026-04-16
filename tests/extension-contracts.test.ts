@@ -8,7 +8,7 @@ import {
 
 import {
   contentRuntimeMessageSchema,
-  createSessionBundle,
+  createSessionArchive,
   createSessionDraft,
   offscreenResponseSchema,
   offscreenRequestSchema,
@@ -58,8 +58,8 @@ describe("extension contracts", () => {
               mimeType: "video/webm"
             },
             {
-              kind: "session.events.json",
-              relativePath: "jl_test1234/session.events.json",
+              kind: "session.archive.json",
+              relativePath: "jl_test1234/session.archive.json",
               mimeType: "application/json"
             }
           ],
@@ -103,7 +103,7 @@ describe("extension contracts", () => {
     expect(message.payload.type).toBe("click");
   });
 
-  test("parses offscreen export requests with full session bundles", () => {
+  test("parses offscreen export requests with full session archives", () => {
     const draft = transitionDraftPhase(
       createSessionDraft({
         page: {
@@ -120,15 +120,15 @@ describe("extension contracts", () => {
     const request = offscreenRequestSchema.parse({
       type: "jl/offscreen-stop-and-export",
       sessionId: draft.sessionId,
-      bundle: createSessionBundle(draft)
+      archive: createSessionArchive(draft)
     });
 
-    if (!("bundle" in request)) {
+    if (!("archive" in request)) {
       throw new Error("Expected an export request.");
     }
 
-    expect(request.bundle.phase).toBe("ready");
-    expect(request.bundle.artifacts).toHaveLength(2);
+    expect(request.archive.phase).toBe("ready");
+    expect(request.archive.artifacts).toHaveLength(2);
   });
 
   test("resolves companion artifact destinations inside the configured output directory", () => {

@@ -112,7 +112,7 @@ async function readSavedCompanionConfig(): Promise<CompanionConfig | null> {
 export function resolveArtifactDestinationPath(input: {
   outputDir: string;
   sessionId: string;
-  artifactName: "recording.webm" | "session.events.json";
+  artifactName: "recording.webm" | "session.archive.json";
 }): string {
   if (!/^[A-Za-z0-9._-]+$/.test(input.sessionId)) {
     throw new Error(`Invalid session id: ${input.sessionId}`);

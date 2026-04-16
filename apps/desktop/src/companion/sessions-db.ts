@@ -1,13 +1,24 @@
 import { Database } from "bun:sqlite";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { sessionBundleSchema } from "@jittle-lamp/shared";
+import {
+  archiveActionSchema,
+  archiveAnnotationSchema,
+  archiveConsoleEntrySchema,
+  archiveNetworkEntrySchema,
+  sessionArchiveSchema,
+  type ArchiveAction,
+  type ArchiveAnnotation,
+  type ArchiveConsoleEntry,
+  type ArchiveNetworkEntry,
+  type SessionArchive
+} from "@jittle-lamp/shared";
 
 import type { ViewerPayload } from "../rpc";
 
-type ArtifactName = "recording.webm" | "session.events.json";
+type ArtifactName = "recording.webm" | "session.archive.json";
 
 export type SessionArtifact = {
   artifactName: string;
@@ -36,16 +47,39 @@ type SessionWriteRow = {
   at: string;
 };
 
+type StoredSessionEventRow = {
+  id: string;
+  section: "actions" | "console" | "network";
+  at: string;
+  seq: number;
+  subtype: string | null;
+  tags_json: string;
+  payload_json: string;
+};
+
+type StoredAnnotationRow = {
+  payload_json: string;
+};
+
+function notesTextFromArchive(archive: SessionArchive): string {
+  return archive.notes.join("\n\n").trim();
+}
+
+function notesArrayFromText(notes: string): string[] {
+  const trimmed = notes.trim();
+  return trimmed ? [trimmed] : [];
+}
+
+function stringifyArchive(archive: SessionArchive): string {
+  return `${JSON.stringify(archive, null, 2)}\n`;
+}
+
 const defaultDbDir = join(homedir(), ".jittle-lamp");
 const defaultDbPath = join(defaultDbDir, "sessions.db");
 
 let _overrideDbPath: string | null = null;
 let db: Database | null = null;
 
-/**
- * Override the SQLite path used for this process. Only intended for isolated
- * test runs – call once before any DB access and never in production code.
- */
 export function _testOverrideDb(path: string): void {
   if (db) {
     db.close();
@@ -90,6 +124,31 @@ function getDb(): Database {
       notes TEXT NOT NULL DEFAULT ''
     )
   `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_events (
+      session_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      section TEXT NOT NULL,
+      at TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      subtype TEXT,
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      payload_json TEXT NOT NULL,
+      PRIMARY KEY (session_id, id)
+    )
+  `);
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_session_events_session_section_seq
+    ON session_events (session_id, section, seq)
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_annotations (
+      session_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      PRIMARY KEY (session_id, id)
+    )
+  `);
 
   return db;
 }
@@ -116,14 +175,123 @@ export function insertSessionWrite(input: {
   );
 }
 
-/**
- * Scan `outputDir` on the filesystem and return a `SessionRecord` for every
- * subfolder that contains both `recording.webm` and a valid
- * `session.events.json` (validated against `sessionBundleSchema`).
- *
- * SQLite metadata (tags, notes) is joined on top. Sessions whose JSON bundle
- * fails validation are silently skipped.
- */
+export function persistSessionArchive(archive: SessionArchive): void {
+  const database = getDb();
+
+  database.run(`DELETE FROM session_events WHERE session_id = ?`, [archive.sessionId]);
+  database.run(`DELETE FROM session_annotations WHERE session_id = ?`, [archive.sessionId]);
+
+  const insertEvent = database.prepare(
+    `INSERT OR REPLACE INTO session_events
+      (session_id, id, section, at, seq, subtype, tags_json, payload_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  const insertAnnotation = database.prepare(
+    `INSERT OR REPLACE INTO session_annotations (session_id, id, payload_json)
+     VALUES (?, ?, ?)`
+  );
+
+  const transaction = database.transaction((input: SessionArchive) => {
+    for (const entry of input.sections.actions) {
+      insertEvent.run(input.sessionId, entry.id, "actions", entry.at, entry.seq, null, JSON.stringify(entry.tags), JSON.stringify(entry.payload));
+    }
+
+    for (const entry of input.sections.console) {
+      insertEvent.run(input.sessionId, entry.id, "console", entry.at, entry.seq, null, "[]", JSON.stringify(entry.payload));
+    }
+
+    for (const entry of input.sections.network) {
+      insertEvent.run(
+        input.sessionId,
+        entry.id,
+        "network",
+        entry.at,
+        entry.seq,
+        entry.subtype,
+        "[]",
+        JSON.stringify(entry.payload)
+      );
+    }
+
+    for (const annotation of input.annotations) {
+      insertAnnotation.run(input.sessionId, annotation.id, JSON.stringify(annotation));
+    }
+  });
+
+  transaction(archive);
+}
+
+function buildArchiveFromDb(sessionId: string, seed: SessionArchive): SessionArchive {
+  const database = getDb();
+  const rows = database
+    .query<StoredSessionEventRow, [string]>(
+      `SELECT id, section, at, seq, subtype, tags_json, payload_json
+       FROM session_events
+       WHERE session_id = ?
+       ORDER BY seq ASC`
+    )
+    .all(sessionId);
+
+  const annotations = database
+    .query<StoredAnnotationRow, [string]>(
+      `SELECT payload_json FROM session_annotations WHERE session_id = ? ORDER BY id ASC`
+    )
+    .all(sessionId)
+    .map((row) => archiveAnnotationSchema.parse(JSON.parse(row.payload_json)) as ArchiveAnnotation);
+
+  const actions: ArchiveAction[] = [];
+  const consoleEntries: ArchiveConsoleEntry[] = [];
+  const networkEntries: ArchiveNetworkEntry[] = [];
+
+  for (const row of rows) {
+    if (row.section === "actions") {
+      actions.push(
+        archiveActionSchema.parse({
+          id: row.id,
+          seq: row.seq,
+          at: row.at,
+          tags: JSON.parse(row.tags_json) as string[],
+          payload: JSON.parse(row.payload_json)
+        })
+      );
+      continue;
+    }
+
+    if (row.section === "console") {
+      consoleEntries.push(
+        archiveConsoleEntrySchema.parse({
+          id: row.id,
+          seq: row.seq,
+          at: row.at,
+          payload: JSON.parse(row.payload_json)
+        })
+      );
+      continue;
+    }
+
+    networkEntries.push(
+      archiveNetworkEntrySchema.parse({
+        id: row.id,
+        seq: row.seq,
+        at: row.at,
+        subtype: row.subtype ?? "other",
+        payload: JSON.parse(row.payload_json)
+      })
+    );
+  }
+
+  return sessionArchiveSchema.parse({
+    ...seed,
+    sections: {
+      actions,
+      console: consoleEntries,
+      network: networkEntries
+    },
+    annotations
+  });
+}
+
 export async function scanLibrarySessions(outputDir: string): Promise<SessionRecord[]> {
   const glob = new Bun.Glob("*");
   const names: string[] = [];
@@ -133,21 +301,15 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
       names.push(name);
     }
   } catch {
-    // Output dir doesn't exist yet — normal on first run.
     return [];
   }
 
-  // Pre-load all tags and notes so we only hit the DB once.
   const tagRows = getDb()
-    .query<{ session_id: string; tag: string }, []>(
-      `SELECT session_id, tag FROM session_tags ORDER BY tag ASC`
-    )
+    .query<{ session_id: string; tag: string }, []>(`SELECT session_id, tag FROM session_tags ORDER BY tag ASC`)
     .all();
 
   const metaRows = getDb()
-    .query<{ session_id: string; notes: string }, []>(
-      `SELECT session_id, notes FROM session_meta`
-    )
+    .query<{ session_id: string; notes: string }, []>(`SELECT session_id, notes FROM session_meta`)
     .all();
 
   const tagsBySession = new Map<string, string[]>();
@@ -174,32 +336,29 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
 
     const sessionId = name;
     const webmPath = join(folderPath, "recording.webm");
-    const eventsPath = join(folderPath, "session.events.json");
+    const archivePath = join(folderPath, "session.archive.json");
 
     let webmBytes: number;
-    let eventsBytes: number;
+    let archiveBytes: number;
 
     try {
-      const [webmStat, eventsStat] = await Promise.all([stat(webmPath), stat(eventsPath)]);
+      const [webmStat, archiveStat] = await Promise.all([stat(webmPath), stat(archivePath)]);
       webmBytes = webmStat.size;
-      eventsBytes = eventsStat.size;
+      archiveBytes = archiveStat.size;
     } catch {
-      // Missing one or both artifacts — skip this folder.
       continue;
     }
 
-    let bundle: ReturnType<typeof sessionBundleSchema.parse>;
+    let archive: SessionArchive;
 
     try {
-      const raw = JSON.parse(await readFile(eventsPath, "utf8")) as unknown;
-      const result = sessionBundleSchema.safeParse(raw);
+      const raw = JSON.parse(await readFile(archivePath, "utf8")) as unknown;
+      const result = sessionArchiveSchema.safeParse(raw);
       if (!result.success) continue;
-      bundle = result.data;
+      archive = result.data;
     } catch {
       continue;
     }
-
-    const artifactAt = bundle.createdAt;
 
     sessions.push({
       sessionId,
@@ -209,17 +368,17 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
           artifactName: "recording.webm",
           destinationPath: webmPath,
           bytes: webmBytes,
-          at: artifactAt
+          at: archive.createdAt
         },
         {
-          artifactName: "session.events.json",
-          destinationPath: eventsPath,
-          bytes: eventsBytes,
-          at: artifactAt
+          artifactName: "session.archive.json",
+          destinationPath: archivePath,
+          bytes: archiveBytes,
+          at: archive.createdAt
         }
       ],
-      totalBytes: webmBytes + eventsBytes,
-      recordedAt: bundle.createdAt,
+      totalBytes: webmBytes + archiveBytes,
+      recordedAt: archive.createdAt,
       tags: tagsBySession.get(sessionId) ?? [],
       notes: notesBySession.get(sessionId) ?? ""
     });
@@ -228,7 +387,6 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
   return sessions.sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
 }
 
-/** @deprecated Use `scanLibrarySessions` for folder-backed discovery instead. */
 export function listSessionRecords(): SessionRecord[] {
   const rows = getDb()
     .query<SessionWriteRow, []>(
@@ -239,15 +397,11 @@ export function listSessionRecords(): SessionRecord[] {
     .all();
 
   const tagRows = getDb()
-    .query<{ session_id: string; tag: string }, []>(
-      `SELECT session_id, tag FROM session_tags ORDER BY tag ASC`
-    )
+    .query<{ session_id: string; tag: string }, []>(`SELECT session_id, tag FROM session_tags ORDER BY tag ASC`)
     .all();
 
   const metaRows = getDb()
-    .query<{ session_id: string; notes: string }, []>(
-      `SELECT session_id, notes FROM session_meta`
-    )
+    .query<{ session_id: string; notes: string }, []>(`SELECT session_id, notes FROM session_meta`)
     .all();
 
   const tagsBySession = new Map<string, string[]>();
@@ -276,39 +430,33 @@ export function listSessionRecords(): SessionRecord[] {
     };
 
     const existing = sessionMap.get(row.session_id);
-
     if (existing) {
       existing.artifacts.push(artifact);
       existing.totalBytes += row.bytes;
       if (row.at > existing.recordedAt) existing.recordedAt = row.at;
-    } else {
-      sessionMap.set(row.session_id, {
-        sessionId: row.session_id,
-        sessionFolder: row.session_folder,
-        artifacts: [artifact],
-        totalBytes: row.bytes,
-        recordedAt: row.at,
-        tags: tagsBySession.get(row.session_id) ?? [],
-        notes: notesBySession.get(row.session_id) ?? ""
-      });
+      continue;
     }
+
+    sessionMap.set(row.session_id, {
+      sessionId: row.session_id,
+      sessionFolder: row.session_folder,
+      artifacts: [artifact],
+      totalBytes: row.bytes,
+      recordedAt: row.at,
+      tags: tagsBySession.get(row.session_id) ?? [],
+      notes: notesBySession.get(row.session_id) ?? ""
+    });
   }
 
   return Array.from(sessionMap.values()).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
 }
 
 export function addSessionTag(sessionId: string, tag: string): void {
-  getDb().run(
-    `INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)`,
-    [sessionId, tag]
-  );
+  getDb().run(`INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)`, [sessionId, tag]);
 }
 
 export function removeSessionTag(sessionId: string, tag: string): void {
-  getDb().run(
-    `DELETE FROM session_tags WHERE session_id = ? AND tag = ?`,
-    [sessionId, tag]
-  );
+  getDb().run(`DELETE FROM session_tags WHERE session_id = ? AND tag = ?`, [sessionId, tag]);
 }
 
 export function listAllTags(): string[] {
@@ -318,7 +466,6 @@ export function listAllTags(): string[] {
     .map((row) => row.tag);
 }
 
-/** Persist a free-text notes string for a library session in SQLite only. */
 export function setSessionNotes(sessionId: string, notes: string): void {
   getDb().run(
     `INSERT INTO session_meta (session_id, notes)
@@ -328,14 +475,37 @@ export function setSessionNotes(sessionId: string, notes: string): void {
   );
 }
 
-/** Return the stored notes for a session, or an empty string if none exist. */
-export function getSessionNotes(sessionId: string): string {
-  const row = getDb()
-    .query<{ notes: string }, [string]>(
-      `SELECT notes FROM session_meta WHERE session_id = ?`
-    )
-    .get(sessionId);
+export async function saveLibrarySessionReviewState(input: {
+  sessionId: string;
+  outputDir: string;
+  notes: string;
+  annotations: ArchiveAnnotation[];
+}): Promise<SessionArchive> {
+  const sessionFolder = resolve(join(resolve(input.outputDir), input.sessionId));
+  const archivePath = join(sessionFolder, "session.archive.json");
 
+  const raw = JSON.parse(await readFile(archivePath, "utf8")) as unknown;
+  const result = sessionArchiveSchema.safeParse(raw);
+
+  if (!result.success) {
+    throw new Error(`Session archive validation failed for ${input.sessionId}: ${result.error.message}`);
+  }
+
+  const nextArchive = sessionArchiveSchema.parse({
+    ...result.data,
+    updatedAt: new Date().toISOString(),
+    notes: notesArrayFromText(input.notes),
+    annotations: input.annotations
+  });
+
+  await writeFile(archivePath, stringifyArchive(nextArchive), "utf8");
+  setSessionNotes(input.sessionId, input.notes);
+  persistSessionArchive(nextArchive);
+  return nextArchive;
+}
+
+export function getSessionNotes(sessionId: string): string {
+  const row = getDb().query<{ notes: string }, [string]>(`SELECT notes FROM session_meta WHERE session_id = ?`).get(sessionId);
   return row?.notes ?? "";
 }
 
@@ -343,6 +513,8 @@ export function removeSessionRecords(sessionId: string): void {
   getDb().run(`DELETE FROM session_writes WHERE session_id = ?`, [sessionId]);
   getDb().run(`DELETE FROM session_tags WHERE session_id = ?`, [sessionId]);
   getDb().run(`DELETE FROM session_meta WHERE session_id = ?`, [sessionId]);
+  getDb().run(`DELETE FROM session_events WHERE session_id = ?`, [sessionId]);
+  getDb().run(`DELETE FROM session_annotations WHERE session_id = ?`, [sessionId]);
 }
 
 export async function loadLibrarySession(sessionId: string, outputDir: string): Promise<ViewerPayload> {
@@ -353,32 +525,42 @@ export async function loadLibrarySession(sessionId: string, outputDir: string): 
     throw new Error("Invalid sessionId: path traversal detected.");
   }
 
-  const eventsPath = join(sessionFolder, "session.events.json");
+  const archivePath = join(sessionFolder, "session.archive.json");
   const videoPath = join(sessionFolder, "recording.webm");
 
-  const [eventsStat, videoStat] = await Promise.all([
-    stat(eventsPath).catch(() => null),
+  const [archiveStat, videoStat] = await Promise.all([
+    stat(archivePath).catch(() => null),
     stat(videoPath).catch(() => null)
   ]);
 
-  if (!eventsStat?.isFile()) {
-    throw new Error(`Session not found or missing session.events.json: ${sessionId}`);
+  if (!archiveStat?.isFile()) {
+    throw new Error(`Session not found or missing session.archive.json: ${sessionId}`);
   }
   if (!videoStat?.isFile()) {
     throw new Error(`Session not found or missing recording.webm: ${sessionId}`);
   }
 
-  const raw = JSON.parse(await readFile(eventsPath, "utf8")) as unknown;
-  const result = sessionBundleSchema.safeParse(raw);
+  const raw = JSON.parse(await readFile(archivePath, "utf8")) as unknown;
+  const result = sessionArchiveSchema.safeParse(raw);
 
   if (!result.success) {
-    throw new Error(`Session bundle validation failed for ${sessionId}: ${result.error.message}`);
+    throw new Error(`Session archive validation failed for ${sessionId}: ${result.error.message}`);
+  }
+
+  persistSessionArchive(result.data);
+
+  const storedNotes = getSessionNotes(sessionId);
+  const archiveNotes = notesTextFromArchive(result.data);
+  const notes = storedNotes || archiveNotes;
+
+  if (!storedNotes && archiveNotes) {
+    setSessionNotes(sessionId, archiveNotes);
   }
 
   return {
     source: "library",
-    bundle: result.data,
+    archive: buildArchiveFromDb(sessionId, result.data),
     videoPath,
-    notes: getSessionNotes(sessionId)
+    notes
   };
 }
