@@ -41,6 +41,10 @@ type ViewerState = {
   activeIndex: number;
   networkDetailIndex: number | null;
   networkSearchQuery: string;
+  mergeDialogOpen: boolean;
+  mergeDialogValue: string;
+  mergeDialogError: string | null;
+  pendingMergeActionIds: string[];
   notesValue: string;
   notesSaving: boolean;
   notesDirty: boolean;
@@ -131,6 +135,10 @@ const viewerState: ViewerState = {
   activeIndex: -1,
   networkDetailIndex: null,
   networkSearchQuery: "",
+  mergeDialogOpen: false,
+  mergeDialogValue: "",
+  mergeDialogError: null,
+  pendingMergeActionIds: [],
   notesValue: "",
   notesSaving: false,
   notesDirty: false,
@@ -258,11 +266,11 @@ appRoot.innerHTML = `
           <button class="viewer-close" type="button" data-role="viewer-close" aria-label="Close viewer">✕</button>
         </div>
         <div class="viewer-body">
-          <div class="viewer-left">
-            <div class="viewer-video-wrap">
-              <video class="viewer-video" data-role="viewer-video" controls></video>
-            </div>
-            <div class="viewer-notes-section" data-role="viewer-notes-section">
+            <div class="viewer-left">
+              <div class="viewer-video-wrap">
+                <video class="viewer-video" data-role="viewer-video" controls></video>
+              </div>
+              <div class="viewer-notes-section" data-role="viewer-notes-section">
               <span class="viewer-notes-label">Session notes</span>
               <div class="viewer-zip-notice" data-role="viewer-zip-notice" hidden>
                 Notes are read-only for ZIP imports and are not saved.
@@ -308,6 +316,22 @@ appRoot.innerHTML = `
         <div class="viewer-context-menu" data-role="viewer-context-menu" hidden>
           <button class="context-menu-item" type="button" data-role="ctx-merge">Merge Actions…</button>
           <button class="context-menu-item" type="button" data-role="ctx-unmerge">Un-merge</button>
+        </div>
+        <div class="viewer-merge-dialog-backdrop" data-role="viewer-merge-dialog-backdrop" hidden>
+          <div class="viewer-merge-dialog" role="dialog" aria-modal="true" aria-labelledby="viewer-merge-dialog-title">
+            <div class="viewer-merge-dialog-header">
+              <span class="viewer-panel-label" id="viewer-merge-dialog-title">Merge actions</span>
+            </div>
+            <div class="viewer-merge-dialog-body">
+              <label class="viewer-merge-dialog-label" for="viewer-merge-dialog-input">Merged action name</label>
+              <input class="viewer-merge-dialog-input" id="viewer-merge-dialog-input" data-role="viewer-merge-dialog-input" type="text" maxlength="160" placeholder="Merged actions" />
+              <div class="viewer-merge-dialog-error" data-role="viewer-merge-dialog-error" hidden></div>
+            </div>
+            <div class="viewer-merge-dialog-actions">
+              <button class="button sm" type="button" data-role="viewer-merge-dialog-cancel">Cancel</button>
+              <button class="button sm primary" type="button" data-role="viewer-merge-dialog-confirm">Merge</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -359,6 +383,11 @@ const viewerContextMenu = queryElement<HTMLDivElement>("[data-role='viewer-conte
 const ctxMergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-merge']");
 const ctxUnmergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-unmerge']");
 const viewerNetworkSearch = queryElement<HTMLInputElement>("[data-role='network-search']");
+const viewerMergeDialogBackdrop = queryElement<HTMLDivElement>("[data-role='viewer-merge-dialog-backdrop']");
+const viewerMergeDialogInput = queryElement<HTMLInputElement>("[data-role='viewer-merge-dialog-input']");
+const viewerMergeDialogError = queryElement<HTMLDivElement>("[data-role='viewer-merge-dialog-error']");
+const viewerMergeDialogCancel = queryElement<HTMLButtonElement>("[data-role='viewer-merge-dialog-cancel']");
+const viewerMergeDialogConfirm = queryElement<HTMLButtonElement>("[data-role='viewer-merge-dialog-confirm']");
 
 let contextTargetId: string | null = null;
 
@@ -422,6 +451,36 @@ viewerNetworkSearch.addEventListener("input", () => {
   renderViewerTimeline();
   renderViewerNetworkDetail();
   updateTimelineHighlight();
+});
+
+viewerMergeDialogInput.addEventListener("input", () => {
+  viewerState.mergeDialogValue = viewerMergeDialogInput.value;
+  viewerState.mergeDialogError = null;
+  renderViewerMergeDialog();
+});
+
+viewerMergeDialogInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submitViewerMergeDialog();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeViewerMergeDialog();
+  }
+});
+
+viewerMergeDialogCancel.addEventListener("click", () => {
+  closeViewerMergeDialog();
+});
+
+viewerMergeDialogConfirm.addEventListener("click", () => {
+  submitViewerMergeDialog();
+});
+
+viewerMergeDialogBackdrop.addEventListener("click", (event) => {
+  if (event.target === viewerMergeDialogBackdrop) {
+    closeViewerMergeDialog();
+  }
 });
 
 for (const mediaEventName of [
@@ -581,26 +640,13 @@ viewerFocusBtn.addEventListener("click", () => {
 ctxMergeBtn.addEventListener("click", () => {
   hideContextMenu();
   const selectedActionIds = getSelectedActionEntryIds();
-  const label = globalThis.prompt?.("Merge group label:", `Merged ${selectedActionIds.length} actions`) ?? `Merged ${selectedActionIds.length} actions`;
-  if (!label?.trim()) return;
-
   if (selectedActionIds.length < 2) {
     state.feedback = { tone: "error", text: "Select at least two actions before merging." };
     render();
     return;
   }
 
-  const group: ActionMergeGroup = {
-    id: `mg-${Date.now()}`,
-    kind: "merge-group",
-    memberIds: selectedActionIds,
-    tags: [],
-    label: label.trim(),
-    createdAt: new Date().toISOString()
-  };
-  viewerState.mergeGroups = [...viewerState.mergeGroups, group];
-  viewerState.selectedActionIds = new Set();
-  void persistViewerReviewState("Merged actions.");
+  openViewerMergeDialog(selectedActionIds);
 });
 
 ctxUnmergeBtn.addEventListener("click", () => {
@@ -773,7 +819,9 @@ sessionsScroll.addEventListener("input", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (viewerState.open) {
+    if (viewerState.mergeDialogOpen) {
+      closeViewerMergeDialog();
+    } else if (viewerState.open) {
       void closeViewer();
     } else if (state.drawerOpen) {
       closeDrawer();
@@ -1364,6 +1412,10 @@ function openViewer(payload: ViewerPayload): void {
   viewerState.activeSection = "actions";
   viewerState.networkSubtypeFilter = "all";
   viewerState.networkSearchQuery = "";
+  viewerState.mergeDialogOpen = false;
+  viewerState.mergeDialogValue = "";
+  viewerState.mergeDialogError = null;
+  viewerState.pendingMergeActionIds = [];
   viewerState.autoFollow = true;
   viewerState.selectedActionIds = new Set();
   viewerState.anchorActionId = null;
@@ -1388,6 +1440,10 @@ async function closeViewer(): Promise<void> {
   viewerState.activeSection = "actions";
   viewerState.networkSubtypeFilter = "all";
   viewerState.networkSearchQuery = "";
+  viewerState.mergeDialogOpen = false;
+  viewerState.mergeDialogValue = "";
+  viewerState.mergeDialogError = null;
+  viewerState.pendingMergeActionIds = [];
   viewerState.autoFollow = true;
   viewerState.selectedActionIds = new Set();
   viewerState.anchorActionId = null;
@@ -1438,6 +1494,7 @@ function renderViewer(): void {
   renderViewerNetworkFilter();
   renderViewerTimeline();
   renderViewerNetworkDetail();
+  renderViewerMergeDialog();
 }
 
 function renderViewerTimeline(): void {
@@ -1569,6 +1626,7 @@ function renderViewerSectionTabs(): void {
 function renderViewerNetworkFilter(): void {
   const isNetwork = viewerState.activeSection === "network";
   viewerNetworkFilter.hidden = !isNetwork;
+  viewerNetworkFilter.style.display = isNetwork ? "flex" : "none";
   viewerNetworkSearch.value = viewerState.networkSearchQuery;
   if (!isNetwork) return;
   viewerNetworkFilter.querySelectorAll<HTMLButtonElement>("[data-role='subtype-filter']").forEach((btn) => {
@@ -1579,6 +1637,61 @@ function renderViewerNetworkFilter(): void {
 function hideContextMenu(): void {
   viewerContextMenu.hidden = true;
   contextTargetId = null;
+}
+
+function renderViewerMergeDialog(): void {
+  viewerMergeDialogBackdrop.hidden = !viewerState.mergeDialogOpen;
+  viewerMergeDialogInput.value = viewerState.mergeDialogValue;
+  viewerMergeDialogError.hidden = viewerState.mergeDialogError === null;
+  viewerMergeDialogError.textContent = viewerState.mergeDialogError ?? "";
+
+  if (viewerState.mergeDialogOpen) {
+    queueMicrotask(() => viewerMergeDialogInput.focus());
+  }
+}
+
+function openViewerMergeDialog(selectedActionIds: string[]): void {
+  viewerState.pendingMergeActionIds = selectedActionIds;
+  viewerState.mergeDialogValue = `Merged ${selectedActionIds.length} actions`;
+  viewerState.mergeDialogError = null;
+  viewerState.mergeDialogOpen = true;
+  renderViewerMergeDialog();
+}
+
+function closeViewerMergeDialog(): void {
+  viewerState.mergeDialogOpen = false;
+  viewerState.mergeDialogValue = "";
+  viewerState.mergeDialogError = null;
+  viewerState.pendingMergeActionIds = [];
+  renderViewerMergeDialog();
+}
+
+function submitViewerMergeDialog(): void {
+  const label = viewerState.mergeDialogValue.trim();
+  if (viewerState.pendingMergeActionIds.length < 2) {
+    viewerState.mergeDialogError = "Select at least two actions before merging.";
+    renderViewerMergeDialog();
+    return;
+  }
+
+  if (!label) {
+    viewerState.mergeDialogError = "Enter a name for the merged action.";
+    renderViewerMergeDialog();
+    return;
+  }
+
+  const group: ActionMergeGroup = {
+    id: `mg-${Date.now()}`,
+    kind: "merge-group",
+    memberIds: viewerState.pendingMergeActionIds,
+    tags: [],
+    label,
+    createdAt: new Date().toISOString()
+  };
+  viewerState.mergeGroups = [...viewerState.mergeGroups, group];
+  viewerState.selectedActionIds = new Set();
+  closeViewerMergeDialog();
+  void persistViewerReviewState("Merged actions.");
 }
 
 function renderViewerNetworkDetail(): void {
