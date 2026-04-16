@@ -87,13 +87,19 @@ export function buildTimeline(archive: SessionArchive): TimelineItem[] {
 export function buildSectionTimeline(
   archive: SessionArchive,
   section: TimelineSection,
-  subtypeFilter: NetworkSubtype | "all" = "all"
+  subtypeFilter: NetworkSubtype | "all" = "all",
+  networkSearchQuery = ""
 ): TimelineItem[] {
-  const mixed = buildTimeline(archive).filter((item) => item.section === section);
-  if (section !== "network" || subtypeFilter === "all") {
-    return mixed;
+  let mixed = buildTimeline(archive).filter((item) => item.section === section);
+  if (section === "network" && subtypeFilter !== "all") {
+    mixed = mixed.filter((item) => item.subtype === subtypeFilter);
   }
-  return mixed.filter((item) => item.subtype === subtypeFilter);
+
+  if (section === "network" && networkSearchQuery.trim()) {
+    mixed = mixed.filter((item) => matchesNetworkSearch(item, networkSearchQuery));
+  }
+
+  return mixed;
 }
 
 export function findActiveIndex(items: ReadonlyArray<TimelineItem>, currentTimeMs: number): number {
@@ -223,4 +229,32 @@ function buildActionLabel(
     case "error":
       return payload.message;
   }
+}
+
+function matchesNetworkSearch(item: TimelineItem, query: string): boolean {
+  if (item.payload.kind !== "network") {
+    return false;
+  }
+
+  const haystack = [
+    item.payload.method,
+    item.payload.url,
+    item.payload.statusText ?? "",
+    item.payload.failureText ?? "",
+    ...item.payload.request.headers.flatMap((header) => [header.name, header.value]),
+    ...(item.payload.response?.headers ?? []).flatMap((header) => [header.name, header.value]),
+    item.payload.request.body?.value ?? "",
+    item.payload.response?.body?.value ?? ""
+  ].join("\n");
+
+  const regexMatch = query.trim().match(/^\/(.*)\/([dgimsuvy]*)$/);
+  if (regexMatch) {
+    try {
+      return new RegExp(regexMatch[1] ?? "", regexMatch[2] ?? "").test(haystack);
+    } catch {
+      return false;
+    }
+  }
+
+  return haystack.toLowerCase().includes(query.trim().toLowerCase());
 }

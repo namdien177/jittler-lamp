@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createSessionArchive, createSessionDraft, type ActionMergeGroup, type SessionEvent } from "@jittle-lamp/shared";
 
-import { buildTimeline, buildVisibleActionRangeSelection, buildVisibleActionRows, deriveAnchorMs, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "../apps/desktop/src/mainview/timeline";
+import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, buildVisibleActionRows, deriveAnchorMs, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "../apps/desktop/src/mainview/timeline";
 
 const T0 = "2024-06-01T12:00:00.000Z";
 const T1 = "2024-06-01T12:00:05.000Z";
@@ -119,6 +119,49 @@ describe("buildTimeline", () => {
     const items = buildTimeline(makeArchive([makeLifecycle(T1, "recording"), makeLifecycle(T0, "armed")]));
     const armedItem = items.find((i) => i.kind === "lifecycle" && "phase" in i.payload && i.payload.phase === "armed");
     expect(armedItem!.offsetMs).toBe(-5000);
+  });
+});
+
+describe("buildSectionTimeline network search", () => {
+  test("filters network items by plain text across url headers and response body", () => {
+    const archive = makeArchive([
+      {
+        at: T0,
+        payload: {
+          kind: "network",
+          method: "GET",
+          url: "https://example.com/api/users",
+          subtype: "xhr",
+          request: {
+            headers: [{ name: "x-trace-id", value: "trace-123" }],
+            cookies: []
+          },
+          response: {
+            headers: [{ name: "content-type", value: "application/json" }],
+            setCookieHeaders: [],
+            setCookies: [],
+            body: { disposition: "captured", value: "hello response", encoding: "utf8" }
+          }
+        }
+      },
+      makeNetwork(T1, "GET", "https://example.com/assets/app.css")
+    ]);
+
+    expect(buildSectionTimeline(archive, "network", "all", "trace-123")).toHaveLength(1);
+    expect(buildSectionTimeline(archive, "network", "all", "hello response")).toHaveLength(1);
+    expect(buildSectionTimeline(archive, "network", "all", "app.css")).toHaveLength(1);
+    expect(buildSectionTimeline(archive, "network", "all", "missing-value")).toHaveLength(0);
+  });
+
+  test("filters network items by regex query", () => {
+    const archive = makeArchive([
+      makeNetwork(T0, "GET", "https://example.com/api/users/123"),
+      makeNetwork(T1, "GET", "https://example.com/assets/app.css")
+    ]);
+
+    const items = buildSectionTimeline(archive, "network", "all", "/users\\/\\d+/i");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.label).toContain("/users/123");
   });
 });
 
