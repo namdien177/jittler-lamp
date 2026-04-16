@@ -8,17 +8,19 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run build:shared && bun run build:extension && bun run build:desktop",
+    "build": "bun run build:shared && bun run build:extension && bun run build:desktop && bun run build:web",
     "build:shared": "bun run --cwd packages/shared build",
     "build:extension": "bun run --cwd apps/extension build",
     "build:desktop": "bun run --cwd apps/desktop build",
+    "build:web": "bun run --cwd apps/evidence-web build",
     "typecheck": "bun x tsc --noEmit -p tsconfig.typecheck.json",
     "test": "bun test",
-    "clean": "rm -rf apps/desktop/dist apps/extension/dist packages/shared/dist"
+    "clean": "rm -rf apps/desktop/dist apps/extension/dist apps/evidence-web/dist packages/shared/dist"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.325",
     "bun-types": "latest",
+    "fflate": "^0.8.2",
     "typescript": "^5.8.3"
   }
 }
