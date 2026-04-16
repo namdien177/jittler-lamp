@@ -17,6 +17,7 @@ type AppState = {
   timeline: TimelineItem[];
   activeTimelineIndex: number;
   networkDetailIndex: number | null;
+  networkSearchQuery: string;
   feedback: string | null;
   feedbackTone: "neutral" | "success" | "error";
   activeSection: TimelineSection;
@@ -36,6 +37,7 @@ const state: AppState = {
   timeline: [],
   activeTimelineIndex: -1,
   networkDetailIndex: null,
+  networkSearchQuery: "",
   feedback: null,
   feedbackTone: "neutral",
   activeSection: "actions",
@@ -169,6 +171,7 @@ async function handleFile(file: File): Promise<void> {
     state.timeline = buildTimeline(archive);
     state.activeTimelineIndex = -1;
     state.networkDetailIndex = null;
+    state.networkSearchQuery = "";
     state.activeSection = "actions";
     state.networkSubtypeFilter = "all";
     state.autoFollow = true;
@@ -284,7 +287,7 @@ function renderViewer(): void {
           </div>
         </div>
         <div class="viewer-right">
-          <div class="network-detail" data-role="network-detail"${state.networkDetailIndex === null ? " hidden" : ""}>${state.networkDetailIndex !== null ? renderNetworkDetailHtml() : ""}</div>
+          ${renderNetworkPanelHtml()}
         </div>
       </div>
     </div>
@@ -298,15 +301,7 @@ function renderViewer(): void {
   videoEl.src = state.videoUrl ?? "";
 
   videoEl.addEventListener("timeupdate", () => {
-    const currentMs = videoEl.currentTime * 1000;
-    const section = state.activeSection;
-    if (section === "actions") return;
-    const items = buildSectionTimeline(state.archive!, section, state.networkSubtypeFilter);
-    const newIndex = findActiveIndex(items, currentMs);
-    if (newIndex !== state.activeTimelineIndex) {
-      state.activeTimelineIndex = newIndex;
-      updateTimelineHighlight();
-    }
+    updateTimelineHighlight();
   });
 }
 
@@ -324,13 +319,14 @@ function renderNetworkFilterBar(): string {
     { value: "other", label: "Other" }
   ];
 
-  return subtypes
+  return `${subtypes
     .map((s) => {
       const isActive = s.value === state.networkSubtypeFilter;
       const emphClass = s.emphasis ? " subtype-emphasis" : "";
       return `<button class="subtype-filter${emphClass}" data-role="subtype-filter" data-subtype="${s.value}" data-active="${isActive ? "true" : "false"}" type="button">${s.label}</button>`;
     })
-    .join("");
+    .join("")}
+    <input class="viewer-network-search" type="text" data-role="network-search" value="${escapeHtml(state.networkSearchQuery)}" placeholder="Search URL, headers, response, or /regex/" />`;
 }
 
 function renderTimelineHtml(): string {
@@ -338,7 +334,7 @@ function renderTimelineHtml(): string {
   if (!archive) return `<span class="viewer-timeline-empty">No events recorded.</span>`;
 
   const section = state.activeSection;
-  const items = buildSectionTimeline(archive, section, state.networkSubtypeFilter);
+  const items = buildSectionTimeline(archive, section, state.networkSubtypeFilter, state.networkSearchQuery);
 
   if (section === "actions") {
     const mergedMemberIds = new Set(state.mergeGroups.flatMap((g) => g.memberIds));
@@ -363,6 +359,7 @@ function renderTimelineHtml(): string {
           type="button"
           data-role="timeline-item"
           data-item-id="${escapeHtml(group.id)}"
+          data-offset-ms="${firstMs}"
           data-section="actions"
           data-merged="true"
           data-active="false"
@@ -419,13 +416,21 @@ function updateTimelineHighlight(): void {
   if (!container) return;
 
   const section = state.activeSection;
-  if (section === "actions") return;
-
   const buttons = container.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item']");
   let activeBtn: HTMLButtonElement | null = null;
 
+  const items = state.archive ? buildSectionTimeline(state.archive, section, state.networkSubtypeFilter, state.networkSearchQuery) : [];
+  const nextActiveIndex = findActiveIndex(items, videoEl.currentTime * 1000);
+  state.activeTimelineIndex = nextActiveIndex;
+  const activeItem = nextActiveIndex >= 0 ? items[nextActiveIndex] : undefined;
+  const activeItemId = (() => {
+    if (!activeItem) return null;
+    if (section !== "actions") return activeItem.id;
+    return state.mergeGroups.find((group) => group.memberIds.includes(activeItem.id))?.id ?? activeItem.id;
+  })();
+
   buttons.forEach((btn, idx) => {
-    const isActive = idx === state.activeTimelineIndex;
+    const isActive = section === "actions" ? btn.dataset.itemId === activeItemId : idx === nextActiveIndex;
     btn.dataset.active = isActive ? "true" : "false";
     if (isActive) activeBtn = btn;
   });
@@ -508,6 +513,18 @@ function renderNetworkDetailHtml(): string {
       </div>
     </div>
   `;
+}
+
+function renderNetworkPanelHtml(): string {
+  if (state.activeSection !== "network") {
+    return `<div class="network-detail network-detail-empty" data-role="network-detail-empty"><div class="network-detail-header"><span class="network-detail-title">Network Request</span></div><div class="network-detail-body"><div class="network-detail-section"><span class="network-body-empty">Switch to the Network tab and select a request to inspect headers and bodies.</span></div></div></div>`;
+  }
+
+  if (state.networkDetailIndex === null) {
+    return `<div class="network-detail network-detail-empty" data-role="network-detail-empty"><div class="network-detail-header"><span class="network-detail-title">Network Request</span></div><div class="network-detail-body"><div class="network-detail-section"><span class="network-detail-label">Ready to inspect</span><div class="network-detail-row"><span class="network-detail-key">Search</span><span class="network-detail-val">Use plain text or /regex/ to match URL, header values, or response content.</span></div><div class="network-detail-row"><span class="network-detail-key">Selection</span><span class="network-detail-val">Choose a request from the timeline to open full details here.</span></div></div></div></div>`;
+  }
+
+  return `<div class="network-detail" data-role="network-detail">${renderNetworkDetailHtml()}</div>`;
 }
 
 function hideContextMenu(): void {
@@ -622,6 +639,7 @@ function bindDelegatedEvents(): void {
       state.timeline = [];
       state.activeTimelineIndex = -1;
       state.networkDetailIndex = null;
+      state.networkSearchQuery = "";
       state.feedback = null;
       state.activeSection = "actions";
       state.networkSubtypeFilter = "all";
@@ -640,11 +658,8 @@ function bindDelegatedEvents(): void {
 
     if (role === "btn-close-detail") {
       state.networkDetailIndex = null;
-      const detailEl = appRoot.querySelector<HTMLElement>("[data-role='network-detail']");
-      if (detailEl) {
-        detailEl.hidden = true;
-        detailEl.innerHTML = "";
-      }
+      const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
+      if (panel) panel.innerHTML = renderNetworkPanelHtml();
       return;
     }
 
@@ -665,8 +680,9 @@ function bindDelegatedEvents(): void {
       const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
       if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
 
-      const detailEl = appRoot.querySelector<HTMLElement>("[data-role='network-detail']");
-      if (detailEl) { detailEl.hidden = true; detailEl.innerHTML = ""; }
+      const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
+      if (panel) panel.innerHTML = renderNetworkPanelHtml();
+      updateTimelineHighlight();
       return;
     }
 
@@ -674,6 +690,7 @@ function bindDelegatedEvents(): void {
       const subtype = btn.dataset.subtype as NetworkSubtype | "all" | undefined;
       if (!subtype) return;
       state.networkSubtypeFilter = subtype;
+      state.networkDetailIndex = null;
 
       appRoot.querySelectorAll<HTMLButtonElement>("[data-role='subtype-filter']").forEach((b) => {
         b.dataset.active = b.dataset.subtype === subtype ? "true" : "false";
@@ -681,6 +698,13 @@ function bindDelegatedEvents(): void {
 
       const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
       if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+      const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
+      if (panel) panel.innerHTML = renderNetworkPanelHtml();
+      updateTimelineHighlight();
+      return;
+    }
+
+    if (role === "network-search") {
       return;
     }
 
@@ -715,18 +739,22 @@ function bindDelegatedEvents(): void {
 
       const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
       if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+      updateTimelineHighlight();
       return;
     }
 
     if (role === "ctx-unmerge") {
+      const targetId = ctxTargetId;
       hideContextMenu();
-      if (!ctxTargetId) return;
-      state.mergeGroups = state.mergeGroups.filter((g) => g.id !== ctxTargetId);
+      if (!targetId) return;
+      state.mergeGroups = state.mergeGroups.filter((g) => g.id !== targetId);
       state.archive = getReviewedArchive();
       state.selectedActionIds = new Set();
+      state.anchorActionId = null;
 
       const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
       if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+      updateTimelineHighlight();
       return;
     }
 
@@ -770,10 +798,11 @@ function bindDelegatedEvents(): void {
           });
         }
 
-        if (!isMerged && btn.dataset.offsetMs) {
+        if (btn.dataset.offsetMs) {
           const offsetMs = Number(btn.dataset.offsetMs);
           if (videoEl) videoEl.currentTime = offsetMs / 1000;
         }
+        updateTimelineHighlight();
         return;
       }
 
@@ -790,15 +819,8 @@ function bindDelegatedEvents(): void {
         state.networkDetailIndex = isAlreadyOpen ? null : networkIdx;
 
         const detailEl = appRoot.querySelector<HTMLElement>("[data-role='network-detail']");
-        if (detailEl) {
-          if (state.networkDetailIndex === null) {
-            detailEl.hidden = true;
-            detailEl.innerHTML = "";
-          } else {
-            detailEl.hidden = false;
-            detailEl.innerHTML = renderNetworkDetailHtml();
-          }
-        }
+        const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
+        if (panel) panel.innerHTML = renderNetworkPanelHtml();
       }
 
       updateTimelineHighlight();
@@ -848,6 +870,21 @@ function bindDelegatedEvents(): void {
       if (focusBtn) focusBtn.hidden = false;
     }
   }, true);
+
+  appRoot.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.dataset.role !== "network-search") return;
+
+    state.networkSearchQuery = target.value;
+    state.networkDetailIndex = null;
+
+    const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
+    if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+    const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
+    if (panel) panel.innerHTML = renderNetworkPanelHtml();
+    updateTimelineHighlight();
+  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
