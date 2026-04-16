@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@jittle-lamp/shared": "workspace:*",
-    "electrobun": "^1.16.0"
+    "electrobun": "^1.16.0",
+    "fflate": "^0.8.2"
   }
 }
