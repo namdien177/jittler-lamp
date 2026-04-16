@@ -40,6 +40,7 @@ type ViewerState = {
   timeline: TimelineItem[];
   activeIndex: number;
   networkDetailIndex: number | null;
+  networkSearchQuery: string;
   notesValue: string;
   notesSaving: boolean;
   notesDirty: boolean;
@@ -129,6 +130,7 @@ const viewerState: ViewerState = {
   timeline: [],
   activeIndex: -1,
   networkDetailIndex: null,
+  networkSearchQuery: "",
   notesValue: "",
   notesSaving: false,
   notesDirty: false,
@@ -288,6 +290,7 @@ appRoot.innerHTML = `
               <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="media">Media</button>
               <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="websocket">WS</button>
               <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="other">Other</button>
+              <input class="viewer-network-search" type="text" data-role="network-search" placeholder="Search URL, headers, response, or /regex/" />
             </div>
             <div class="viewer-section-body" data-role="viewer-section-body">
               <div class="viewer-timeline" data-role="viewer-timeline"></div>
@@ -355,6 +358,9 @@ const viewerFocusBtn = queryElement<HTMLButtonElement>("[data-role='viewer-focus
 const viewerContextMenu = queryElement<HTMLDivElement>("[data-role='viewer-context-menu']");
 const ctxMergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-merge']");
 const ctxUnmergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-unmerge']");
+const viewerNetworkSearch = queryElement<HTMLInputElement>("[data-role='network-search']");
+
+let contextTargetId: string | null = null;
 
 gearBtn.addEventListener("click", () => {
   openDrawer();
@@ -407,6 +413,14 @@ viewerNotesSave.addEventListener("click", () => {
 });
 
 viewerVideo.addEventListener("timeupdate", () => {
+  updateTimelineHighlight();
+});
+
+viewerNetworkSearch.addEventListener("input", () => {
+  viewerState.networkSearchQuery = viewerNetworkSearch.value;
+  viewerState.networkDetailIndex = null;
+  renderViewerTimeline();
+  renderViewerNetworkDetail();
   updateTimelineHighlight();
 });
 
@@ -463,6 +477,7 @@ viewerTimeline.addEventListener("click", (event) => {
         viewerState.anchorActionId = itemId;
       }
       renderViewerTimeline();
+      updateTimelineHighlight();
       return;
     }
 
@@ -476,6 +491,7 @@ viewerTimeline.addEventListener("click", (event) => {
       if (rangeIds.length > 0) {
         viewerState.selectedActionIds = new Set(rangeIds);
         renderViewerTimeline();
+        updateTimelineHighlight();
         return;
       }
     }
@@ -483,6 +499,7 @@ viewerTimeline.addEventListener("click", (event) => {
     viewerState.selectedActionIds = new Set([itemId]);
     viewerState.anchorActionId = itemId;
     renderViewerTimeline();
+    updateTimelineHighlight();
     return;
   }
 
@@ -502,6 +519,7 @@ viewerTimeline.addEventListener("contextmenu", (event) => {
   event.preventDefault();
 
   const itemId = item.dataset.itemId ?? "";
+  contextTargetId = itemId;
   if (!viewerState.selectedActionIds.has(itemId)) {
     viewerState.selectedActionIds = new Set([itemId]);
     viewerState.anchorActionId = itemId;
@@ -529,6 +547,7 @@ viewerSectionTabs.addEventListener("click", (event) => {
   renderViewerNetworkFilter();
   renderViewerTimeline();
   renderViewerNetworkDetail();
+  updateTimelineHighlight();
 });
 
 viewerNetworkFilter.addEventListener("click", (event) => {
@@ -538,8 +557,11 @@ viewerNetworkFilter.addEventListener("click", (event) => {
   const subtype = btn.dataset.subtype as NetworkSubtype | "all" | undefined;
   if (!subtype) return;
   viewerState.networkSubtypeFilter = subtype;
+  viewerState.networkDetailIndex = null;
   renderViewerNetworkFilter();
   renderViewerTimeline();
+  renderViewerNetworkDetail();
+  updateTimelineHighlight();
 });
 
 viewerSectionBody.addEventListener("scroll", () => {
@@ -558,10 +580,10 @@ viewerFocusBtn.addEventListener("click", () => {
 
 ctxMergeBtn.addEventListener("click", () => {
   hideContextMenu();
-  const label = prompt("Merge group label:");
+  const selectedActionIds = getSelectedActionEntryIds();
+  const label = globalThis.prompt?.("Merge group label:", `Merged ${selectedActionIds.length} actions`) ?? `Merged ${selectedActionIds.length} actions`;
   if (!label?.trim()) return;
 
-  const selectedActionIds = getSelectedActionEntryIds();
   if (selectedActionIds.length < 2) {
     state.feedback = { tone: "error", text: "Select at least two actions before merging." };
     render();
@@ -582,8 +604,8 @@ ctxMergeBtn.addEventListener("click", () => {
 });
 
 ctxUnmergeBtn.addEventListener("click", () => {
+  const targetId = contextTargetId;
   hideContextMenu();
-  const targetId = [...viewerState.selectedActionIds][0];
   if (!targetId) return;
   viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
   viewerState.selectedActionIds = new Set();
@@ -1341,6 +1363,7 @@ function openViewer(payload: ViewerPayload): void {
   viewerState.notesSaving = false;
   viewerState.activeSection = "actions";
   viewerState.networkSubtypeFilter = "all";
+  viewerState.networkSearchQuery = "";
   viewerState.autoFollow = true;
   viewerState.selectedActionIds = new Set();
   viewerState.anchorActionId = null;
@@ -1364,6 +1387,7 @@ async function closeViewer(): Promise<void> {
   viewerState.notesSaving = false;
   viewerState.activeSection = "actions";
   viewerState.networkSubtypeFilter = "all";
+  viewerState.networkSearchQuery = "";
   viewerState.autoFollow = true;
   viewerState.selectedActionIds = new Set();
   viewerState.anchorActionId = null;
@@ -1424,7 +1448,7 @@ function renderViewerTimeline(): void {
   }
 
   const section = viewerState.activeSection;
-  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter);
+  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
 
   if (section === "actions") {
     const mergedMemberIds = new Set(viewerState.mergeGroups.flatMap((g) => g.memberIds));
@@ -1450,6 +1474,7 @@ function renderViewerTimeline(): void {
           type="button"
           data-role="timeline-item"
           data-item-id="${escapeHtml(group.id)}"
+          data-offset-ms="${firstMs}"
           data-section="actions"
           data-merged="true"
           data-active="false"
@@ -1507,9 +1532,7 @@ function updateTimelineHighlight(): void {
   if (!payload) return;
 
   const section = viewerState.activeSection;
-  if (section === "actions") return;
-
-  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter);
+  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
   const currentTimeMs = viewerVideo.currentTime * 1000;
   const nextActive = findActiveIndex(items, currentTimeMs);
   viewerState.activeIndex = nextActive;
@@ -1517,8 +1540,15 @@ function updateTimelineHighlight(): void {
   const buttons = viewerTimeline.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item']");
   let activeBtn: HTMLButtonElement | null = null;
 
+  const activeItemId = (() => {
+    const activeItem = nextActive >= 0 ? items[nextActive] : undefined;
+    if (!activeItem) return null;
+    if (section !== "actions") return activeItem.id;
+    return viewerState.mergeGroups.find((group) => group.memberIds.includes(activeItem.id))?.id ?? activeItem.id;
+  })();
+
   buttons.forEach((btn, idx) => {
-    const isActive = idx === nextActive;
+    const isActive = section === "actions" ? btn.dataset.itemId === activeItemId : idx === nextActive;
     btn.dataset.active = isActive ? "true" : "false";
     if (isActive) activeBtn = btn;
   });
@@ -1539,6 +1569,7 @@ function renderViewerSectionTabs(): void {
 function renderViewerNetworkFilter(): void {
   const isNetwork = viewerState.activeSection === "network";
   viewerNetworkFilter.hidden = !isNetwork;
+  viewerNetworkSearch.value = viewerState.networkSearchQuery;
   if (!isNetwork) return;
   viewerNetworkFilter.querySelectorAll<HTMLButtonElement>("[data-role='subtype-filter']").forEach((btn) => {
     btn.dataset.active = btn.dataset.subtype === viewerState.networkSubtypeFilter ? "true" : "false";
@@ -1547,6 +1578,7 @@ function renderViewerNetworkFilter(): void {
 
 function hideContextMenu(): void {
   viewerContextMenu.hidden = true;
+  contextTargetId = null;
 }
 
 function renderViewerNetworkDetail(): void {

@@ -1305,6 +1305,21 @@ input {
   flex-shrink: 0;
 }
 
+.viewer-network-search {
+  margin-left: auto;
+  min-width: 240px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.viewer-network-search::placeholder {
+  color: var(--text-soft);
+}
+
 .subtype-filter {
   padding: 2px 8px;
   border-radius: var(--radius-sm);
