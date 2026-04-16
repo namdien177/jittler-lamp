@@ -18,6 +18,10 @@ type AppState = {
   activeTimelineIndex: number;
   networkDetailIndex: number | null;
   networkSearchQuery: string;
+  mergeDialogOpen: boolean;
+  mergeDialogValue: string;
+  mergeDialogError: string | null;
+  pendingMergeActionIds: string[];
   feedback: string | null;
   feedbackTone: "neutral" | "success" | "error";
   activeSection: TimelineSection;
@@ -38,6 +42,10 @@ const state: AppState = {
   activeTimelineIndex: -1,
   networkDetailIndex: null,
   networkSearchQuery: "",
+  mergeDialogOpen: false,
+  mergeDialogValue: "",
+  mergeDialogError: null,
+  pendingMergeActionIds: [],
   feedback: null,
   feedbackTone: "neutral",
   activeSection: "actions",
@@ -255,8 +263,6 @@ function renderViewer(): void {
   const archive = state.archive;
   if (!archive) return;
 
-  const isNetworkSection = state.activeSection === "network";
-
   appRoot.innerHTML = `
     <div class="viewer">
       <div class="viewer-header">
@@ -278,9 +284,7 @@ function renderViewer(): void {
             <button class="section-tab" data-role="section-tab" data-section="console" data-active="${state.activeSection === "console" ? "true" : "false"}">Console</button>
             <button class="section-tab" data-role="section-tab" data-section="network" data-active="${state.activeSection === "network" ? "true" : "false"}">Network</button>
           </div>
-          <div class="viewer-network-filter" data-role="viewer-network-filter"${isNetworkSection ? "" : " hidden"}>
-            ${renderNetworkFilterBar()}
-          </div>
+          ${state.activeSection === "network" ? `<div class="viewer-network-filter" data-role="viewer-network-filter">${renderNetworkFilterBar()}</div>` : ""}
           <div class="viewer-section-body" data-role="viewer-section-body">
             <div class="viewer-timeline" data-role="viewer-timeline">${renderTimelineHtml()}</div>
             <button class="viewer-focus-btn" data-role="viewer-focus-btn"${state.autoFollow ? " hidden" : ""}>↓ Focus</button>
@@ -295,10 +299,31 @@ function renderViewer(): void {
       <button class="context-menu-item" data-role="ctx-merge" type="button">Merge Actions…</button>
       <button class="context-menu-item" data-role="ctx-unmerge" type="button">Un-merge</button>
     </div>
+    <div class="viewer-merge-dialog-backdrop" data-role="viewer-merge-dialog-backdrop"${state.mergeDialogOpen ? "" : " hidden"}>
+      <div class="viewer-merge-dialog" role="dialog" aria-modal="true" aria-labelledby="viewer-merge-dialog-title">
+        <div class="viewer-merge-dialog-header">
+          <span class="network-detail-title" id="viewer-merge-dialog-title">Merge Actions</span>
+        </div>
+        <div class="viewer-merge-dialog-body">
+          <label class="viewer-merge-dialog-label" for="viewer-merge-dialog-input">Merged action name</label>
+          <input class="viewer-merge-dialog-input" id="viewer-merge-dialog-input" data-role="viewer-merge-dialog-input" type="text" value="${escapeHtml(state.mergeDialogValue)}" maxlength="160" placeholder="Merged actions" />
+          <div class="viewer-merge-dialog-error" data-role="viewer-merge-dialog-error"${state.mergeDialogError ? "" : " hidden"}>${state.mergeDialogError ? escapeHtml(state.mergeDialogError) : ""}</div>
+        </div>
+        <div class="viewer-merge-dialog-actions">
+          <button class="btn-ghost" data-role="viewer-merge-dialog-cancel" type="button">Cancel</button>
+          <button class="btn-ghost" data-role="viewer-merge-dialog-confirm" type="button">Merge</button>
+        </div>
+      </div>
+    </div>
   `;
 
   videoEl = appRoot.querySelector("[data-role='viewer-video']") as HTMLVideoElement;
   videoEl.src = state.videoUrl ?? "";
+
+  const mergeInput = appRoot.querySelector<HTMLInputElement>("[data-role='viewer-merge-dialog-input']");
+  if (state.mergeDialogOpen && mergeInput) {
+    queueMicrotask(() => mergeInput.focus());
+  }
 
   videoEl.addEventListener("timeupdate", () => {
     updateTimelineHighlight();
@@ -534,6 +559,61 @@ function hideContextMenu(): void {
   ctxIsMerged = false;
 }
 
+function openMergeDialog(selectedActionIds: string[]): void {
+  state.pendingMergeActionIds = selectedActionIds;
+  state.mergeDialogValue = `Merged ${selectedActionIds.length} actions`;
+  state.mergeDialogError = null;
+  state.mergeDialogOpen = true;
+  renderViewer();
+  updateTimelineHighlight();
+}
+
+function closeMergeDialog(): void {
+  state.mergeDialogOpen = false;
+  state.mergeDialogValue = "";
+  state.mergeDialogError = null;
+  state.pendingMergeActionIds = [];
+  renderViewer();
+  updateTimelineHighlight();
+}
+
+function submitMergeDialog(): void {
+  const selectedIds = state.pendingMergeActionIds;
+  if (selectedIds.length < 2) {
+    state.mergeDialogError = "Select at least two actions before merging.";
+    renderViewer();
+    updateTimelineHighlight();
+    return;
+  }
+
+  const label = state.mergeDialogValue.trim();
+  if (!label) {
+    state.mergeDialogError = "Enter a name for the merged action.";
+    renderViewer();
+    updateTimelineHighlight();
+    return;
+  }
+
+  const newGroup: ActionMergeGroup = {
+    id: `merge-${Date.now()}`,
+    kind: "merge-group",
+    memberIds: selectedIds,
+    tags: [],
+    label,
+    createdAt: new Date().toISOString()
+  };
+  state.mergeGroups = [...state.mergeGroups, newGroup];
+  state.archive = getReviewedArchive();
+  state.selectedActionIds = new Set();
+  state.anchorActionId = null;
+  state.mergeDialogOpen = false;
+  state.mergeDialogValue = "";
+  state.mergeDialogError = null;
+  state.pendingMergeActionIds = [];
+  renderViewer();
+  updateTimelineHighlight();
+}
+
 function showContextMenu(x: number, y: number, targetId: string, isMerged: boolean): void {
   const menu = appRoot.querySelector<HTMLElement>("[data-role='viewer-context-menu']");
   if (!menu) return;
@@ -640,6 +720,10 @@ function bindDelegatedEvents(): void {
       state.activeTimelineIndex = -1;
       state.networkDetailIndex = null;
       state.networkSearchQuery = "";
+      state.mergeDialogOpen = false;
+      state.mergeDialogValue = "";
+      state.mergeDialogError = null;
+      state.pendingMergeActionIds = [];
       state.feedback = null;
       state.activeSection = "actions";
       state.networkSubtypeFilter = "all";
@@ -653,6 +737,21 @@ function bindDelegatedEvents(): void {
 
     if (role === "btn-export") {
       downloadUpdatedZip();
+      return;
+    }
+
+    if (role === "viewer-merge-dialog-backdrop" && target === btn) {
+      closeMergeDialog();
+      return;
+    }
+
+    if (role === "viewer-merge-dialog-cancel") {
+      closeMergeDialog();
+      return;
+    }
+
+    if (role === "viewer-merge-dialog-confirm") {
+      submitMergeDialog();
       return;
     }
 
@@ -674,14 +773,7 @@ function bindDelegatedEvents(): void {
         tab.dataset.active = tab.dataset.section === section ? "true" : "false";
       });
 
-      const filterBar = appRoot.querySelector<HTMLElement>("[data-role='viewer-network-filter']");
-      if (filterBar) filterBar.hidden = section !== "network";
-
-      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
-      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
-
-      const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
-      if (panel) panel.innerHTML = renderNetworkPanelHtml();
+      renderViewer();
       updateTimelineHighlight();
       return;
     }
@@ -692,14 +784,7 @@ function bindDelegatedEvents(): void {
       state.networkSubtypeFilter = subtype;
       state.networkDetailIndex = null;
 
-      appRoot.querySelectorAll<HTMLButtonElement>("[data-role='subtype-filter']").forEach((b) => {
-        b.dataset.active = b.dataset.subtype === subtype ? "true" : "false";
-      });
-
-      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
-      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
-      const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
-      if (panel) panel.innerHTML = renderNetworkPanelHtml();
+      renderViewer();
       updateTimelineHighlight();
       return;
     }
@@ -721,25 +806,7 @@ function bindDelegatedEvents(): void {
         setFeedback("Select 2 or more consecutive actions to merge.", "neutral");
         return;
       }
-      const label = window.prompt("Merge group label:", "Merged actions");
-      if (!label) return;
-
-      const newGroup: ActionMergeGroup = {
-        id: `merge-${Date.now()}`,
-        kind: "merge-group",
-        memberIds: selectedIds,
-        tags: [],
-        label,
-        createdAt: new Date().toISOString()
-      };
-      state.mergeGroups = [...state.mergeGroups, newGroup];
-      state.archive = getReviewedArchive();
-      state.selectedActionIds = new Set();
-      state.anchorActionId = null;
-
-      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
-      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
-      updateTimelineHighlight();
+      openMergeDialog(selectedIds);
       return;
     }
 
@@ -751,9 +818,7 @@ function bindDelegatedEvents(): void {
       state.archive = getReviewedArchive();
       state.selectedActionIds = new Set();
       state.anchorActionId = null;
-
-      const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
-      if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
+      renderViewer();
       updateTimelineHighlight();
       return;
     }
@@ -874,17 +939,38 @@ function bindDelegatedEvents(): void {
   appRoot.addEventListener("input", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
-    if (target.dataset.role !== "network-search") return;
+    if (target.dataset.role === "network-search") {
+      state.networkSearchQuery = target.value;
+      state.networkDetailIndex = null;
+      renderViewer();
+      updateTimelineHighlight();
+      return;
+    }
 
-    state.networkSearchQuery = target.value;
-    state.networkDetailIndex = null;
+    if (target.dataset.role === "viewer-merge-dialog-input") {
+      state.mergeDialogValue = target.value;
+      state.mergeDialogError = null;
+    }
+  });
 
-    const timelineEl = appRoot.querySelector<HTMLElement>("[data-role='viewer-timeline']");
-    if (timelineEl) timelineEl.innerHTML = renderTimelineHtml();
-    const panel = appRoot.querySelector<HTMLElement>(".viewer-right");
-    if (panel) panel.innerHTML = renderNetworkPanelHtml();
-    updateTimelineHighlight();
+  appRoot.addEventListener("keydown", (event) => {
+    if (!(event.target instanceof HTMLElement)) return;
+    if (event.target.dataset.role !== "viewer-merge-dialog-input") return;
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitMergeDialog();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeMergeDialog();
+    }
   });
 }
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.mergeDialogOpen) {
+    closeMergeDialog();
+  }
+});
 
 document.addEventListener("DOMContentLoaded", init);
