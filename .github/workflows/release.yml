@@ -113,12 +113,14 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Prepare App Store Connect API key
-        if: ${{ secrets.ELECTROBUN_APPLE_API_KEY_P8 != '' }}
+        env:
+          ELECTROBUN_APPLE_API_KEY_P8: ${{ secrets.ELECTROBUN_APPLE_API_KEY_P8 }}
+        if: ${{ env.ELECTROBUN_APPLE_API_KEY_P8 != '' }}
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/electrobun"
           cat <<'EOF' > "$RUNNER_TEMP/electrobun/AuthKey.p8"
-          ${{ secrets.ELECTROBUN_APPLE_API_KEY_P8 }}
+          $ELECTROBUN_APPLE_API_KEY_P8
           EOF
 
       - name: Determine signing mode
