@@ -1,6 +1,7 @@
 import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, SessionRecord, ViewerPayload } from "../rpc";
-import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "@jittle-lamp/shared";
-import type { ActionMergeGroup, NetworkSubtype, TimelineSection } from "@jittle-lamp/shared";
+import { findActiveIndex, formatOffset } from "@jittle-lamp/shared";
+import type { NetworkSubtype, TimelineSection } from "@jittle-lamp/shared";
+import { createMergeGroup, deriveSectionTimeline, deriveTimeline, getArchiveMergeGroups, getContiguousMergeableSelection, openMergeDialog as openMergeDialogState, closeMergeDialog as closeMergeDialogState, selectActionRange, selectSingleAction, toggleActionSelection, validateMergeDialog } from "@jittle-lamp/viewer-core";
 import { createDesktopBridge } from "./desktop-bridge";
 import { filterSessions, formatRuntimeLabel, formatSourceLabel, isDatePreset, renderInlineTagAutocompleteHtml, renderSessionsHtml, renderTagAutocompleteHtml, renderTagFilterHtml, type DatePreset } from "./catalog-view";
 import { escapeHtml, formatBytes, formatErrorMessage, formatRelativeTime, queryRequiredElement } from "./utils";
@@ -415,34 +416,35 @@ viewerTimeline.addEventListener("click", (event) => {
 
   if (item.dataset.section === "actions") {
     if (event.metaKey || event.ctrlKey) {
-      if (viewerState.selectedActionIds.has(itemId)) {
-        viewerState.selectedActionIds.delete(itemId);
-      } else {
-        viewerState.selectedActionIds.add(itemId);
-        viewerState.anchorActionId = itemId;
-      }
+      const selection = toggleActionSelection(
+        { selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId },
+        itemId
+      );
+      viewerState.selectedActionIds = selection.selectedActionIds;
+      viewerState.anchorActionId = selection.anchorActionId;
       renderViewerTimeline();
       updateTimelineHighlight();
       return;
     }
 
     if (event.shiftKey && viewerState.anchorActionId) {
-      const rangeIds = buildVisibleActionRangeSelection(
+      const selection = selectActionRange(
         viewerState.payload!.archive,
         viewerState.mergeGroups,
-        viewerState.anchorActionId,
+        { selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId },
         itemId
       );
-      if (rangeIds.length > 0) {
-        viewerState.selectedActionIds = new Set(rangeIds);
+      if (selection.selectedActionIds.size > 0) {
+        viewerState.selectedActionIds = selection.selectedActionIds;
         renderViewerTimeline();
         updateTimelineHighlight();
         return;
       }
     }
 
-    viewerState.selectedActionIds = new Set([itemId]);
-    viewerState.anchorActionId = itemId;
+    const selection = selectSingleAction(itemId);
+    viewerState.selectedActionIds = selection.selectedActionIds;
+    viewerState.anchorActionId = selection.anchorActionId;
     renderViewerTimeline();
     updateTimelineHighlight();
     return;
@@ -466,8 +468,9 @@ viewerTimeline.addEventListener("contextmenu", (event) => {
   const itemId = item.dataset.itemId ?? "";
   contextTargetId = itemId;
   if (!viewerState.selectedActionIds.has(itemId)) {
-    viewerState.selectedActionIds = new Set([itemId]);
-    viewerState.anchorActionId = itemId;
+    const selection = selectSingleAction(itemId);
+    viewerState.selectedActionIds = selection.selectedActionIds;
+    viewerState.anchorActionId = selection.anchorActionId;
     renderViewerTimeline();
   }
 
@@ -1257,7 +1260,7 @@ function renderViewerTimeline(): void {
   }
 
   const section = viewerState.activeSection;
-  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
+  const items = deriveSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
 
   if (section === "actions") {
     const mergedMemberIds = new Set(viewerState.mergeGroups.flatMap((g) => g.memberIds));
@@ -1341,7 +1344,7 @@ function updateTimelineHighlight(): void {
   if (!payload) return;
 
   const section = viewerState.activeSection;
-  const items = buildSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
+  const items = deriveSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
   const currentTimeMs = viewerVideo.currentTime * 1000;
   const nextActive = findActiveIndex(items, currentTimeMs);
   viewerState.activeIndex = nextActive;
@@ -1403,43 +1406,29 @@ function renderViewerMergeDialog(): void {
 }
 
 function openViewerMergeDialog(selectedActionIds: string[]): void {
-  viewerState.pendingMergeActionIds = selectedActionIds;
-  viewerState.mergeDialogValue = `Merged ${selectedActionIds.length} actions`;
-  viewerState.mergeDialogError = null;
-  viewerState.mergeDialogOpen = true;
+  openMergeDialogState(viewerState, selectedActionIds);
   renderViewerMergeDialog();
 }
 
 function closeViewerMergeDialog(): void {
-  viewerState.mergeDialogOpen = false;
-  viewerState.mergeDialogValue = "";
-  viewerState.mergeDialogError = null;
-  viewerState.pendingMergeActionIds = [];
+  closeMergeDialogState(viewerState);
   renderViewerMergeDialog();
 }
 
 function submitViewerMergeDialog(): void {
-  const label = viewerState.mergeDialogValue.trim();
-  if (viewerState.pendingMergeActionIds.length < 2) {
-    viewerState.mergeDialogError = "Select at least two actions before merging.";
+  const validation = validateMergeDialog(viewerState);
+  if (!validation.ok) {
+    viewerState.mergeDialogError = validation.error;
     renderViewerMergeDialog();
     return;
   }
 
-  if (!label) {
-    viewerState.mergeDialogError = "Enter a name for the merged action.";
-    renderViewerMergeDialog();
-    return;
-  }
-
-  const group: ActionMergeGroup = {
+  const group = createMergeGroup({
     id: `mg-${Date.now()}`,
-    kind: "merge-group",
-    memberIds: viewerState.pendingMergeActionIds,
-    tags: [],
-    label,
-    createdAt: new Date().toISOString()
-  };
+    createdAt: new Date().toISOString(),
+    label: validation.label,
+    selectedActionIds: validation.selectedActionIds
+  });
   viewerState.mergeGroups = [...viewerState.mergeGroups, group];
   viewerState.selectedActionIds = new Set();
   closeViewerMergeDialog();
@@ -1587,7 +1576,7 @@ function getSelectedActionEntryIds(): string[] {
     return [];
   }
 
-  return getContiguousMergeableActionIds(payload.archive, viewerState.mergeGroups, viewerState.selectedActionIds);
+  return getContiguousMergeableSelection(payload.archive, viewerState.mergeGroups, viewerState.selectedActionIds);
 }
 
 async function persistViewerReviewState(successText?: string): Promise<void> {
@@ -1616,8 +1605,8 @@ async function persistViewerReviewState(successText?: string): Promise<void> {
     archive: response.archive,
     notes: viewerState.notesValue
   };
-  viewerState.timeline = buildTimeline(response.archive);
-  viewerState.mergeGroups = response.archive.annotations.filter((annotation): annotation is ActionMergeGroup => annotation.kind === "merge-group");
+  viewerState.timeline = deriveTimeline(response.archive);
+  viewerState.mergeGroups = getArchiveMergeGroups(response.archive);
   renderViewerTimeline();
   renderViewerNetworkDetail();
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { applyArchiveToViewerCore, createSessionArchive, createSessionDraft, createViewerCoreState, resetViewerCoreState, sessionArchiveSchema, type ViewerCoreState, type SessionEvent } from "@jittle-lamp/shared";
+import { createSessionArchive, createSessionDraft, sessionArchiveSchema, type SessionEvent } from "@jittle-lamp/shared";
+import { applyArchiveToViewerCore, createViewerCoreState, resetViewerCoreState, type ViewerCoreState } from "@jittle-lamp/viewer-core";
 
 const NOW = "2024-06-01T12:00:00.000Z";
 

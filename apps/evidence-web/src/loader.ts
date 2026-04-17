@@ -1,5 +1,6 @@
 import { unzipSync } from "fflate";
-import { buildTimeline, sessionArchiveSchema, type ActionMergeGroup, type SessionArchive, type TimelineItem } from "@jittle-lamp/shared";
+import { sessionArchiveSchema, type ActionMergeGroup, type SessionArchive, type TimelineItem } from "@jittle-lamp/shared";
+import { deriveTimeline, getArchiveMergeGroups } from "@jittle-lamp/viewer-core";
 
 export type LoadedSession = {
   archive: SessionArchive;
@@ -37,7 +38,7 @@ export async function loadSessionZip(file: File): Promise<LoadedSession> {
     archive,
     videoUrl,
     recordingBytes: Uint8Array.from(webmData),
-    timeline: buildTimeline(archive),
-    mergeGroups: (archive.annotations ?? []).filter((a): a is ActionMergeGroup => a.kind === "merge-group")
+    timeline: deriveTimeline(archive),
+    mergeGroups: getArchiveMergeGroups(archive)
   };
 }
