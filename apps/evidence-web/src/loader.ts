@@ -1,5 +1,12 @@
 import { unzipSync } from "fflate";
-import { sessionArchiveSchema, type ActionMergeGroup, type SessionArchive, type TimelineItem } from "@jittle-lamp/shared";
+import {
+  parseSessionArchiveJson,
+  pickSessionBundleFiles,
+  type ActionMergeGroup,
+  type SessionArchive,
+  type SessionLoader,
+  type TimelineItem
+} from "@jittle-lamp/shared";
 import { deriveTimeline, getArchiveMergeGroups } from "@jittle-lamp/viewer-core";
 
 export type LoadedSession = {
@@ -10,35 +17,29 @@ export type LoadedSession = {
   mergeGroups: ActionMergeGroup[];
 };
 
-export async function loadSessionZip(file: File): Promise<LoadedSession> {
-  const buffer = await file.arrayBuffer();
-  const files = unzipSync(new Uint8Array(buffer));
+export class WebSessionZipLoader implements SessionLoader<File, LoadedSession> {
+  async load(file: File): Promise<LoadedSession> {
+    const buffer = await file.arrayBuffer();
+    const files = unzipSync(new Uint8Array(buffer));
+    const { archiveJson, recordingWebm } = pickSessionBundleFiles(files);
 
-  let webmData: Uint8Array | null = null;
-  let jsonData: Uint8Array | null = null;
+    const archive = parseSessionArchiveJson(archiveJson);
 
-  for (const [path, content] of Object.entries(files)) {
-    const name = path.split("/").pop();
-    if (name === "recording.webm") webmData = content;
-    if (name === "session.archive.json") jsonData = content;
+    const recordingArtifact = archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
+    const stableBuffer = Uint8Array.from(recordingWebm).buffer;
+    const blob = new Blob([stableBuffer], { type: recordingArtifact?.mimeType || "video/webm" });
+    const videoUrl = URL.createObjectURL(blob);
+
+    return {
+      archive,
+      videoUrl,
+      recordingBytes: Uint8Array.from(recordingWebm),
+      timeline: deriveTimeline(archive),
+      mergeGroups: getArchiveMergeGroups(archive)
+    };
   }
+}
 
-  if (!jsonData) throw new Error("session.archive.json not found in ZIP.");
-  if (!webmData) throw new Error("recording.webm not found in ZIP.");
-
-  const text = new TextDecoder().decode(jsonData);
-  const archive = sessionArchiveSchema.parse(JSON.parse(text));
-
-  const recordingArtifact = archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
-  const stableBuffer = Uint8Array.from(webmData).buffer;
-  const blob = new Blob([stableBuffer], { type: recordingArtifact?.mimeType || "video/webm" });
-  const videoUrl = URL.createObjectURL(blob);
-
-  return {
-    archive,
-    videoUrl,
-    recordingBytes: Uint8Array.from(webmData),
-    timeline: deriveTimeline(archive),
-    mergeGroups: getArchiveMergeGroups(archive)
-  };
+export async function loadSessionZip(file: File): Promise<LoadedSession> {
+  return new WebSessionZipLoader().load(file);
 }
