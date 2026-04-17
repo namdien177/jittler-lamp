@@ -4,11 +4,13 @@
     "composite": true,
     "noEmit": true,
     "lib": [
-      "ES2023"
+      "ES2023",
+      "DOM"
     ],
     "types": [
       "bun-types",
-      "node"
+      "node",
+      "chrome"
     ]
   },
   "include": [
@@ -19,7 +21,8 @@
     "../apps/desktop/src/companion/sessions-db.ts",
     "../apps/desktop/src/bun/zip-import.ts",
     "../apps/evidence-web/src/archive-export.ts",
-    "../apps/extension/src/draft-storage.ts"
+    "../apps/extension/src/draft-storage.ts",
+    "../apps/extension/src/background.ts"
   ],
   "references": [
     {
