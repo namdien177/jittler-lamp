@@ -29,6 +29,8 @@ const companionServerOrigin = "http://127.0.0.1:48115";
 const companionHealthTimeoutMs = 1_200;
 const networkBodyCaptureByteLimit = 64 * 1024;
 const networkBodyFetchByteLimit = 512 * 1024;
+const pendingRecoveryTimeoutMs = 15_000;
+const pendingRecoveryAlarmPrefix = "jittle-lamp.pending-recovery.";
 
 const networkRequestsByTab = new Map<number, Map<string, NetworkRequestState>>();
 const stoppingTabIds = new Set<number>();
@@ -254,6 +256,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void queueDraftMutation(() => autoStopIfCapturedTabCloses(tabId));
 });
 
+chrome.alarms.onAlarm.addListener((alarm) => {
+  void queueDraftMutation(() => handlePendingRecoveryAlarm(alarm.name));
+});
+
 async function handleIncomingMessage(
   rawMessage: unknown,
   sender: chrome.runtime.MessageSender
@@ -378,6 +384,7 @@ async function stopRecordingSession(detail: string): Promise<void> {
 
   const processingDraft = transitionDraftPhase(currentDraft, "processing", detail);
   clearPendingRecovery(tabId);
+  await clearPendingRecoveryAlarm(tabId);
   await saveDraft(processingDraft);
 
   try {
@@ -447,6 +454,11 @@ async function handleCompletedTabUpdate(tabId: number): Promise<void> {
   const pendingRecovery = getPendingRecovery(tabId);
   const tab = await chrome.tabs.get(tabId);
 
+  if (pendingRecovery && isPendingRecoveryExpired(pendingRecovery)) {
+    await stopRecordingSession(recoveryTimeoutDetail());
+    return;
+  }
+
   if (pendingRecovery && (!tab.url || !isHttpUrl(tab.url))) {
     await stopRecordingSession(
       "Stopped recording and exported the partial session because the tab navigated away from an http(s) page while reconnecting after navigation."
@@ -485,6 +497,7 @@ async function handleCompletedTabUpdate(tabId: number): Promise<void> {
       await attachDebugger(tabId);
       await ensureContentBridge(tabId, nextDraft.sessionId);
       clearPendingRecovery(tabId);
+      await clearPendingRecoveryAlarm(tabId);
       await saveDraft(
         appendDraftEvent(nextDraft, {
           kind: "lifecycle",
@@ -889,6 +902,7 @@ async function handleDebuggerDetach(
   }
 
   markPendingRecovery(tabId, reason);
+  schedulePendingRecoveryAlarm(getPendingRecovery(tabId));
   await saveDraft(
     appendDraftEvent(draft, {
       kind: "lifecycle",
@@ -924,6 +938,90 @@ function clearPendingRecovery(tabId?: number): void {
   }
 
   activeRecoveryState = null;
+}
+
+function getPendingRecoveryAlarmName(tabId: number): string {
+  return `${pendingRecoveryAlarmPrefix}${tabId}`;
+}
+
+function getPendingRecoveryExpiryMs(recovery: PendingRecoveryState): number {
+  const startedAtMs = Date.parse(recovery.startedAt);
+
+  if (!Number.isFinite(startedAtMs)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  return startedAtMs + pendingRecoveryTimeoutMs;
+}
+
+function isPendingRecoveryExpired(recovery: PendingRecoveryState, nowMs: number = Date.now()): boolean {
+  return getPendingRecoveryExpiryMs(recovery) <= nowMs;
+}
+
+function schedulePendingRecoveryAlarm(recovery: PendingRecoveryState | null): void {
+  if (!recovery) {
+    return;
+  }
+
+  chrome.alarms.create(getPendingRecoveryAlarmName(recovery.tabId), {
+    when: Math.max(Date.now() + 1, getPendingRecoveryExpiryMs(recovery))
+  });
+}
+
+async function clearPendingRecoveryAlarm(tabId: number): Promise<void> {
+  try {
+    await chrome.alarms.clear(getPendingRecoveryAlarmName(tabId));
+  } catch (error: unknown) {
+    console.warn(errorMessage(error));
+  }
+}
+
+async function handlePendingRecoveryAlarm(alarmName: string): Promise<void> {
+  if (!alarmName.startsWith(pendingRecoveryAlarmPrefix)) {
+    return;
+  }
+
+  const tabId = Number.parseInt(alarmName.slice(pendingRecoveryAlarmPrefix.length), 10);
+
+  if (!Number.isInteger(tabId) || tabId < 0) {
+    return;
+  }
+
+  const draft = await readDraft();
+  const pendingRecovery = getPendingRecovery(tabId);
+
+  if (!draft || draft.page.tabId !== tabId || !pendingRecovery) {
+    await clearPendingRecoveryAlarm(tabId);
+    return;
+  }
+
+  if (isPendingRecoveryExpired(pendingRecovery)) {
+    await stopRecordingSession(recoveryTimeoutDetail());
+    return;
+  }
+
+  const tab = await getTabIfPresent(tabId);
+
+  if (!tab) {
+    await stopRecordingSession("Captured tab closed; exported the partial session.");
+    return;
+  }
+
+  if (tab.status === "complete") {
+    await handleCompletedTabUpdate(tabId);
+    return;
+  }
+
+  if (shouldAttemptDetachRecovery(tab)) {
+    schedulePendingRecoveryAlarm(pendingRecovery);
+    return;
+  }
+
+  await stopRecordingSession(recoveryTimeoutDetail());
+}
+
+function recoveryTimeoutDetail(): string {
+  return "Stopped recording and exported the partial session because capture could not reconnect before the recovery timeout.";
 }
 
 async function getTabIfPresent(tabId: number): Promise<chrome.tabs.Tab | null> {
@@ -1688,10 +1786,16 @@ async function saveDraft(draft: CaptureSessionDraft): Promise<void> {
 }
 
 async function clearDraft(): Promise<void> {
+  const recoveryTabId = activeRecoveryState?.tabId;
   activeDraftCache = null;
   activeDraftEventCount = 0;
   activeRecoveryState = null;
   pendingRecoveryCheckScheduled = false;
+
+  if (typeof recoveryTabId === "number") {
+    await clearPendingRecoveryAlarm(recoveryTabId);
+  }
+
   await chrome.storage.session.remove([sessionStorageKey, sessionStorageMetaKey]);
 }
 
@@ -1711,10 +1815,33 @@ function schedulePendingRecoveryCheck(tabId: number): void {
       }
 
       const tab = await getTabIfPresent(tabId);
+      const pendingRecovery = getPendingRecovery(tabId);
 
-      if (tab?.status === "complete") {
-        await handleCompletedTabUpdate(tabId);
+      if (!pendingRecovery) {
+        return;
       }
+
+      if (isPendingRecoveryExpired(pendingRecovery)) {
+        await stopRecordingSession(recoveryTimeoutDetail());
+        return;
+      }
+
+      if (!tab) {
+        await stopRecordingSession("Captured tab closed; exported the partial session.");
+        return;
+      }
+
+      if (tab.status === "complete") {
+        await handleCompletedTabUpdate(tabId);
+        return;
+      }
+
+      if (shouldAttemptDetachRecovery(tab)) {
+        schedulePendingRecoveryAlarm(pendingRecovery);
+        return;
+      }
+
+      await stopRecordingSession(recoveryTimeoutDetail());
     });
   });
 }
@@ -1926,3 +2053,43 @@ async function queueDraftMutation<T>(operation: () => Promise<T>): Promise<T> {
   );
   return nextOperation;
 }
+
+async function flushDraftMutations(): Promise<void> {
+  await queueDraftMutation(async () => undefined);
+}
+
+async function resetForTests(options?: { preserveStorage?: boolean }): Promise<void> {
+  networkRequestsByTab.clear();
+  stoppingTabIds.clear();
+  draftMutationQueue = Promise.resolve();
+  offscreenCreationPromise = null;
+  activeDraftCache = null;
+  activeDraftEventCount = 0;
+  pendingRecoveryCheckScheduled = false;
+
+  const recoveryTabId = activeRecoveryState?.tabId;
+  activeRecoveryState = null;
+
+  if (typeof recoveryTabId === "number") {
+    await clearPendingRecoveryAlarm(recoveryTabId);
+  }
+
+  if (!options?.preserveStorage) {
+    await chrome.storage.session.remove([sessionStorageKey, sessionStorageMetaKey]);
+  }
+}
+
+export const __backgroundTest = {
+  sessionStorageKey,
+  sessionStorageMetaKey,
+  pendingRecoveryTimeoutMs,
+  getPendingRecoveryAlarmName,
+  handleDebuggerDetach,
+  handleCompletedTabUpdate,
+  handlePendingRecoveryAlarm,
+  readDraft,
+  saveDraft,
+  clearDraft,
+  flushDraftMutations,
+  resetForTests
+};

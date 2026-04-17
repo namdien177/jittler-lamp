@@ -18,6 +18,7 @@ export const extensionManifest = {
     "activeTab",
     "scripting",
     "storage",
+    "alarms",
     "downloads",
     "tabCapture",
     "debugger",
