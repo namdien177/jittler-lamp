@@ -191,6 +191,23 @@ describe("findActiveIndex", () => {
     expect(findActiveIndex(items, 10000)).toBe(2);
     expect(findActiveIndex(items, 99999)).toBe(2);
   });
+
+  test("handles boundary values at exact offsets and duplicate timestamps", () => {
+    const duplicateOffsetItems = buildTimeline(
+      makeArchive([
+        makeLifecycle(T0, "recording"),
+        makeLifecycle(T0, "armed"),
+        makeLifecycle(T1, "ready")
+      ])
+    );
+
+    expect(findActiveIndex(duplicateOffsetItems, -1)).toBe(-1);
+    expect(findActiveIndex(duplicateOffsetItems, 0)).toBe(1);
+    expect(findActiveIndex(duplicateOffsetItems, 1)).toBe(1);
+    expect(findActiveIndex(duplicateOffsetItems, 4999)).toBe(1);
+    expect(findActiveIndex(duplicateOffsetItems, 5000)).toBe(2);
+    expect(findActiveIndex(duplicateOffsetItems, Number.MAX_SAFE_INTEGER)).toBe(2);
+  });
 });
 
 describe("formatOffset", () => {
