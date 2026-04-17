@@ -1,3 +1,5 @@
+import { ZodError } from "zod";
+
 import { sessionArchiveSchema, type SessionArchive } from "./session";
 
 export const sessionArchiveFileName = "session.archive.json";
@@ -23,7 +25,21 @@ export function parseSessionArchiveJson(input: string | Uint8Array): SessionArch
 
 export function safeParseSessionArchiveJson(input: string | Uint8Array): ReturnType<typeof sessionArchiveSchema.safeParse> {
   const jsonText = typeof input === "string" ? input : new TextDecoder().decode(input);
-  const raw = JSON.parse(jsonText) as unknown;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(jsonText) as unknown;
+  } catch (e) {
+    return {
+      success: false,
+      error: new ZodError([
+        {
+          code: "custom",
+          message: e instanceof Error ? e.message : "Invalid JSON",
+          path: []
+        }
+      ])
+    };
+  }
   return sessionArchiveSchema.safeParse(raw);
 }
 
