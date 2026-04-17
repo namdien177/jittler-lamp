@@ -1,7 +1,13 @@
 import { zipSync } from "fflate";
 
-import { sessionArchiveSchema } from "@jittle-lamp/shared";
-import type { ActionMergeGroup, SessionArchive } from "@jittle-lamp/shared";
+import {
+  recordingFileName,
+  sessionArchiveFileName,
+  sessionArchiveSchema,
+  type ActionMergeGroup,
+  type SessionArchive,
+  type SessionExporter
+} from "@jittle-lamp/shared";
 
 export function buildReviewedArchive(input: {
   archive: SessionArchive;
@@ -15,27 +21,35 @@ export function buildReviewedArchive(input: {
   });
 }
 
-export function buildReviewedSessionZip(input: {
+export type ReviewedSessionZipInput = {
   archive: SessionArchive;
   mergeGroups: ActionMergeGroup[];
   recordingBytes: Uint8Array;
   now?: Date;
-}): Uint8Array {
-  const archive = buildReviewedArchive(
-    input.now
-      ? {
-          archive: input.archive,
-          mergeGroups: input.mergeGroups,
-          now: input.now
-        }
-      : {
-          archive: input.archive,
-          mergeGroups: input.mergeGroups
-        }
-  );
+};
 
-  return zipSync({
-    "session.archive.json": new TextEncoder().encode(`${JSON.stringify(archive, null, 2)}\n`),
-    "recording.webm": Uint8Array.from(input.recordingBytes)
-  });
+export class WebReviewedSessionZipExporter implements SessionExporter<ReviewedSessionZipInput, Uint8Array> {
+  export(input: ReviewedSessionZipInput): Uint8Array {
+    const archive = buildReviewedArchive(
+      input.now
+        ? {
+            archive: input.archive,
+            mergeGroups: input.mergeGroups,
+            now: input.now
+          }
+        : {
+            archive: input.archive,
+            mergeGroups: input.mergeGroups
+          }
+    );
+
+    return zipSync({
+      [sessionArchiveFileName]: new TextEncoder().encode(`${JSON.stringify(archive, null, 2)}\n`),
+      [recordingFileName]: Uint8Array.from(input.recordingBytes)
+    });
+  }
+}
+
+export function buildReviewedSessionZip(input: ReviewedSessionZipInput): Uint8Array {
+  return new WebReviewedSessionZipExporter().export(input);
 }
