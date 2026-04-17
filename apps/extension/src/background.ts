@@ -37,6 +37,19 @@ let draftMutationQueue = Promise.resolve();
 let offscreenCreationPromise: Promise<void> | null = null;
 let activeDraftCache: CaptureSessionDraft | null = null;
 let activeDraftEventCount = 0;
+let activeRecoveryState: PendingRecoveryState | null = null;
+let pendingRecoveryCheckScheduled = false;
+
+type PendingRecoveryState = {
+  tabId: number;
+  startedAt: string;
+  detachReason: string;
+};
+
+type SessionStorageMeta = {
+  eventCount?: number;
+  recovery?: PendingRecoveryState;
+};
 
 type NetworkRequestState = {
   hasBaseRequest?: boolean;
@@ -364,6 +377,7 @@ async function stopRecordingSession(detail: string): Promise<void> {
   }
 
   const processingDraft = transitionDraftPhase(currentDraft, "processing", detail);
+  clearPendingRecovery(tabId);
   await saveDraft(processingDraft);
 
   try {
@@ -430,7 +444,15 @@ async function handleCompletedTabUpdate(tabId: number): Promise<void> {
     return;
   }
 
+  const pendingRecovery = getPendingRecovery(tabId);
   const tab = await chrome.tabs.get(tabId);
+
+  if (pendingRecovery && (!tab.url || !isHttpUrl(tab.url))) {
+    await stopRecordingSession(
+      "Stopped recording and exported the partial session because the tab navigated away from an http(s) page while reconnecting after navigation."
+    );
+    return;
+  }
 
   if (!tab.url || !isHttpUrl(tab.url)) {
     return;
@@ -456,6 +478,27 @@ async function handleCompletedTabUpdate(tabId: number): Promise<void> {
         }
       );
     await saveDraft(nextDraft);
+  }
+
+  if (pendingRecovery) {
+    try {
+      await attachDebugger(tabId);
+      await ensureContentBridge(tabId, nextDraft.sessionId);
+      clearPendingRecovery(tabId);
+      await saveDraft(
+        appendDraftEvent(nextDraft, {
+          kind: "lifecycle",
+          phase: "recording",
+          detail: "Resumed capture after same-tab navigation."
+        })
+      );
+      return;
+    } catch (error: unknown) {
+      await stopRecordingSession(
+        `Stopped recording and exported the partial session because capture could not reconnect after navigation: ${errorMessage(error)}`
+      );
+      return;
+    }
   }
 
   await ensureContentBridge(tabId, nextDraft.sessionId);
@@ -827,20 +870,72 @@ async function handleDebuggerDetach(
     return;
   }
 
-  await saveDraft(
-    transitionDraftPhase(
-      appendDraftEvent(draft, {
-        kind: "error",
-        message: `Debugger detached unexpectedly: ${reason}`,
-        source: "extension"
-      }),
-      "failed",
-      "Stopped recording because the Chrome debugger detached unexpectedly."
-    )
-  );
+  if (getPendingRecovery(tabId)) {
+    return;
+  }
 
-  await signalContentCaptureEnded(tabId, draft.sessionId);
-  await closeOffscreenDocumentIfPresent();
+  const tab = await getTabIfPresent(tabId);
+
+  if (!tab) {
+    await stopRecordingSession("Captured tab closed; exported the partial session.");
+    return;
+  }
+
+  if (!shouldAttemptDetachRecovery(tab)) {
+    await stopRecordingSession(
+      `Stopped recording and exported the partial session because the Chrome debugger detached unexpectedly: ${reason}.`
+    );
+    return;
+  }
+
+  markPendingRecovery(tabId, reason);
+  await saveDraft(
+    appendDraftEvent(draft, {
+      kind: "lifecycle",
+      phase: "recording",
+      detail: `Debugger detached unexpectedly (${reason}); waiting for the tab to finish loading so capture can reconnect.`
+    })
+  );
+}
+
+function markPendingRecovery(tabId: number, detachReason: string): void {
+  activeRecoveryState = {
+    tabId,
+    startedAt: new Date().toISOString(),
+    detachReason
+  };
+}
+
+function getPendingRecovery(tabId: number): PendingRecoveryState | null {
+  if (!activeRecoveryState || activeRecoveryState.tabId !== tabId) {
+    return null;
+  }
+
+  return activeRecoveryState;
+}
+
+function clearPendingRecovery(tabId?: number): void {
+  if (!activeRecoveryState) {
+    return;
+  }
+
+  if (tabId !== undefined && activeRecoveryState.tabId !== tabId) {
+    return;
+  }
+
+  activeRecoveryState = null;
+}
+
+async function getTabIfPresent(tabId: number): Promise<chrome.tabs.Tab | null> {
+  try {
+    return await chrome.tabs.get(tabId);
+  } catch {
+    return null;
+  }
+}
+
+function shouldAttemptDetachRecovery(tab: chrome.tabs.Tab): boolean {
+  return tab.status === "loading";
 }
 
 async function ensureContentBridge(tabId: number, sessionId: string): Promise<void> {
@@ -1545,6 +1640,9 @@ async function readDraft(): Promise<CaptureSessionDraft | null> {
 
   const stored = await chrome.storage.session.get([sessionStorageKey, sessionStorageMetaKey]);
   const rawDraft = stored[sessionStorageKey];
+  const meta = parseSessionStorageMeta(stored[sessionStorageMetaKey]);
+
+  activeRecoveryState = meta.recovery ?? null;
 
   if (!rawDraft) {
     return null;
@@ -1559,9 +1657,13 @@ async function readDraft(): Promise<CaptureSessionDraft | null> {
 
   activeDraftCache = parsed.data;
   activeDraftEventCount =
-    typeof stored[sessionStorageMetaKey]?.eventCount === "number"
-      ? Math.max(stored[sessionStorageMetaKey].eventCount, parsed.data.events.length)
+    typeof meta.eventCount === "number"
+      ? Math.max(meta.eventCount, parsed.data.events.length)
       : parsed.data.events.length;
+
+  if (meta.recovery && typeof parsed.data.page.tabId === "number") {
+    schedulePendingRecoveryCheck(parsed.data.page.tabId);
+  }
 
   return activeDraftCache;
 }
@@ -1576,8 +1678,9 @@ async function saveDraft(draft: CaptureSessionDraft): Promise<void> {
     await chrome.storage.session.set({
       [sessionStorageKey]: checkpoint,
       [sessionStorageMetaKey]: {
-        eventCount: draft.events.length
-      }
+        eventCount: draft.events.length,
+        ...(activeRecoveryState ? { recovery: activeRecoveryState } : {})
+      } satisfies SessionStorageMeta
     });
   } catch (error: unknown) {
     console.warn(`Unable to checkpoint active session in session storage: ${errorMessage(error)}`);
@@ -1587,7 +1690,71 @@ async function saveDraft(draft: CaptureSessionDraft): Promise<void> {
 async function clearDraft(): Promise<void> {
   activeDraftCache = null;
   activeDraftEventCount = 0;
+  activeRecoveryState = null;
+  pendingRecoveryCheckScheduled = false;
   await chrome.storage.session.remove([sessionStorageKey, sessionStorageMetaKey]);
+}
+
+function schedulePendingRecoveryCheck(tabId: number): void {
+  if (pendingRecoveryCheckScheduled) {
+    return;
+  }
+
+  pendingRecoveryCheckScheduled = true;
+  queueMicrotask(() => {
+    pendingRecoveryCheckScheduled = false;
+    void queueDraftMutation(async () => {
+      const draft = await readDraft();
+
+      if (!draft || draft.page.tabId !== tabId || !getPendingRecovery(tabId)) {
+        return;
+      }
+
+      const tab = await getTabIfPresent(tabId);
+
+      if (tab?.status === "complete") {
+        await handleCompletedTabUpdate(tabId);
+      }
+    });
+  });
+}
+
+function parseSessionStorageMeta(rawMeta: unknown): SessionStorageMeta {
+  if (!rawMeta || typeof rawMeta !== "object") {
+    return {};
+  }
+
+  const candidate = rawMeta as {
+    eventCount?: unknown;
+    recovery?: unknown;
+  };
+
+  return {
+    ...(typeof candidate.eventCount === "number" ? { eventCount: candidate.eventCount } : {}),
+    ...(isPendingRecoveryState(candidate.recovery) ? { recovery: candidate.recovery } : {})
+  };
+}
+
+function isPendingRecoveryState(value: unknown): value is PendingRecoveryState {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as {
+    tabId?: unknown;
+    startedAt?: unknown;
+    detachReason?: unknown;
+  };
+
+  return (
+    typeof candidate.tabId === "number" &&
+    Number.isInteger(candidate.tabId) &&
+    candidate.tabId >= 0 &&
+    typeof candidate.startedAt === "string" &&
+    candidate.startedAt.length > 0 &&
+    typeof candidate.detachReason === "string" &&
+    candidate.detachReason.length > 0
+  );
 }
 
 async function buildPopupResponse(ok: boolean, error?: string): Promise<PopupResponse> {
