@@ -1,4 +1,4 @@
-import { applyArchiveToViewerCore, createViewerCoreState, resetViewerCoreState, type ViewerCoreState } from "@jittle-lamp/shared";
+import { applyArchiveToViewerCore, createViewerCoreState, resetViewerCoreState, type ViewerCoreState } from "@jittle-lamp/viewer-core";
 
 import type { ViewerPayload } from "../rpc";
 

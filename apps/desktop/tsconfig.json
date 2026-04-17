@@ -19,6 +19,11 @@
     "src/**/*.ts"
   ],
   "references": [
-    { "path": "../../packages/shared" }
+    {
+      "path": "../../packages/shared"
+    },
+    {
+      "path": "../../packages/viewer-core"
+    }
   ]
 }

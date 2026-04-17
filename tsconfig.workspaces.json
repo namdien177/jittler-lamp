@@ -5,6 +5,9 @@
       "path": "./packages/shared"
     },
     {
+      "path": "./packages/viewer-core"
+    },
+    {
       "path": "./apps/extension"
     },
     {

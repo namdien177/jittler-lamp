@@ -1,4 +1,5 @@
-import { buildVisibleActionRangeSelection, getContiguousMergeableActionIds, type ActionMergeGroup, type SessionArchive, type TimelineSection } from "@jittle-lamp/shared";
+import type { SessionArchive, TimelineSection } from "@jittle-lamp/shared";
+import { createMergeGroup, getContiguousMergeableSelection, openMergeDialog as openMergeDialogState, closeMergeDialog as closeMergeDialogState, selectActionRange, selectSingleAction, toggleActionSelection, validateMergeDialog, reduceViewerPhase } from "@jittle-lamp/viewer-core";
 
 import { buildReviewedArchive, buildReviewedSessionZip } from "./archive-export";
 import { loadSessionZip } from "./loader";
@@ -26,8 +27,9 @@ export function init(): void {
 async function handleFile(file: File): Promise<void> {
   if (state.phase === "loading") return;
 
-  state.phase = "loading";
-  state.error = null;
+  const nextPhase = reduceViewerPhase(state, { type: "load:start" });
+  state.phase = nextPhase.phase;
+  state.error = nextPhase.error;
   renderApp();
 
   try {
@@ -50,11 +52,13 @@ async function handleFile(file: File): Promise<void> {
     state.selectedActionIds = new Set();
     state.anchorActionId = null;
     state.mergeGroups = loaded.mergeGroups;
-    state.phase = "viewing";
+    state.phase = reduceViewerPhase(state, { type: "load:success" }).phase;
     state.feedback = null;
   } catch (err) {
-    state.phase = "error";
-    state.error = err instanceof Error ? err.message : String(err);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const nextPhase = reduceViewerPhase(state, { type: "load:error", error: errorMessage });
+    state.phase = nextPhase.phase;
+    state.error = nextPhase.error;
   }
 
   renderApp();
@@ -203,22 +207,25 @@ function bindDelegatedEvents(): void {
       if (section === "actions") {
         if (event.metaKey || event.ctrlKey) {
           if (!itemId) return;
-          const next = new Set(state.selectedActionIds);
-          if (next.has(itemId)) {
-            next.delete(itemId);
-          } else {
-            next.add(itemId);
-            state.anchorActionId = itemId;
-          }
-          state.selectedActionIds = next;
+          const selection = toggleActionSelection(
+            { selectedActionIds: state.selectedActionIds, anchorActionId: state.anchorActionId },
+            itemId
+          );
+          state.selectedActionIds = selection.selectedActionIds;
+          state.anchorActionId = selection.anchorActionId;
           btn.dataset.selected = state.selectedActionIds.has(itemId) ? "true" : "false";
           return;
         }
 
         if (event.shiftKey && state.anchorActionId && itemId && state.archive) {
-          const rangeIds = buildVisibleActionRangeSelection(state.archive, state.mergeGroups, state.anchorActionId, itemId);
-          if (rangeIds.length > 0) {
-            state.selectedActionIds = new Set(rangeIds);
+          const selection = selectActionRange(
+            state.archive,
+            state.mergeGroups,
+            { selectedActionIds: state.selectedActionIds, anchorActionId: state.anchorActionId },
+            itemId
+          );
+          if (selection.selectedActionIds.size > 0) {
+            state.selectedActionIds = selection.selectedActionIds;
             appRoot.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item'][data-section='actions']").forEach((b) => {
               const bid = b.dataset.itemId;
               if (bid) b.dataset.selected = state.selectedActionIds.has(bid) ? "true" : "false";
@@ -228,8 +235,9 @@ function bindDelegatedEvents(): void {
         }
 
         if (itemId) {
-          state.selectedActionIds = new Set([itemId]);
-          state.anchorActionId = itemId;
+          const selection = selectSingleAction(itemId);
+          state.selectedActionIds = selection.selectedActionIds;
+          state.anchorActionId = selection.anchorActionId;
           appRoot.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item'][data-section='actions']").forEach((b) => {
             b.dataset.selected = b.dataset.itemId === itemId ? "true" : "false";
           });
@@ -286,8 +294,9 @@ function bindDelegatedEvents(): void {
     if (!itemId) return;
 
     if (!state.selectedActionIds.has(itemId)) {
-      state.selectedActionIds = new Set([itemId]);
-      state.anchorActionId = itemId;
+      const selection = selectSingleAction(itemId);
+      state.selectedActionIds = selection.selectedActionIds;
+      state.anchorActionId = selection.anchorActionId;
       appRoot.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item'][data-section='actions']").forEach((b) => {
         b.dataset.selected = b.dataset.itemId === itemId ? "true" : "false";
       });
@@ -428,10 +437,7 @@ function hideContextMenu(): void {
 }
 
 function openMergeDialog(selectedActionIds: string[]): void {
-  state.pendingMergeActionIds = selectedActionIds;
-  state.mergeDialogValue = `Merged ${selectedActionIds.length} actions`;
-  state.mergeDialogError = null;
-  state.mergeDialogOpen = true;
+  openMergeDialogState(state, selectedActionIds);
   renderApp();
   if (videoEl) {
     updateTimelineHighlight(state, appRoot, videoEl, scrollState);
@@ -439,10 +445,7 @@ function openMergeDialog(selectedActionIds: string[]): void {
 }
 
 function closeMergeDialog(): void {
-  state.mergeDialogOpen = false;
-  state.mergeDialogValue = "";
-  state.mergeDialogError = null;
-  state.pendingMergeActionIds = [];
+  closeMergeDialogState(state);
   renderApp();
   if (videoEl) {
     updateTimelineHighlight(state, appRoot, videoEl, scrollState);
@@ -450,9 +453,9 @@ function closeMergeDialog(): void {
 }
 
 function submitMergeDialog(): void {
-  const selectedIds = state.pendingMergeActionIds;
-  if (selectedIds.length < 2) {
-    state.mergeDialogError = "Select at least two actions before merging.";
+  const validation = validateMergeDialog(state);
+  if (!validation.ok) {
+    state.mergeDialogError = validation.error;
     renderApp();
     if (videoEl) {
       updateTimelineHighlight(state, appRoot, videoEl, scrollState);
@@ -460,32 +463,17 @@ function submitMergeDialog(): void {
     return;
   }
 
-  const label = state.mergeDialogValue.trim();
-  if (!label) {
-    state.mergeDialogError = "Enter a name for the merged action.";
-    renderApp();
-    if (videoEl) {
-      updateTimelineHighlight(state, appRoot, videoEl, scrollState);
-    }
-    return;
-  }
-
-  const newGroup: ActionMergeGroup = {
+  const newGroup = createMergeGroup({
     id: `merge-${Date.now()}`,
-    kind: "merge-group",
-    memberIds: selectedIds,
-    tags: [],
-    label,
-    createdAt: new Date().toISOString()
-  };
+    createdAt: new Date().toISOString(),
+    label: validation.label,
+    selectedActionIds: validation.selectedActionIds
+  });
   state.mergeGroups = [...state.mergeGroups, newGroup];
   state.archive = getReviewedArchive();
   state.selectedActionIds = new Set();
   state.anchorActionId = null;
-  state.mergeDialogOpen = false;
-  state.mergeDialogValue = "";
-  state.mergeDialogError = null;
-  state.pendingMergeActionIds = [];
+  closeMergeDialogState(state);
   renderApp();
   if (videoEl) {
     updateTimelineHighlight(state, appRoot, videoEl, scrollState);
@@ -514,7 +502,7 @@ function getSelectedMergeableActionIds(): string[] {
     return [];
   }
 
-  return getContiguousMergeableActionIds(state.archive, state.mergeGroups, state.selectedActionIds);
+  return getContiguousMergeableSelection(state.archive, state.mergeGroups, state.selectedActionIds);
 }
 
 function getReviewedArchive(): SessionArchive | null {

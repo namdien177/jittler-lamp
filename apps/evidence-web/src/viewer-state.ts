@@ -1,7 +1,7 @@
-import { createViewerCoreState, resetViewerCoreState, type SessionArchive, type ViewerCoreState } from "@jittle-lamp/shared";
+import { createViewerCoreState, resetViewerCoreState, type AppPhase, type ViewerCoreState } from "@jittle-lamp/viewer-core";
+import type { SessionArchive } from "@jittle-lamp/shared";
 
 export type FeedbackTone = "neutral" | "success" | "error";
-export type AppPhase = "idle" | "loading" | "error" | "viewing";
 
 export type AppState = ViewerCoreState & {
   phase: AppPhase;

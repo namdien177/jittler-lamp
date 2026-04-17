@@ -23,6 +23,9 @@
       ],
       "electrobun/bun": [
         "types/electrobun-bun.d.ts"
+      ],
+      "@jittle-lamp/viewer-core": [
+        "packages/viewer-core/src/index.ts"
       ]
     }
   }

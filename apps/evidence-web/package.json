@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@jittle-lamp/shared": "workspace:*",
+    "@jittle-lamp/viewer-core": "workspace:*",
     "fflate": "^0.8.2"
   }
 }
