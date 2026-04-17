@@ -1,61 +1,14 @@
-import { Electroview } from "electrobun/view";
+import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, SessionRecord, ViewerPayload } from "../rpc";
+import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "@jittle-lamp/shared";
+import type { ActionMergeGroup, NetworkSubtype, TimelineSection } from "@jittle-lamp/shared";
+import { createDesktopBridge } from "./desktop-bridge";
+import { filterSessions, formatRuntimeLabel, formatSourceLabel, isDatePreset, renderInlineTagAutocompleteHtml, renderSessionsHtml, renderTagAutocompleteHtml, renderTagFilterHtml, type DatePreset } from "./catalog-view";
+import { escapeHtml, formatBytes, formatErrorMessage, formatRelativeTime, queryRequiredElement } from "./utils";
+import { collectViewerVideoDiagnostics, createViewerVideoState, loadViewerVideoSource, recordViewerVideoEvent, resetViewerVideoDiagnostics } from "./viewer-video";
+import { applyViewerPayload, createViewerState, resetViewerState, type ViewerState } from "./viewer-state";
+import { canEditViewerNotes, getViewerReadOnlyNotice, getViewerSourceLabel, shouldClearViewerTempSession, shouldPersistViewerReviewState } from "./viewer-source";
 
-import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, DesktopRPC, SessionRecord, ViewerPayload } from "../rpc";
-import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "./timeline";
-import type { TimelineItem, TimelineSection } from "./timeline";
-import type { ActionMergeGroup, ArchiveAnnotation, NetworkSubtype } from "@jittle-lamp/shared";
-
-type DesktopBridge = {
-  rpc: {
-    request: {
-      addSessionTag(params: { sessionId: string; tag: string }): Promise<{ ok: true }>;
-      chooseOutputDirectory(params: { startingFolder: string }): Promise<{ selectedPath: string | null }>;
-      clearTempSession(params: { tempId: string }): Promise<{ ok: true }>;
-      deleteSession(params: { sessionId: string }): Promise<{ ok: true }>;
-      exitApp(params: undefined): Promise<{ ok: true }>;
-      getCompanionConfig(params: undefined): Promise<DesktopCompanionConfigSnapshot>;
-      getCompanionRuntime(params: undefined): Promise<DesktopCompanionRuntimeSnapshot>;
-      exportSessionZip(params: { sessionId: string }): Promise<{ savedPath: string }>;
-      getVideoPlaybackUrl(params: { videoPath: string; mimeType: string }): Promise<{ url: string }>;
-      importZipSession(params: undefined): Promise<ViewerPayload>;
-      listAllTags(params: undefined): Promise<string[]>;
-      openLocalSession(params: undefined): Promise<ViewerPayload>;
-      listSessions(params: undefined): Promise<SessionRecord[]>;
-      loadLibrarySession(params: { sessionId: string }): Promise<ViewerPayload>;
-      openPath(params: { path: string }): Promise<{ ok: true }>;
-      removeSessionTag(params: { sessionId: string; tag: string }): Promise<{ ok: true }>;
-      saveOutputDirectory(params: { outputDir: string }): Promise<DesktopCompanionConfigSnapshot>;
-      setSessionNotes(params: { sessionId: string; notes: string }): Promise<{ ok: true }>;
-      saveSessionReviewState(params: { sessionId: string; notes: string; annotations: ArchiveAnnotation[] }): Promise<{ ok: true; archive: ViewerPayload["archive"] }>;
-    };
-  };
-};
-
-type DatePreset = "today" | "week" | "month" | "all";
 type FeedbackTone = "neutral" | "success" | "error";
-
-type ViewerState = {
-  open: boolean;
-  payload: ViewerPayload | null;
-  timeline: TimelineItem[];
-  activeIndex: number;
-  networkDetailIndex: number | null;
-  networkSearchQuery: string;
-  mergeDialogOpen: boolean;
-  mergeDialogValue: string;
-  mergeDialogError: string | null;
-  pendingMergeActionIds: string[];
-  notesValue: string;
-  notesSaving: boolean;
-  notesDirty: boolean;
-  isOpening: boolean;
-  activeSection: TimelineSection;
-  networkSubtypeFilter: NetworkSubtype | "all";
-  autoFollow: boolean;
-  selectedActionIds: Set<string>;
-  anchorActionId: string | null;
-  mergeGroups: ActionMergeGroup[];
-};
 
 type ViewState = {
   bridgeError: string | null;
@@ -76,80 +29,13 @@ type ViewState = {
   isSaving: boolean;
 };
 
-type MediaAttemptKind = "media-url";
-
-type VideoEventLogEntry = {
-  event: string;
-  at: string;
-  networkState: number;
-  readyState: number;
-  currentTime: number;
-  currentSrcKind: string;
-};
-
-type VideoLoadAttempt = {
-  videoPath: string;
-  mimeType: string;
-  source: ViewerPayload["source"] | "unknown";
-  attemptKind: MediaAttemptKind;
-  loadVersion: number;
-};
-
-type VideoDiagnostics = {
-  reason: string;
-  requestedMimeType: string | null;
-  canPlayRequestedType: string;
-  canPlayWebm: string;
-  canPlayVp8: string;
-  canPlayVp9: string;
-  lastAttempt: VideoLoadAttempt | null;
-  error: {
-    code: number | null;
-    codeLabel: string;
-    message: string | null;
-  };
-  networkState: number;
-  readyState: number;
-  currentTime: number;
-  duration: number | null;
-  paused: boolean;
-  ended: boolean;
-  src: string | null;
-  currentSrc: string;
-  currentSrcKind: string;
-  recentEvents: VideoEventLogEntry[];
-};
-
 const runtimePollIntervalMs = 2_000;
 const desktopBridge = createDesktopBridge();
 let pendingDeleteTimer: ReturnType<typeof setTimeout> | null = null;
-let viewerVideoLoadVersion = 0;
-let viewerVideoEventLog: VideoEventLogEntry[] = [];
-let lastVideoLoadAttempt: VideoLoadAttempt | null = null;
+const viewerVideoState = createViewerVideoState();
 let isAutoScrolling = false;
 
-const viewerState: ViewerState = {
-  open: false,
-  payload: null,
-  timeline: [],
-  activeIndex: -1,
-  networkDetailIndex: null,
-  networkSearchQuery: "",
-  mergeDialogOpen: false,
-  mergeDialogValue: "",
-  mergeDialogError: null,
-  pendingMergeActionIds: [],
-  notesValue: "",
-  notesSaving: false,
-  notesDirty: false,
-  isOpening: false,
-  activeSection: "actions",
-  networkSubtypeFilter: "all",
-  autoFollow: true,
-  selectedActionIds: new Set(),
-  anchorActionId: null,
-  mergeGroups: []
-};
+const viewerState: ViewerState = createViewerState();
 
 const state: ViewState = {
   bridgeError: null,
@@ -338,56 +224,56 @@ appRoot.innerHTML = `
   </div>
 `;
 
-const runtimePill = queryElement<HTMLSpanElement>("[data-role='runtime-pill']");
-const outputPath = queryElement<HTMLSpanElement>("[data-role='output-path']");
-const gearBtn = queryElement<HTMLButtonElement>("[data-role='gear-btn']");
-const importZipBtn = queryElement<HTMLButtonElement>("[data-role='import-zip-btn']");
-const openLocalBtn = queryElement<HTMLButtonElement>("[data-role='open-local-btn']");
-const tagFilterWrapper = queryElement<HTMLDivElement>("[data-role='tag-filter-wrapper']");
-const resultsCount = queryElement<HTMLSpanElement>("[data-role='results-count']");
-const feedback = queryElement<HTMLDivElement>("[data-role='feedback']");
-const sessionsScroll = queryElement<HTMLDivElement>("[data-role='sessions-scroll']");
-const drawerOverlay = queryElement<HTMLDivElement>("[data-role='drawer-overlay']");
-const settingsDrawer = queryElement<HTMLDivElement>("[data-role='settings-drawer']");
-const drawerClose = queryElement<HTMLButtonElement>("[data-role='drawer-close']");
-const currentOutputDir = queryElement<HTMLDivElement>("[data-role='current-output-dir']");
-const effectiveSummary = queryElement<HTMLParagraphElement>("[data-role='effective-summary']");
-const envOverrideWarning = queryElement<HTMLDivElement>("[data-role='env-override-warning']");
-const outputDirField = queryElement<HTMLInputElement>("[data-role='output-dir-field']");
-const chooseButton = queryElement<HTMLButtonElement>("[data-role='choose-button']");
-const saveButton = queryElement<HTMLButtonElement>("[data-role='save-button']");
-const openOutputButton = queryElement<HTMLButtonElement>("[data-role='open-output-button']");
-const openConfigButton = queryElement<HTMLButtonElement>("[data-role='open-config-button']");
-const detailSource = queryElement<HTMLElement>("[data-role='detail-source']");
-const detailSavedOutput = queryElement<HTMLElement>("[data-role='detail-saved-output']");
-const detailDefaultOutput = queryElement<HTMLElement>("[data-role='detail-default-output']");
-const detailConfigPath = queryElement<HTMLElement>("[data-role='detail-config-path']");
+const runtimePill = queryRequiredElement<HTMLSpanElement>(appRoot, "[data-role='runtime-pill']");
+const outputPath = queryRequiredElement<HTMLSpanElement>(appRoot, "[data-role='output-path']");
+const gearBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='gear-btn']");
+const importZipBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='import-zip-btn']");
+const openLocalBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='open-local-btn']");
+const tagFilterWrapper = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='tag-filter-wrapper']");
+const resultsCount = queryRequiredElement<HTMLSpanElement>(appRoot, "[data-role='results-count']");
+const feedback = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='feedback']");
+const sessionsScroll = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='sessions-scroll']");
+const drawerOverlay = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='drawer-overlay']");
+const settingsDrawer = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='settings-drawer']");
+const drawerClose = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='drawer-close']");
+const currentOutputDir = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='current-output-dir']");
+const effectiveSummary = queryRequiredElement<HTMLParagraphElement>(appRoot, "[data-role='effective-summary']");
+const envOverrideWarning = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='env-override-warning']");
+const outputDirField = queryRequiredElement<HTMLInputElement>(appRoot, "[data-role='output-dir-field']");
+const chooseButton = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='choose-button']");
+const saveButton = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='save-button']");
+const openOutputButton = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='open-output-button']");
+const openConfigButton = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='open-config-button']");
+const detailSource = queryRequiredElement<HTMLElement>(appRoot, "[data-role='detail-source']");
+const detailSavedOutput = queryRequiredElement<HTMLElement>(appRoot, "[data-role='detail-saved-output']");
+const detailDefaultOutput = queryRequiredElement<HTMLElement>(appRoot, "[data-role='detail-default-output']");
+const detailConfigPath = queryRequiredElement<HTMLElement>(appRoot, "[data-role='detail-config-path']");
 
-const viewerOverlay = queryElement<HTMLDivElement>("[data-role='viewer-overlay']");
-const viewerClose = queryElement<HTMLButtonElement>("[data-role='viewer-close']");
-const viewerTitle = queryElement<HTMLSpanElement>("[data-role='viewer-title']");
-const viewerSourceBadge = queryElement<HTMLSpanElement>("[data-role='viewer-source-badge']");
-const viewerVideo = queryElement<HTMLVideoElement>("[data-role='viewer-video']");
-const viewerTimeline = queryElement<HTMLDivElement>("[data-role='viewer-timeline']");
-const viewerZipNotice = queryElement<HTMLDivElement>("[data-role='viewer-zip-notice']");
-const viewerNotesTextarea = queryElement<HTMLTextAreaElement>("[data-role='viewer-notes-textarea']");
-const viewerNotesSave = queryElement<HTMLButtonElement>("[data-role='viewer-notes-save']");
-const viewerNetworkDetail = queryElement<HTMLDivElement>("[data-role='viewer-network-detail']");
-const viewerDetailClose = queryElement<HTMLButtonElement>("[data-role='viewer-detail-close']");
-const viewerNetworkDetailBody = queryElement<HTMLDivElement>("[data-role='viewer-network-detail-body']");
-const viewerSectionTabs = queryElement<HTMLDivElement>("[data-role='viewer-section-tabs']");
-const viewerNetworkFilter = queryElement<HTMLDivElement>("[data-role='viewer-network-filter']");
-const viewerSectionBody = queryElement<HTMLDivElement>("[data-role='viewer-section-body']");
-const viewerFocusBtn = queryElement<HTMLButtonElement>("[data-role='viewer-focus-btn']");
-const viewerContextMenu = queryElement<HTMLDivElement>("[data-role='viewer-context-menu']");
-const ctxMergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-merge']");
-const ctxUnmergeBtn = queryElement<HTMLButtonElement>("[data-role='ctx-unmerge']");
-const viewerNetworkSearch = queryElement<HTMLInputElement>("[data-role='network-search']");
-const viewerMergeDialogBackdrop = queryElement<HTMLDivElement>("[data-role='viewer-merge-dialog-backdrop']");
-const viewerMergeDialogInput = queryElement<HTMLInputElement>("[data-role='viewer-merge-dialog-input']");
-const viewerMergeDialogError = queryElement<HTMLDivElement>("[data-role='viewer-merge-dialog-error']");
-const viewerMergeDialogCancel = queryElement<HTMLButtonElement>("[data-role='viewer-merge-dialog-cancel']");
-const viewerMergeDialogConfirm = queryElement<HTMLButtonElement>("[data-role='viewer-merge-dialog-confirm']");
+const viewerOverlay = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-overlay']");
+const viewerClose = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-close']");
+const viewerTitle = queryRequiredElement<HTMLSpanElement>(appRoot, "[data-role='viewer-title']");
+const viewerSourceBadge = queryRequiredElement<HTMLSpanElement>(appRoot, "[data-role='viewer-source-badge']");
+const viewerVideo = queryRequiredElement<HTMLVideoElement>(appRoot, "[data-role='viewer-video']");
+const viewerTimeline = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-timeline']");
+const viewerZipNotice = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-zip-notice']");
+const viewerNotesTextarea = queryRequiredElement<HTMLTextAreaElement>(appRoot, "[data-role='viewer-notes-textarea']");
+const viewerNotesSave = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-notes-save']");
+const viewerNetworkDetail = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-network-detail']");
+const viewerDetailClose = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-detail-close']");
+const viewerNetworkDetailBody = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-network-detail-body']");
+const viewerSectionTabs = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-section-tabs']");
+const viewerNetworkFilter = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-network-filter']");
+const viewerSectionBody = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-section-body']");
+const viewerFocusBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-focus-btn']");
+const viewerContextMenu = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-context-menu']");
+const ctxMergeBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='ctx-merge']");
+const ctxUnmergeBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='ctx-unmerge']");
+const viewerNetworkSearch = queryRequiredElement<HTMLInputElement>(appRoot, "[data-role='network-search']");
+const viewerMergeDialogBackdrop = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-merge-dialog-backdrop']");
+const viewerMergeDialogInput = queryRequiredElement<HTMLInputElement>(appRoot, "[data-role='viewer-merge-dialog-input']");
+const viewerMergeDialogError = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-merge-dialog-error']");
+const viewerMergeDialogCancel = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-merge-dialog-cancel']");
+const viewerMergeDialogConfirm = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-merge-dialog-confirm']");
 
 let contextTargetId: string | null = null;
 
@@ -500,12 +386,12 @@ for (const mediaEventName of [
   "error"
 ] as const) {
   viewerVideo.addEventListener(mediaEventName, () => {
-    recordViewerVideoEvent(mediaEventName);
+    recordViewerVideoEvent(viewerVideo, viewerVideoState, mediaEventName);
   });
 }
 
 viewerVideo.addEventListener("error", () => {
-  const diagnostics = collectViewerVideoDiagnostics("error-event");
+  const diagnostics = collectViewerVideoDiagnostics(viewerVideo, viewerVideoState, "error-event");
 
   console.error("[jittle-lamp][viewer-video] playback failed", diagnostics);
 
@@ -906,31 +792,12 @@ function render(): void {
 }
 
 function renderTagFilterWrapper(): void {
-  if (state.tagFilter !== null) {
-    tagFilterWrapper.innerHTML = `
-      <span class="active-tag-chip">
-        ${escapeHtml(state.tagFilter)}
-        <button class="tag-chip-remove" type="button" data-role="tag-filter-remove" aria-label="Remove tag filter">✕</button>
-      </span>
-    `;
-    return;
-  }
-
   const existingInput = tagFilterWrapper.querySelector<HTMLInputElement>("[data-role='tag-filter-input']");
-  if (existingInput) {
+  if (state.tagFilter === null && existingInput) {
     return;
   }
 
-  tagFilterWrapper.innerHTML = `
-    <input
-      class="tag-filter-input"
-      type="text"
-      placeholder="Filter by tag…"
-      data-role="tag-filter-input"
-      autocomplete="off"
-    />
-    <div class="tag-autocomplete" data-role="tag-filter-autocomplete" hidden></div>
-  `;
+  tagFilterWrapper.innerHTML = renderTagFilterHtml(state.tagFilter, escapeHtml);
 }
 
 function updateTagFilterAutocomplete(value: string): void {
@@ -952,12 +819,7 @@ function updateTagFilterAutocomplete(value: string): void {
   }
 
   autocomplete.hidden = false;
-  autocomplete.innerHTML = matches
-    .map(
-      (t) =>
-        `<button class="tag-option" type="button" data-role="tag-filter-option" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`
-    )
-    .join("");
+  autocomplete.innerHTML = renderTagAutocompleteHtml(matches, escapeHtml);
 
   autocomplete.querySelectorAll<HTMLButtonElement>("[data-role='tag-filter-option']").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -970,78 +832,15 @@ function updateTagFilterAutocomplete(value: string): void {
 }
 
 function renderSessions(filtered: SessionRecord[]): void {
-  if (filtered.length === 0) {
-    sessionsScroll.innerHTML = `
-      <div class="empty-state">
-        <span>No sessions found.</span>
-        <span class="empty-hint">Start a browser recording with the extension to populate this list.</span>
-      </div>
-    `;
-    return;
-  }
-
-  sessionsScroll.innerHTML = filtered
-    .map((session) => {
-      const shortId =
-        session.sessionId.length > 24
-          ? `${session.sessionId.slice(0, 10)}…${session.sessionId.slice(-8)}`
-          : session.sessionId;
-
-      const hasWebm = session.artifacts.some((a) => a.artifactName === "recording.webm");
-      const hasJson = session.artifacts.some((a) => a.artifactName === "session.archive.json");
-      const isPending = state.pendingDeleteId === session.sessionId;
-      const isEditing = state.editingTagSessionId === session.sessionId;
-
-      const tagChips = session.tags
-        .map(
-          (tag) =>
-            `<span class="tag-chip">${escapeHtml(tag)}<button class="tag-chip-x" type="button" data-role="tag-chip-x" data-session-id="${escapeHtml(session.sessionId)}" data-tag="${escapeHtml(tag)}" aria-label="Remove tag ${escapeHtml(tag)}">✕</button></span>`
-        )
-        .join("");
-
-      const tagEditor = isEditing
-        ? `<div class="tag-editor-wrap">
-            <input
-              class="tag-input-inline"
-              type="text"
-              data-role="tag-input-inline"
-              data-session-id="${escapeHtml(session.sessionId)}"
-              value="${escapeHtml(state.tagInputValue)}"
-              placeholder="tag name"
-              autocomplete="off"
-            />
-            <div class="tag-autocomplete" data-role="tag-inline-autocomplete" data-session-id="${escapeHtml(session.sessionId)}" hidden></div>
-          </div>`
-        : `<button class="tag-add-btn" type="button" data-role="tag-add-btn" data-session-id="${escapeHtml(session.sessionId)}">+ tag</button>`;
-
-      return `
-        <article class="session-card">
-          <div class="session-head">
-            <span class="session-id" title="${escapeHtml(session.sessionId)}">${escapeHtml(shortId)}</span>
-            <span class="session-time">${escapeHtml(formatRelativeTime(session.recordedAt))}</span>
-          </div>
-          <div class="session-artifacts">
-            <span class="artifact-tag ${hasWebm ? "artifact-present" : "artifact-missing"}">webm</span>
-            <span class="artifact-tag ${hasJson ? "artifact-present" : "artifact-missing"}">json</span>
-            <span class="session-size">${escapeHtml(formatBytes(session.totalBytes))}</span>
-          </div>
-          <div class="session-tags">
-            ${tagChips}
-            ${tagEditor}
-          </div>
-          <p class="session-path">${escapeHtml(session.sessionFolder)}</p>
-          <div class="session-actions">
-            <button class="button ghost sm" type="button" data-role="session-view-btn" data-session-id="${escapeHtml(session.sessionId)}">View</button>
-            <button class="button ghost sm" type="button" data-role="session-open-btn" data-session-id="${escapeHtml(session.sessionId)}">Open</button>
-            <button class="button ghost sm" type="button" data-role="session-zip-btn" data-session-id="${escapeHtml(session.sessionId)}">ZIP</button>
-            <button class="button ghost sm${isPending ? " session-delete-confirm" : ""}" type="button" data-role="session-delete-btn" data-session-id="${escapeHtml(session.sessionId)}">
-              ${isPending ? "Confirm?" : "Delete"}
-            </button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+  sessionsScroll.innerHTML = renderSessionsHtml({
+    sessions: filtered,
+    pendingDeleteId: state.pendingDeleteId,
+    editingTagSessionId: state.editingTagSessionId,
+    tagInputValue: state.tagInputValue,
+    escapeHtml,
+    formatRelativeTime,
+    formatBytes
+  });
 
   if (isEditing()) {
     const sessionId = state.editingTagSessionId;
@@ -1087,42 +886,15 @@ function updateInlineTagAutocomplete(sessionId: string, value: string): void {
   }
 
   autocomplete.hidden = false;
-  autocomplete.innerHTML = matches
-    .map(
-      (t) =>
-        `<button class="tag-option" type="button" data-role="tag-inline-option" data-session-id="${escapeHtml(sessionId)}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`
-    )
-    .join("");
+  autocomplete.innerHTML = renderInlineTagAutocompleteHtml({ sessionId, tags: matches, escapeHtml });
 }
 
 function getFilteredSessions(): SessionRecord[] {
-  const now = Date.now();
-  const dayMs = 86_400_000;
-
-  return state.sessions.filter((session) => {
-    if (state.tagFilter !== null) {
-      if (!session.tags.includes(state.tagFilter)) return false;
-    }
-
-    if (state.dateFilter !== "all") {
-      const recordedAt = new Date(session.recordedAt).getTime();
-      if (Number.isNaN(recordedAt)) return false;
-
-      if (state.dateFilter === "today") {
-        if (now - recordedAt > dayMs) return false;
-      } else if (state.dateFilter === "week") {
-        if (now - recordedAt > 7 * dayMs) return false;
-      } else if (state.dateFilter === "month") {
-        if (now - recordedAt > 30 * dayMs) return false;
-      }
-    }
-
-    return true;
+  return filterSessions({
+    sessions: state.sessions,
+    tagFilter: state.tagFilter,
+    dateFilter: state.dateFilter
   });
-}
-
-function isDatePreset(value: string | undefined): value is DatePreset {
-  return value === "today" || value === "week" || value === "month" || value === "all";
 }
 
 function openDrawer(): void {
@@ -1397,31 +1169,14 @@ async function handleViewSession(sessionId: string): Promise<void> {
 
 function openViewer(payload: ViewerPayload): void {
   const previousPayload = viewerState.payload;
-  if (previousPayload?.source === "zip" && previousPayload.tempId !== undefined && desktopBridge) {
-    void desktopBridge.rpc.request.clearTempSession({ tempId: previousPayload.tempId }).catch(() => undefined);
+  if (previousPayload && shouldClearViewerTempSession(previousPayload) && desktopBridge) {
+    const previousTempId = previousPayload.tempId;
+    if (previousTempId !== undefined) {
+      void desktopBridge.rpc.request.clearTempSession({ tempId: previousTempId }).catch(() => undefined);
+    }
   }
 
-  viewerState.open = true;
-  viewerState.payload = payload;
-  viewerState.timeline = buildTimeline(payload.archive);
-  viewerState.activeIndex = -1;
-  viewerState.networkDetailIndex = null;
-  viewerState.notesValue = payload.notes;
-  viewerState.notesDirty = false;
-  viewerState.notesSaving = false;
-  viewerState.activeSection = "actions";
-  viewerState.networkSubtypeFilter = "all";
-  viewerState.networkSearchQuery = "";
-  viewerState.mergeDialogOpen = false;
-  viewerState.mergeDialogValue = "";
-  viewerState.mergeDialogError = null;
-  viewerState.pendingMergeActionIds = [];
-  viewerState.autoFollow = true;
-  viewerState.selectedActionIds = new Set();
-  viewerState.anchorActionId = null;
-  viewerState.mergeGroups = (payload.archive.annotations ?? []).filter(
-    (a): a is ActionMergeGroup => a.kind === "merge-group"
-  );
+  applyViewerPayload(viewerState, payload);
 
   renderViewer();
 }
@@ -1429,36 +1184,21 @@ function openViewer(payload: ViewerPayload): void {
 async function closeViewer(): Promise<void> {
   const payload = viewerState.payload;
 
-  viewerState.open = false;
-  viewerState.payload = null;
-  viewerState.timeline = [];
-  viewerState.activeIndex = -1;
-  viewerState.networkDetailIndex = null;
-  viewerState.notesValue = "";
-  viewerState.notesDirty = false;
-  viewerState.notesSaving = false;
-  viewerState.activeSection = "actions";
-  viewerState.networkSubtypeFilter = "all";
-  viewerState.networkSearchQuery = "";
-  viewerState.mergeDialogOpen = false;
-  viewerState.mergeDialogValue = "";
-  viewerState.mergeDialogError = null;
-  viewerState.pendingMergeActionIds = [];
-  viewerState.autoFollow = true;
-  viewerState.selectedActionIds = new Set();
-  viewerState.anchorActionId = null;
-  viewerState.mergeGroups = [];
+  resetViewerState(viewerState);
 
   hideContextMenu();
   viewerFocusBtn.hidden = true;
   viewerVideo.pause();
-  viewerVideoLoadVersion += 1;
+  viewerVideoState.loadVersion += 1;
   viewerVideo.src = "";
   viewerOverlay.dataset.open = "false";
-  resetViewerVideoDiagnostics();
+  resetViewerVideoDiagnostics(viewerVideoState);
 
-  if (payload?.source === "zip" && payload.tempId !== undefined && desktopBridge) {
-    await desktopBridge.rpc.request.clearTempSession({ tempId: payload.tempId }).catch(() => undefined);
+  if (payload && shouldClearViewerTempSession(payload) && desktopBridge) {
+    const tempId = payload.tempId;
+    if (tempId !== undefined) {
+      await desktopBridge.rpc.request.clearTempSession({ tempId }).catch(() => undefined);
+    }
   }
 }
 
@@ -1468,20 +1208,32 @@ function renderViewer(): void {
 
   viewerOverlay.dataset.open = "true";
   viewerTitle.textContent = payload.archive.name;
-  const sourceLabels: Record<string, string> = { library: "Library", zip: "ZIP", local: "Local" };
-  viewerSourceBadge.textContent = sourceLabels[payload.source] ?? payload.source;
+  viewerSourceBadge.textContent = getViewerSourceLabel(payload.source);
   viewerSourceBadge.dataset.source = payload.source;
 
   const recordingArtifact = payload.archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
-  void loadViewerVideoSource(payload.videoPath, recordingArtifact?.mimeType || "video/webm");
+  void loadViewerVideoSource({
+    videoPath: payload.videoPath,
+    mimeType: recordingArtifact?.mimeType || "video/webm",
+    viewerVideo,
+    viewerVideoState,
+    desktopBridge,
+    getViewerSource: () => viewerState.payload?.source ?? "unknown",
+    isViewerOpen: () => viewerState.open,
+    onBridgeUnavailable: () => {
+      state.feedback = { tone: "error", text: "Desktop bridge unavailable for evidence video loading." };
+      render();
+    },
+    onLoadFailure: (error, diagnostics) => {
+      console.warn(formatErrorMessage(error, "Unable to load the evidence video through desktop RPC."), diagnostics);
+    }
+  });
 
-  const isReadOnly = payload.source !== "library";
-  if (payload.source === "local") {
+  const readOnlyNotice = getViewerReadOnlyNotice(payload.source);
+  const isReadOnly = !canEditViewerNotes(payload.source);
+  if (readOnlyNotice) {
     viewerZipNotice.hidden = false;
-    viewerZipNotice.textContent = "Local session — notes are read-only and not persisted.";
-  } else if (payload.source === "zip") {
-    viewerZipNotice.hidden = false;
-    viewerZipNotice.textContent = "Notes are read-only for ZIP imports and are not saved.";
+    viewerZipNotice.textContent = readOnlyNotice;
   } else {
     viewerZipNotice.hidden = true;
   }
@@ -1809,145 +1561,9 @@ async function copyViewerValue(value: string, label: string): Promise<void> {
   render();
 }
 
-async function loadViewerVideoSource(videoPath: string, mimeType: string): Promise<void> {
-  const loadVersion = ++viewerVideoLoadVersion;
-
-  resetViewerVideoDiagnostics();
-  viewerVideo.removeAttribute("src");
-  viewerVideo.load();
-
-  if (!desktopBridge) {
-    state.feedback = { tone: "error", text: "Desktop bridge unavailable for evidence video loading." };
-    render();
-    return;
-  }
-
-  try {
-    logViewerVideoAttempt({
-      videoPath,
-      mimeType,
-      source: viewerState.payload?.source ?? "unknown",
-      attemptKind: "media-url",
-      loadVersion
-    });
-
-    const { url } = await desktopBridge.rpc.request.getVideoPlaybackUrl({ videoPath, mimeType });
-
-    console.info("[jittle-lamp][viewer-video] fetched video bytes", {
-      loadVersion,
-      mimeType,
-      url
-    });
-
-    if (loadVersion !== viewerVideoLoadVersion || !viewerState.open) {
-      return;
-    }
-
-    lastVideoLoadAttempt = {
-      videoPath,
-      mimeType,
-      source: viewerState.payload?.source ?? "unknown",
-      attemptKind: "media-url",
-      loadVersion
-    };
-    viewerVideo.src = url;
-    console.info("[jittle-lamp][viewer-video] loading media url", collectViewerVideoDiagnostics("media-url-load"));
-    viewerVideo.load();
-    return;
-  } catch (error) {
-    console.warn(formatErrorMessage(error, "Unable to load the evidence video through desktop RPC."), collectViewerVideoDiagnostics("media-url-rpc-failure"));
-  }
-}
-
-function resetViewerVideoDiagnostics(): void {
-  viewerVideoEventLog = [];
-  lastVideoLoadAttempt = null;
-}
-
-function logViewerVideoAttempt(input: VideoLoadAttempt): void {
-  lastVideoLoadAttempt = input;
-  console.info("[jittle-lamp][viewer-video] source attempt", {
-    ...input,
-    canPlayType: viewerVideo.canPlayType(input.mimeType),
-    networkState: viewerVideo.networkState,
-    readyState: viewerVideo.readyState,
-    currentSrc: viewerVideo.currentSrc,
-    currentSrcKind: classifyVideoSrc(viewerVideo.currentSrc)
-  });
-}
-
-function recordViewerVideoEvent(event: string): void {
-  viewerVideoEventLog.push({
-    event,
-    at: new Date().toISOString(),
-    networkState: viewerVideo.networkState,
-    readyState: viewerVideo.readyState,
-    currentTime: viewerVideo.currentTime,
-    currentSrcKind: classifyVideoSrc(viewerVideo.currentSrc)
-  });
-
-  if (viewerVideoEventLog.length > 20) {
-    viewerVideoEventLog = viewerVideoEventLog.slice(-20);
-  }
-}
-
-function collectViewerVideoDiagnostics(reason: string): VideoDiagnostics {
-  const error = viewerVideo.error;
-
-  return {
-    reason,
-    requestedMimeType: lastVideoLoadAttempt?.mimeType ?? null,
-    canPlayRequestedType: lastVideoLoadAttempt?.mimeType
-      ? viewerVideo.canPlayType(lastVideoLoadAttempt.mimeType)
-      : "",
-    canPlayWebm: viewerVideo.canPlayType("video/webm"),
-    canPlayVp8: viewerVideo.canPlayType("video/webm;codecs=vp8"),
-    canPlayVp9: viewerVideo.canPlayType("video/webm;codecs=vp9"),
-    lastAttempt: lastVideoLoadAttempt,
-    error: {
-      code: error?.code ?? null,
-      codeLabel: labelVideoErrorCode(error?.code ?? null),
-      message: error?.message ?? null
-    },
-    networkState: viewerVideo.networkState,
-    readyState: viewerVideo.readyState,
-    currentTime: viewerVideo.currentTime,
-    duration: Number.isFinite(viewerVideo.duration) ? viewerVideo.duration : null,
-    paused: viewerVideo.paused,
-    ended: viewerVideo.ended,
-    src: viewerVideo.getAttribute("src"),
-    currentSrc: viewerVideo.currentSrc,
-    currentSrcKind: classifyVideoSrc(viewerVideo.currentSrc),
-    recentEvents: [...viewerVideoEventLog]
-  };
-}
-
-function labelVideoErrorCode(code: number | null): string {
-  switch (code) {
-    case MediaError.MEDIA_ERR_ABORTED:
-      return "aborted";
-    case MediaError.MEDIA_ERR_NETWORK:
-      return "network";
-    case MediaError.MEDIA_ERR_DECODE:
-      return "decode";
-    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-      return "src-not-supported";
-    default:
-      return "unknown";
-  }
-}
-
-function classifyVideoSrc(value: string): string {
-  if (!value) return "empty";
-  if (value.startsWith("blob:")) return "blob";
-  if (value.startsWith("file:")) return "file";
-  if (value.startsWith("http://") || value.startsWith("https://")) return "http";
-  return "other";
-}
-
 async function saveViewerNotes(): Promise<void> {
   const payload = viewerState.payload;
-  if (!payload || payload.source !== "library" || !desktopBridge) return;
+  if (!payload || !shouldPersistViewerReviewState(payload.source) || !desktopBridge) return;
 
   viewerState.notesSaving = true;
   viewerNotesSave.disabled = true;
@@ -1978,7 +1594,7 @@ async function persistViewerReviewState(successText?: string): Promise<void> {
   const payload = viewerState.payload;
   if (!payload) return;
 
-  if (payload.source !== "library" || !desktopBridge) {
+  if (!shouldPersistViewerReviewState(payload.source) || !desktopBridge) {
     renderViewerTimeline();
     renderViewerNetworkDetail();
     if (successText) {
@@ -2011,57 +1627,6 @@ async function persistViewerReviewState(successText?: string): Promise<void> {
   }
 }
 
-function formatSourceLabel(source: DesktopCompanionConfigSnapshot["source"]): string {
-  switch (source) {
-    case "env":
-      return "Environment override";
-    case "file":
-      return "Saved file";
-    case "default":
-      return "Default";
-  }
-}
-
-function formatRuntimeLabel(status?: DesktopCompanionRuntimeSnapshot["status"]): string {
-  switch (status) {
-    case "listening":
-      return "Online";
-    case "error":
-      return "Error";
-    case "starting":
-    default:
-      return "Starting";
-  }
-}
-
-function formatRelativeTime(isoTimestamp: string): string {
-  const parsed = new Date(isoTimestamp);
-  if (Number.isNaN(parsed.getTime())) return isoTimestamp;
-
-  const deltaSeconds = Math.round((parsed.getTime() - Date.now()) / 1_000);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
-  if (Math.abs(deltaSeconds) < 60) return formatter.format(deltaSeconds, "second");
-
-  const deltaMinutes = Math.round(deltaSeconds / 60);
-  if (Math.abs(deltaMinutes) < 60) return formatter.format(deltaMinutes, "minute");
-
-  const deltaHours = Math.round(deltaMinutes / 60);
-  return formatter.format(deltaHours, "hour");
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) return error.message;
-  return fallback;
-}
-
 async function handleOpenLocalSession(): Promise<void> {
   if (!desktopBridge) return;
   if (viewerState.isOpening) return;
@@ -2092,43 +1657,6 @@ async function handleExportSessionZip(sessionId: string): Promise<void> {
     state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to export session ZIP.") };
   }
   render();
-}
-
-function queryElement<T extends Element>(selector: string): T {
-  const element = appRoot.querySelector<T>(selector);
-  if (!element) throw new Error(`Desktop main view element not found for selector: ${selector}`);
-  return element;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function createDesktopBridge(): DesktopBridge | null {
-  try {
-    const rpc = Electroview.defineRPC<DesktopRPC>({
-      maxRequestTime: 10_000,
-      handlers: {
-        requests: {},
-        messages: {}
-      }
-    });
-
-    new Electroview({ rpc });
-
-    return {
-      rpc: {
-        request: rpc.request as DesktopBridge["rpc"]["request"]
-      }
-    };
-  } catch {
-    return null;
-  }
 }
 
 render();

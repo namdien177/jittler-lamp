@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { createSessionArchive, createSessionDraft, type ActionMergeGroup, type SessionEvent } from "@jittle-lamp/shared";
-
-import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, buildVisibleActionRows, deriveAnchorMs, findActiveIndex, formatOffset, getContiguousMergeableActionIds } from "../apps/desktop/src/mainview/timeline";
+import { buildSectionTimeline, buildTimeline, buildVisibleActionRangeSelection, buildVisibleActionRows, createSessionArchive, createSessionDraft, deriveAnchorMs, findActiveIndex, formatOffset, getContiguousMergeableActionIds, type ActionMergeGroup, type SessionEvent } from "@jittle-lamp/shared";
 
 const T0 = "2024-06-01T12:00:00.000Z";
 const T1 = "2024-06-01T12:00:05.000Z";

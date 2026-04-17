@@ -17,5 +17,10 @@
     "packages/**/*.ts",
     "scripts/**/*.ts",
     "tests/**/*.ts"
+  ],
+  "exclude": [
+    "apps/**/dist/**",
+    "packages/**/dist/**",
+    "release-artifacts/**"
   ]
 }
