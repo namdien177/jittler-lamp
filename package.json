@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run build:shared && bun run build:viewer-core && bun run build:extension && bun run build:desktop && bun run build:web",
+    "build": "bun run build:shared && bun run build:viewer-core && bun run build:viewer-react && bun run build:extension && bun run build:desktop && bun run build:web",
     "build:shared": "bun run --cwd packages/shared build",
     "build:extension": "bun run --cwd apps/extension build",
     "build:desktop": "bun run --cwd apps/desktop build",
@@ -20,13 +20,15 @@
     "typecheck": "bun x tsc --noEmit -p tsconfig.typecheck.json",
     "test": "bun test",
     "clean": "rm -rf apps/desktop/dist apps/desktop/artifacts apps/extension/dist apps/evidence-web/dist packages/shared/dist release-artifacts",
-    "build:viewer-core": "bun run --cwd packages/viewer-core build"
+    "build:viewer-core": "bun run --cwd packages/viewer-core build",
+    "build:viewer-react": "bun run --cwd packages/viewer-react build"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.325",
     "@types/node": "^24.5.2",
     "bun-types": "latest",
     "fflate": "^0.8.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@types/react": "19.2.2"
   }
 }

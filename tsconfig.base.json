@@ -26,6 +26,9 @@
       ],
       "@jittle-lamp/viewer-core": [
         "packages/viewer-core/src/index.ts"
+      ],
+      "@jittle-lamp/viewer-react": [
+        "packages/viewer-react/src/index.ts"
       ]
     }
   }
