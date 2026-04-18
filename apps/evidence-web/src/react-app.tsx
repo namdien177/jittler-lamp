@@ -39,6 +39,13 @@ export type AppState = ReturnType<typeof createViewerCoreState> & {
   feedbackTone: FeedbackTone;
 };
 
+type SectionTimelineItem = ReturnType<typeof buildSectionTimeline>[number];
+type TimelineListItem = SectionTimelineItem & {
+  mergedRangeText?: string;
+  rangeStartMs?: number;
+  rangeEndMs?: number;
+};
+
 const NETWORK_SUBTYPE_OPTIONS: ReadonlyArray<{ value: NetworkSubtype | "all"; label: string; emphasis?: boolean }> = [
   { value: "all", label: "All" },
   { value: "xhr", label: "XHR", emphasis: true },
@@ -267,7 +274,7 @@ function App(): React.JSX.Element {
     };
   }, [state.videoUrl]);
 
-  const sectionItems = useMemo(() => {
+  const sectionItems = useMemo<Array<TimelineListItem>>(() => {
     if (!state.archive) return [];
 
     const baseItems = buildSectionTimeline(
@@ -583,7 +590,7 @@ function NetworkFilterBar(props: {
 
 function TimelineList(props: {
   timelineRef: React.RefObject<HTMLDivElement | null>;
-  items: Array<ReturnType<typeof buildSectionTimeline>[number] & { mergedRangeText?: string }>;
+  items: Array<TimelineListItem>;
   activeSection: TimelineSection;
   activeIndex: number;
   selectedActionIds: ReadonlySet<string>;
