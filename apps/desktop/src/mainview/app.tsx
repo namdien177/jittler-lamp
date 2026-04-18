@@ -6,10 +6,11 @@ import { createRoot } from "react-dom/client";
 import { createDesktopBridge } from "./desktop-bridge";
 import { filterSessions, formatRuntimeLabel, formatSourceLabel, isDatePreset, renderInlineTagAutocompleteHtml, renderSessionsHtml, renderTagAutocompleteHtml, renderTagFilterHtml, type DatePreset } from "./catalog-view";
 import { escapeHtml, formatBytes, formatErrorMessage, formatRelativeTime, queryRequiredElement } from "./utils";
-import { collectViewerVideoDiagnostics, createViewerVideoState, loadViewerVideoSource, recordViewerVideoEvent, resetViewerVideoDiagnostics } from "./viewer-video";
+import { collectViewerVideoDiagnostics, createViewerVideoState, recordViewerVideoEvent, resetViewerVideoDiagnostics } from "./viewer-video";
 import { applyViewerPayload, createViewerState, resetViewerState, type ViewerState } from "./viewer-state";
-import { canEditViewerNotes, getViewerReadOnlyNotice, getViewerSourceLabel, shouldClearViewerTempSession, shouldPersistViewerReviewState } from "./viewer-source";
+import { getViewerSourceLabel, shouldClearViewerTempSession } from "./viewer-source";
 import { ViewerPane } from "./viewer-pane";
+import { createDesktopNotesAdapter, createDesktopPlaybackAdapter, createDesktopShareAdapter, createDesktopStorageAdapter } from "./adapters";
 
 type FeedbackTone = "neutral" | "success" | "error";
 
@@ -39,6 +40,10 @@ const viewerVideoState = createViewerVideoState();
 let isAutoScrolling = false;
 
 const viewerState: ViewerState = createViewerState();
+const storageAdapter = desktopBridge ? createDesktopStorageAdapter(desktopBridge) : null;
+const notesAdapter = createDesktopNotesAdapter();
+const shareAdapter = createDesktopShareAdapter();
+void shareAdapter;
 
 const state: ViewState = {
   bridgeError: null,
@@ -212,6 +217,15 @@ const viewerNotesTextarea = queryRequiredElement<HTMLTextAreaElement>(appRoot, "
 const viewerNotesSave = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-notes-save']");
 const viewerReactRootElement = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-react-root']");
 const viewerReactRoot = createRoot(viewerReactRootElement);
+const playbackAdapter = desktopBridge
+  ? createDesktopPlaybackAdapter({
+    bridge: desktopBridge,
+    viewerVideo,
+    viewerVideoState,
+    getViewerSource: () => viewerState.payload?.source ?? "unknown",
+    isViewerOpen: () => viewerState.open
+  })
+  : null;
 
 let contextTargetId: string | null = null;
 let contextMenuState = { open: false, x: 0, y: 0, canMerge: false, canUnmerge: false };
@@ -875,7 +889,8 @@ async function handleImportZip(): Promise<void> {
   render();
 
   try {
-    const payload = await desktopBridge.rpc.request.importZipSession(undefined);
+    const payload = await storageAdapter.importZipSession?.();
+    if (!payload) throw new Error("ZIP import adapter is unavailable.");
     openViewer(payload);
     state.feedback = { tone: "neutral", text: "ZIP session loaded." };
   } catch (error) {
@@ -895,7 +910,8 @@ async function handleViewSession(sessionId: string): Promise<void> {
   render();
 
   try {
-    const payload = await desktopBridge.rpc.request.loadLibrarySession({ sessionId });
+    const payload = await storageAdapter.loadLibrarySession?.(sessionId);
+    if (!payload) throw new Error("Library session adapter is unavailable.");
     openViewer(payload);
     state.feedback = { tone: "neutral", text: "Session loaded." };
   } catch (error) {
@@ -926,9 +942,8 @@ async function closeViewer(): Promise<void> {
   resetViewerState(viewerState);
 
   hideContextMenu();
-  viewerVideo.pause();
+  playbackAdapter?.releaseSource?.();
   viewerVideoState.loadVersion += 1;
-  viewerVideo.src = "";
   viewerOverlay.dataset.open = "false";
   resetViewerVideoDiagnostics(viewerVideoState);
 
@@ -950,14 +965,9 @@ function renderViewer(): void {
   viewerSourceBadge.dataset.source = payload.source;
 
   const recordingArtifact = payload.archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
-  void loadViewerVideoSource({
+  playbackAdapter?.loadSource({
     videoPath: payload.videoPath,
     mimeType: recordingArtifact?.mimeType || "video/webm",
-    viewerVideo,
-    viewerVideoState,
-    desktopBridge,
-    getViewerSource: () => viewerState.payload?.source ?? "unknown",
-    isViewerOpen: () => viewerState.open,
     onBridgeUnavailable: () => {
       state.feedback = { tone: "error", text: "Desktop bridge unavailable for evidence video loading." };
       render();
@@ -967,8 +977,8 @@ function renderViewer(): void {
     }
   });
 
-  const readOnlyNotice = getViewerReadOnlyNotice(payload.source);
-  const isReadOnly = !canEditViewerNotes(payload.source);
+  const readOnlyNotice = notesAdapter.getReadOnlyNotice(payload.source);
+  const isReadOnly = !notesAdapter.canEdit(payload.source);
   if (readOnlyNotice) {
     viewerZipNotice.hidden = false;
     viewerZipNotice.textContent = readOnlyNotice;
@@ -1283,7 +1293,7 @@ async function copyViewerValue(value: string, label: string): Promise<void> {
 
 async function saveViewerNotes(): Promise<void> {
   const payload = viewerState.payload;
-  if (!payload || !shouldPersistViewerReviewState(payload.source) || !desktopBridge) return;
+  if (!payload || !notesAdapter.canEdit(payload.source) || !storageAdapter) return;
 
   viewerState.notesSaving = true;
   viewerNotesSave.disabled = true;
@@ -1314,7 +1324,7 @@ async function persistViewerReviewState(successText?: string): Promise<void> {
   const payload = viewerState.payload;
   if (!payload) return;
 
-  if (!shouldPersistViewerReviewState(payload.source) || !desktopBridge) {
+  if (!notesAdapter.canEdit(payload.source) || !storageAdapter) {
     renderViewerPane();
     if (successText) {
       state.feedback = { tone: "neutral", text: successText };
@@ -1323,11 +1333,14 @@ async function persistViewerReviewState(successText?: string): Promise<void> {
     return;
   }
 
-  const response = await desktopBridge.rpc.request.saveSessionReviewState({
+  const response = await storageAdapter.saveSessionReviewState?.({
     sessionId: payload.archive.sessionId,
     notes: viewerState.notesValue,
     annotations: viewerState.mergeGroups
   });
+  if (!response) {
+    throw new Error("Session review persistence adapter is unavailable.");
+  }
 
   viewerState.notesDirty = false;
   viewerState.payload = {
@@ -1352,7 +1365,8 @@ async function handleOpenLocalSession(): Promise<void> {
   state.feedback = { tone: "neutral", text: "Opening local session folder…" };
   render();
   try {
-    const payload = await desktopBridge.rpc.request.openLocalSession(undefined);
+    const payload = await storageAdapter.openLocalSession?.();
+    if (!payload) throw new Error("Local session adapter is unavailable.");
     openViewer(payload);
     state.feedback = { tone: "neutral", text: "Local session loaded." };
     render();
@@ -1369,7 +1383,9 @@ async function handleExportSessionZip(sessionId: string): Promise<void> {
   state.feedback = { tone: "neutral", text: "Exporting session ZIP…" };
   render();
   try {
-    const { savedPath } = await desktopBridge.rpc.request.exportSessionZip({ sessionId });
+    const exportResult = await storageAdapter.exportSessionZip?.(sessionId);
+    if (!exportResult) throw new Error("ZIP export adapter is unavailable.");
+    const { savedPath } = exportResult;
     state.feedback = { tone: "success", text: `ZIP exported → ${savedPath}` };
   } catch (error) {
     state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to export session ZIP.") };
