@@ -67,9 +67,25 @@ function initialState(): AppState {
 
 function App(): React.JSX.Element {
   const [state, setState] = useState<AppState>(() => initialState());
+  const [contextMenu, setContextMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    itemId: string | null;
+    canMerge: boolean;
+    canUnmerge: boolean;
+  }>({
+    open: false,
+    x: 0,
+    y: 0,
+    itemId: null,
+    canMerge: false,
+    canUnmerge: false
+  });
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const autoScrollingRef = useRef(false);
+  const ACTION_HIGHLIGHT_DELTA_MS = 200;
 
   const setFeedback = (text: string, tone: FeedbackTone): void => {
     setState((prev) => ({ ...prev, feedback: text, feedbackTone: tone }));
@@ -152,11 +168,55 @@ function App(): React.JSX.Element {
     const mergeable = state.archive
       ? getContiguousMergeableSelection(state.archive, state.mergeGroups, selectedIds)
       : [];
+    const group = state.mergeGroups.find((candidate) => candidate.id === itemId);
 
-    if (mergeable.length >= 2) {
-      openMergeDialogState(state, mergeable);
-      setState({ ...state });
-    }
+    setContextMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      itemId,
+      canMerge: mergeable.length >= 2,
+      canUnmerge: Boolean(group)
+    });
+  };
+
+  const closeContextMenu = (): void => {
+    setContextMenu((prev) => (prev.open ? { ...prev, open: false } : prev));
+  };
+
+  const handleContextMenuMerge = (): void => {
+    if (!state.archive || !contextMenu.itemId) return;
+    const selectedIds = state.selectedActionIds.has(contextMenu.itemId)
+      ? state.selectedActionIds
+      : new Set([contextMenu.itemId]);
+    const mergeable = getContiguousMergeableSelection(state.archive, state.mergeGroups, selectedIds);
+    if (mergeable.length < 2) return;
+    openMergeDialogState(state, mergeable);
+    setState({ ...state });
+    closeContextMenu();
+  };
+
+  const handleContextMenuUnmerge = (): void => {
+    const groupId = contextMenu.itemId;
+    if (!groupId) return;
+    setState((prev) => {
+      const nextGroups = prev.mergeGroups.filter((group) => group.id !== groupId);
+      if (nextGroups.length === prev.mergeGroups.length) {
+        return prev;
+      }
+
+      const nextSelected = new Set(prev.selectedActionIds);
+      nextSelected.delete(groupId);
+
+      return {
+        ...prev,
+        mergeGroups: nextGroups,
+        selectedActionIds: nextSelected,
+        anchorActionId: prev.anchorActionId === groupId ? null : prev.anchorActionId,
+        archive: prev.archive ? buildReviewedArchive({ archive: prev.archive, mergeGroups: nextGroups }) : prev.archive
+      };
+    });
+    closeContextMenu();
   };
 
   const handleFile = async (file: File): Promise<void> => {
@@ -227,7 +287,8 @@ function App(): React.JSX.Element {
     return rows
       .map((row) => {
         if (row.memberActionIds.length === 1) {
-          return itemsById.get(row.id);
+          const item = itemsById.get(row.id);
+          return item ? { ...item, rangeStartMs: item.offsetMs, rangeEndMs: item.offsetMs } : undefined;
         }
 
         const memberItems = row.memberActionIds
@@ -246,7 +307,9 @@ function App(): React.JSX.Element {
           offsetMs: firstMs,
           label: group.label,
           tags: group.tags,
-          mergedRangeText: `${formatOffset(firstMs)}–${formatOffset(lastMs)}`
+          mergedRangeText: `${formatOffset(firstMs)}–${formatOffset(lastMs)}`,
+          rangeStartMs: firstMs,
+          rangeEndMs: lastMs
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== undefined);
@@ -257,19 +320,27 @@ function App(): React.JSX.Element {
     const tl = timelineRef.current;
     if (!videoEl || !tl || !state.archive) return;
 
-    const items = buildSectionTimeline(
-      state.archive,
-      state.activeSection,
-      state.networkSubtypeFilter,
-      state.networkSearchQuery
-    );
-    const nextActiveIndex = findActiveIndex(items, videoEl.currentTime * 1000);
-    const activeItem = nextActiveIndex >= 0 ? items[nextActiveIndex] : undefined;
-    const activeItemId = (() => {
-      if (!activeItem) return null;
-      if (state.activeSection !== "actions") return activeItem.id;
-      return state.mergeGroups.find((group) => group.memberIds.includes(activeItem.id))?.id ?? activeItem.id;
-    })();
+    const currentMs = videoEl.currentTime * 1000;
+    const items = state.activeSection === "actions"
+      ? sectionItems
+      : buildSectionTimeline(
+        state.archive,
+        state.activeSection,
+        state.networkSubtypeFilter,
+        state.networkSearchQuery
+      );
+    const nextActiveIndex = findActiveIndex(items, currentMs);
+    const actionActiveIds = state.activeSection === "actions"
+      ? new Set(
+        sectionItems
+          .filter((item) => {
+            const start = item.rangeStartMs ?? item.offsetMs;
+            const end = item.rangeEndMs ?? item.offsetMs;
+            return start <= currentMs + ACTION_HIGHLIGHT_DELTA_MS && end >= currentMs - ACTION_HIGHLIGHT_DELTA_MS;
+          })
+          .map((item) => item.id)
+      )
+      : new Set<string>();
 
     setState((prev) => ({ ...prev, activeIndex: nextActiveIndex }));
 
@@ -278,7 +349,7 @@ function App(): React.JSX.Element {
     buttons.forEach((btn, idx) => {
       const isActive =
         state.activeSection === "actions"
-          ? btn.dataset.itemId === activeItemId
+          ? actionActiveIds.has(btn.dataset.itemId ?? "")
           : idx === nextActiveIndex;
       btn.dataset.active = isActive ? "true" : "false";
       if (isActive) activeBtn = btn;
@@ -363,7 +434,13 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <div className="viewer">
+    <div
+      className="viewer"
+      onClick={closeContextMenu}
+      onContextMenu={() => {
+        if (contextMenu.open) closeContextMenu();
+      }}
+    >
       <div className="viewer-header">
         <div className="viewer-header-left">
           <span className="viewer-title">{state.archive.name}</span>
@@ -439,6 +516,16 @@ function App(): React.JSX.Element {
         }}
         onConfirm={submitMergeDialog}
       />
+      <ContextMenu
+        open={contextMenu.open}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        canMerge={contextMenu.canMerge}
+        canUnmerge={contextMenu.canUnmerge}
+        onMerge={handleContextMenuMerge}
+        onUnmerge={handleContextMenuUnmerge}
+        onClose={closeContextMenu}
+      />
     </div>
   );
 }
@@ -508,7 +595,7 @@ function TimelineList(props: {
       {props.items.map((item, idx) => (
         <button
           key={item.id}
-          className="timeline-item"
+          className={`timeline-item${item.mergedRangeText ? " timeline-item-merged" : ""}`}
           data-role="timeline-item"
           data-item-id={item.id}
           data-index={idx}
@@ -522,9 +609,49 @@ function TimelineList(props: {
           onContextMenu={(event) => props.onItemContextMenu(event, item.id)}
         >
           <span className="timeline-offset">{item.mergedRangeText ?? formatOffset(item.offsetMs)}</span>
+          {item.mergedRangeText ? <span className="tl-merged-badge">Merged</span> : null}
           <span className="timeline-label">{item.label}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+function ContextMenu(props: {
+  open: boolean;
+  x: number;
+  y: number;
+  canMerge: boolean;
+  canUnmerge: boolean;
+  onMerge: () => void;
+  onUnmerge: () => void;
+  onClose: () => void;
+}): React.JSX.Element | null {
+  useEffect(() => {
+    if (!props.open) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.open, props.onClose]);
+
+  if (!props.open) return null;
+
+  return (
+    <div
+      className="viewer-context-menu"
+      style={{ left: props.x, top: props.y }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <button className="context-menu-item" type="button" onClick={props.onMerge} disabled={!props.canMerge}>
+        Merge
+      </button>
+      {props.canUnmerge ? (
+        <button className="context-menu-item" type="button" onClick={props.onUnmerge}>
+          Unmerge
+        </button>
+      ) : null}
     </div>
   );
 }
