@@ -265,8 +265,6 @@ input {
 }
 
 .viewer-timeline {
-  flex: 1;
-  overflow-y: auto;
   padding: var(--space-2) 0;
 }
 
@@ -598,6 +596,7 @@ input {
 
 .viewer-section-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   position: relative;
   display: flex;

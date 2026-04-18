@@ -922,6 +922,12 @@ input {
   overflow: hidden;
 }
 
+[data-role="viewer-react-root"] {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
 .viewer-left {
   display: flex;
   flex-direction: column;
@@ -1032,27 +1038,10 @@ input {
 }
 
 .viewer-timeline {
-  flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
   margin-top: var(--space-2);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.viewer-timeline::-webkit-scrollbar {
-  width: 4px;
-}
-
-.viewer-timeline::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.viewer-timeline::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 2px;
 }
 
 .timeline-item {
@@ -1436,10 +1425,26 @@ input {
 
 .viewer-section-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   position: relative;
   display: flex;
   flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.viewer-section-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.viewer-section-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.viewer-section-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 2px;
 }
 
 .viewer-focus-btn {
