@@ -25,7 +25,7 @@ const config = {
     },
     views: {
       mainview: {
-        entrypoint: "src/mainview/app.ts"
+        entrypoint: "src/mainview/app.tsx"
       }
     },
     copy: {
