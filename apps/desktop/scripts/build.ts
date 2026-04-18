@@ -13,7 +13,7 @@ const [bunBuild, viewBuild] = await Promise.all([
     naming: "[name].js"
   }),
   Bun.build({
-    entrypoints: [new URL("../src/mainview/app.ts", import.meta.url).pathname],
+    entrypoints: [new URL("../src/mainview/app.tsx", import.meta.url).pathname],
     outdir: viewsRoot.pathname,
     target: "browser",
     format: "esm",
