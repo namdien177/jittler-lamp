@@ -55,12 +55,20 @@ export function ViewerPane(props: {
   onCopy: (value: string, label: string) => void;
   onContextMerge: () => void;
   onContextUnmerge: () => void;
-  onDismissContext: () => void;
+  onDismissContext: (event: React.MouseEvent<HTMLDivElement>) => void;
   onMergeValueChange: (value: string) => void;
   onMergeConfirm: () => void;
   onMergeCancel: () => void;
 }): React.JSX.Element {
   const detailPayload = props.networkDetail?.payload.kind === "network" ? props.networkDetail.payload : null;
+  const statusCode = detailPayload?.status ?? null;
+  const isSuccess = statusCode !== null && statusCode >= 200 && statusCode < 300;
+  const isError = statusCode !== null && statusCode >= 400;
+  const statusClass = isSuccess ? "network-status-success" : isError ? "network-status-error" : "";
+  const statusText = statusCode !== null
+    ? `${statusCode}${detailPayload?.statusText ? ` ${detailPayload.statusText}` : ""}`
+    : "—";
+  const durationText = detailPayload?.durationMs !== undefined ? `${detailPayload.durationMs.toFixed(0)} ms` : "—";
 
   return (
     <>
@@ -94,8 +102,40 @@ export function ViewerPane(props: {
             <button className="viewer-detail-close" type="button" onClick={props.onCloseDetail}>✕</button>
           </div>
           {detailPayload ? <div className="viewer-network-detail-body">
-            <div className="network-detail-row"><span className="network-detail-key">Method</span><button type="button" data-role="copy" onClick={() => props.onCopy(detailPayload.method, "request method")}>{detailPayload.method}</button></div>
-            <div className="network-detail-row"><span className="network-detail-key">URL</span><button type="button" data-role="copy" onClick={() => props.onCopy(detailPayload.url, "request URL")}>{detailPayload.url}</button></div>
+            <div className="network-detail-section">
+              <span className="network-detail-label">Request</span>
+              <div className="network-detail-row"><span className="network-detail-key">Method</span><button className="network-copy-inline network-detail-val" type="button" onClick={() => props.onCopy(detailPayload.method, "request method")}>{detailPayload.method}</button></div>
+              <div className="network-detail-row"><span className="network-detail-key">URL</span><button className="network-copy-inline network-detail-val network-url" type="button" onClick={() => props.onCopy(detailPayload.url, "request URL")}>{detailPayload.url}</button></div>
+              <div className="network-detail-row"><span className="network-detail-key">Status</span><button className={`network-copy-inline network-detail-val ${statusClass}`.trim()} type="button" onClick={() => props.onCopy(statusText, "response status")}>{statusText}</button></div>
+              <div className="network-detail-row"><span className="network-detail-key">Duration</span><button className="network-copy-inline network-detail-val" type="button" onClick={() => props.onCopy(durationText, "request duration")}>{durationText}</button></div>
+              {detailPayload.failureText ? <div className="network-detail-row"><span className="network-detail-key">Failure</span><button className="network-copy-inline network-detail-val network-status-error" type="button" onClick={() => props.onCopy(detailPayload.failureText ?? "", "failure message")}>{detailPayload.failureText}</button></div> : null}
+            </div>
+            <div className="network-detail-section">
+              <span className="network-detail-label">Request headers</span>
+              {detailPayload.request.headers.length ? detailPayload.request.headers.map((header, index) => (
+                <div className="network-header-row" key={`request-${header.name}-${index}`}>
+                  <button className="network-copy-inline network-header-name" type="button" onClick={() => props.onCopy(header.name, "header name")}>{header.name}</button>
+                  <button className="network-copy-inline network-header-value" type="button" onClick={() => props.onCopy(header.value, "header value")}>{header.value}</button>
+                </div>
+              )) : <span className="network-body-empty">No headers</span>}
+            </div>
+            <div className="network-detail-section">
+              <span className="network-detail-label">Request body</span>
+              <BodyCapture body={detailPayload.request.body} emptyLabel="No request body" onCopy={props.onCopy} />
+            </div>
+            <div className="network-detail-section">
+              <span className="network-detail-label">Response headers</span>
+              {detailPayload.response?.headers?.length ? detailPayload.response.headers.map((header, index) => (
+                <div className="network-header-row" key={`response-${header.name}-${index}`}>
+                  <button className="network-copy-inline network-header-name" type="button" onClick={() => props.onCopy(header.name, "header name")}>{header.name}</button>
+                  <button className="network-copy-inline network-header-value" type="button" onClick={() => props.onCopy(header.value, "header value")}>{header.value}</button>
+                </div>
+              )) : <span className="network-body-empty">No headers</span>}
+            </div>
+            <div className="network-detail-section">
+              <span className="network-detail-label">Response body</span>
+              <BodyCapture body={detailPayload.response?.body} emptyLabel="No response body" onCopy={props.onCopy} />
+            </div>
           </div> : null}
         </div>
       </div>
@@ -122,4 +162,33 @@ export function ViewerPane(props: {
       </div>
     </>
   );
+}
+
+function BodyCapture(props: {
+  body: TimelineItem["payload"] extends infer T
+    ? T extends { kind: "network"; request: { body?: infer U } }
+      ? U
+      : never
+    : never;
+  emptyLabel: string;
+  onCopy: (value: string, label: string) => void;
+}): React.JSX.Element {
+  if (!props.body) {
+    return <span className="network-body-empty">{props.emptyLabel}</span>;
+  }
+
+  if (props.body.disposition === "captured" && props.body.value !== undefined) {
+    const previewText = props.body.encoding === "base64"
+      ? `[base64, ${props.body.byteLength ?? "?"} bytes]`
+      : props.body.value.slice(0, 2000);
+
+    return (
+      <button className="network-copy-block" type="button" onClick={() => props.onCopy(props.body?.value ?? "", "request/response body")}>
+        <pre className="network-body-pre">{previewText}</pre>
+      </button>
+    );
+  }
+
+  const reasonSuffix = props.body.reason ? ` (${props.body.reason})` : "";
+  return <span className="network-body-empty">{`${props.body.disposition}${reasonSuffix}`}</span>;
 }

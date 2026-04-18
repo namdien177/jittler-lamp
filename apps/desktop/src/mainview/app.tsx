@@ -989,6 +989,17 @@ function updateTimelineHighlight(): void {
   const items = deriveSectionTimeline(payload.archive, viewerState.activeSection, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
   viewerState.activeIndex = findActiveIndex(items, viewerVideo.currentTime * 1000);
   renderViewerPane();
+  scrollActiveTimelineItemIntoView();
+}
+
+function scrollActiveTimelineItemIntoView(): void {
+  if (!viewerState.autoFollow || isAutoScrolling) return;
+  isAutoScrolling = true;
+  requestAnimationFrame(() => {
+    const activeRow = viewerReactRootElement.querySelector<HTMLElement>(".viewer-timeline .timeline-item[data-active='true']");
+    activeRow?.scrollIntoView({ block: "nearest" });
+    isAutoScrolling = false;
+  });
 }
 
 function buildTimelineRows() {
@@ -1098,6 +1109,7 @@ function renderViewerPane(): void {
         updateTimelineHighlight();
       }}
       onTimelineClick={(itemId, offsetMs, event) => {
+        viewerState.autoFollow = false;
         viewerVideo.currentTime = Math.max(0, offsetMs / 1000);
         if (viewerState.activeSection === "actions" && payload) {
           if (event.metaKey || event.ctrlKey) {
@@ -1177,9 +1189,6 @@ function renderViewerPane(): void {
       onDismissContext={() => {
         if (contextMenuState.open) {
           hideContextMenu();
-        }
-        if (viewerState.autoFollow) {
-          viewerState.autoFollow = false;
         }
       }}
       onMergeValueChange={(value) => {
