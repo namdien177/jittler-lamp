@@ -10,13 +10,17 @@
       "bun-types",
       "node",
       "chrome"
-    ]
+    ],
+    "jsx": "react-jsx"
   },
   "include": [
     "apps/**/*.ts",
+    "apps/**/*.tsx",
     "packages/**/*.ts",
+    "packages/**/*.tsx",
     "scripts/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
   ],
   "exclude": [
     "apps/**/dist/**",
