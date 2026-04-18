@@ -1,7 +1,7 @@
-import { init } from "./controller";
+import { bootstrap } from "./react-app";
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", init, { once: true });
+  document.addEventListener("DOMContentLoaded", bootstrap, { once: true });
 } else {
-  init();
+  bootstrap();
 }
