@@ -2,12 +2,14 @@ import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, S
 import { findActiveIndex, formatOffset } from "@jittle-lamp/shared";
 import type { NetworkSubtype, TimelineSection } from "@jittle-lamp/shared";
 import { createMergeGroup, deriveSectionTimeline, deriveTimeline, getArchiveMergeGroups, getContiguousMergeableSelection, openMergeDialog as openMergeDialogState, closeMergeDialog as closeMergeDialogState, selectActionRange, selectSingleAction, toggleActionSelection, validateMergeDialog } from "@jittle-lamp/viewer-core";
+import { createRoot } from "react-dom/client";
 import { createDesktopBridge } from "./desktop-bridge";
 import { filterSessions, formatRuntimeLabel, formatSourceLabel, isDatePreset, renderInlineTagAutocompleteHtml, renderSessionsHtml, renderTagAutocompleteHtml, renderTagFilterHtml, type DatePreset } from "./catalog-view";
 import { escapeHtml, formatBytes, formatErrorMessage, formatRelativeTime, queryRequiredElement } from "./utils";
 import { collectViewerVideoDiagnostics, createViewerVideoState, loadViewerVideoSource, recordViewerVideoEvent, resetViewerVideoDiagnostics } from "./viewer-video";
 import { applyViewerPayload, createViewerState, resetViewerState, type ViewerState } from "./viewer-state";
 import { canEditViewerNotes, getViewerReadOnlyNotice, getViewerSourceLabel, shouldClearViewerTempSession, shouldPersistViewerReviewState } from "./viewer-source";
+import { ViewerPane } from "./viewer-pane";
 
 type FeedbackTone = "neutral" | "success" | "error";
 
@@ -168,57 +170,7 @@ appRoot.innerHTML = `
               </div>
             </div>
           </div>
-          <div class="viewer-right">
-            <div class="viewer-section-tabs" data-role="viewer-section-tabs">
-              <button class="section-tab" type="button" data-role="section-tab" data-section="actions" data-active="true">Actions</button>
-              <button class="section-tab" type="button" data-role="section-tab" data-section="console">Console</button>
-              <button class="section-tab" type="button" data-role="section-tab" data-section="network">Network</button>
-            </div>
-            <div class="viewer-network-filter" data-role="viewer-network-filter" hidden>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="all" data-active="true">All</button>
-              <button class="subtype-filter subtype-emphasis" type="button" data-role="subtype-filter" data-subtype="xhr">XHR</button>
-              <button class="subtype-filter subtype-emphasis" type="button" data-role="subtype-filter" data-subtype="fetch">Fetch</button>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="document">Doc</button>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="script">Script</button>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="image">Img</button>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="font">Font</button>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="media">Media</button>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="websocket">WS</button>
-              <button class="subtype-filter" type="button" data-role="subtype-filter" data-subtype="other">Other</button>
-              <input class="viewer-network-search" type="text" data-role="network-search" placeholder="Search URL, headers, response, or /regex/" />
-            </div>
-            <div class="viewer-section-body" data-role="viewer-section-body">
-              <div class="viewer-timeline" data-role="viewer-timeline"></div>
-              <button class="viewer-focus-btn" type="button" data-role="viewer-focus-btn" hidden>↓ Focus</button>
-            </div>
-            <div class="viewer-network-detail" data-role="viewer-network-detail" hidden>
-              <div class="viewer-network-detail-header">
-                <span class="viewer-panel-label">Network request</span>
-                <button class="viewer-detail-close" type="button" data-role="viewer-detail-close" aria-label="Close detail">✕</button>
-              </div>
-              <div class="viewer-network-detail-body" data-role="viewer-network-detail-body"></div>
-            </div>
-          </div>
-        </div>
-        <div class="viewer-context-menu" data-role="viewer-context-menu" hidden>
-          <button class="context-menu-item" type="button" data-role="ctx-merge">Merge Actions…</button>
-          <button class="context-menu-item" type="button" data-role="ctx-unmerge">Un-merge</button>
-        </div>
-        <div class="viewer-merge-dialog-backdrop" data-role="viewer-merge-dialog-backdrop" hidden>
-          <div class="viewer-merge-dialog" role="dialog" aria-modal="true" aria-labelledby="viewer-merge-dialog-title">
-            <div class="viewer-merge-dialog-header">
-              <span class="viewer-panel-label" id="viewer-merge-dialog-title">Merge actions</span>
-            </div>
-            <div class="viewer-merge-dialog-body">
-              <label class="viewer-merge-dialog-label" for="viewer-merge-dialog-input">Merged action name</label>
-              <input class="viewer-merge-dialog-input" id="viewer-merge-dialog-input" data-role="viewer-merge-dialog-input" type="text" maxlength="160" placeholder="Merged actions" />
-              <div class="viewer-merge-dialog-error" data-role="viewer-merge-dialog-error" hidden></div>
-            </div>
-            <div class="viewer-merge-dialog-actions">
-              <button class="button sm" type="button" data-role="viewer-merge-dialog-cancel">Cancel</button>
-              <button class="button sm primary" type="button" data-role="viewer-merge-dialog-confirm">Merge</button>
-            </div>
-          </div>
+          <div data-role="viewer-react-root"></div>
         </div>
       </div>
     </div>
@@ -255,28 +207,14 @@ const viewerClose = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role
 const viewerTitle = queryRequiredElement<HTMLSpanElement>(appRoot, "[data-role='viewer-title']");
 const viewerSourceBadge = queryRequiredElement<HTMLSpanElement>(appRoot, "[data-role='viewer-source-badge']");
 const viewerVideo = queryRequiredElement<HTMLVideoElement>(appRoot, "[data-role='viewer-video']");
-const viewerTimeline = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-timeline']");
 const viewerZipNotice = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-zip-notice']");
 const viewerNotesTextarea = queryRequiredElement<HTMLTextAreaElement>(appRoot, "[data-role='viewer-notes-textarea']");
 const viewerNotesSave = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-notes-save']");
-const viewerNetworkDetail = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-network-detail']");
-const viewerDetailClose = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-detail-close']");
-const viewerNetworkDetailBody = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-network-detail-body']");
-const viewerSectionTabs = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-section-tabs']");
-const viewerNetworkFilter = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-network-filter']");
-const viewerSectionBody = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-section-body']");
-const viewerFocusBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-focus-btn']");
-const viewerContextMenu = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-context-menu']");
-const ctxMergeBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='ctx-merge']");
-const ctxUnmergeBtn = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='ctx-unmerge']");
-const viewerNetworkSearch = queryRequiredElement<HTMLInputElement>(appRoot, "[data-role='network-search']");
-const viewerMergeDialogBackdrop = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-merge-dialog-backdrop']");
-const viewerMergeDialogInput = queryRequiredElement<HTMLInputElement>(appRoot, "[data-role='viewer-merge-dialog-input']");
-const viewerMergeDialogError = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-merge-dialog-error']");
-const viewerMergeDialogCancel = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-merge-dialog-cancel']");
-const viewerMergeDialogConfirm = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-merge-dialog-confirm']");
+const viewerReactRootElement = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-react-root']");
+const viewerReactRoot = createRoot(viewerReactRootElement);
 
 let contextTargetId: string | null = null;
+let contextMenuState = { open: false, x: 0, y: 0, canMerge: false, canUnmerge: false };
 
 gearBtn.addEventListener("click", () => {
   openDrawer();
@@ -300,24 +238,6 @@ viewerOverlay.addEventListener("click", (event) => {
   }
 });
 
-viewerDetailClose.addEventListener("click", () => {
-  viewerState.networkDetailIndex = null;
-  renderViewerNetworkDetail();
-});
-
-viewerNetworkDetailBody.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element)) return;
-
-  const copyTarget = event.target.closest<HTMLElement>("[data-role='copy-value']");
-  const copyValue = copyTarget?.dataset.copyValue;
-
-  if (!copyTarget || !copyValue) {
-    return;
-  }
-
-  void copyViewerValue(copyValue, copyTarget.dataset.copyLabel ?? "value");
-});
-
 viewerNotesTextarea.addEventListener("input", () => {
   viewerState.notesValue = viewerNotesTextarea.value;
   viewerState.notesDirty = viewerState.notesValue !== (viewerState.payload?.notes ?? "");
@@ -330,44 +250,6 @@ viewerNotesSave.addEventListener("click", () => {
 
 viewerVideo.addEventListener("timeupdate", () => {
   updateTimelineHighlight();
-});
-
-viewerNetworkSearch.addEventListener("input", () => {
-  viewerState.networkSearchQuery = viewerNetworkSearch.value;
-  viewerState.networkDetailIndex = null;
-  renderViewerTimeline();
-  renderViewerNetworkDetail();
-  updateTimelineHighlight();
-});
-
-viewerMergeDialogInput.addEventListener("input", () => {
-  viewerState.mergeDialogValue = viewerMergeDialogInput.value;
-  viewerState.mergeDialogError = null;
-  renderViewerMergeDialog();
-});
-
-viewerMergeDialogInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    submitViewerMergeDialog();
-  } else if (event.key === "Escape") {
-    event.preventDefault();
-    closeViewerMergeDialog();
-  }
-});
-
-viewerMergeDialogCancel.addEventListener("click", () => {
-  closeViewerMergeDialog();
-});
-
-viewerMergeDialogConfirm.addEventListener("click", () => {
-  submitViewerMergeDialog();
-});
-
-viewerMergeDialogBackdrop.addEventListener("click", (event) => {
-  if (event.target === viewerMergeDialogBackdrop) {
-    closeViewerMergeDialog();
-  }
 });
 
 for (const mediaEventName of [
@@ -393,9 +275,7 @@ for (const mediaEventName of [
 
 viewerVideo.addEventListener("error", () => {
   const diagnostics = collectViewerVideoDiagnostics(viewerVideo, viewerVideoState, "error-event");
-
   console.error("[jittle-lamp][viewer-video] playback failed", diagnostics);
-
   state.feedback = {
     tone: "error",
     text: `Unable to play the evidence video (${diagnostics.error.codeLabel}). Full media diagnostics logged.`
@@ -403,152 +283,8 @@ viewerVideo.addEventListener("error", () => {
   render();
 });
 
-viewerTimeline.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element)) return;
-  const item = event.target.closest<HTMLButtonElement>("[data-role='timeline-item']");
-  if (!item) return;
-  const itemId = item.dataset.itemId ?? "";
-  const offsetMs = Number(item.dataset.offsetMs);
-
-  if (Number.isFinite(offsetMs)) {
-    viewerVideo.currentTime = Math.max(0, offsetMs / 1000);
-  }
-
-  if (item.dataset.section === "actions") {
-    if (event.metaKey || event.ctrlKey) {
-      const selection = toggleActionSelection(
-        { selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId },
-        itemId
-      );
-      viewerState.selectedActionIds = selection.selectedActionIds;
-      viewerState.anchorActionId = selection.anchorActionId;
-      renderViewerTimeline();
-      updateTimelineHighlight();
-      return;
-    }
-
-    if (event.shiftKey && viewerState.anchorActionId) {
-      const selection = selectActionRange(
-        viewerState.payload!.archive,
-        viewerState.mergeGroups,
-        { selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId },
-        itemId
-      );
-      if (selection.selectedActionIds.size > 0) {
-        viewerState.selectedActionIds = selection.selectedActionIds;
-        renderViewerTimeline();
-        updateTimelineHighlight();
-        return;
-      }
-    }
-
-    const selection = selectSingleAction(itemId);
-    viewerState.selectedActionIds = selection.selectedActionIds;
-    viewerState.anchorActionId = selection.anchorActionId;
-    renderViewerTimeline();
-    updateTimelineHighlight();
-    return;
-  }
-
-  const fullTimelineIndex = viewerState.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
-  if (fullTimelineIndex === -1) return;
-  const timelineItem = viewerState.timeline[fullTimelineIndex];
-  if (!timelineItem) return;
-  viewerState.networkDetailIndex =
-    timelineItem.kind === "network" && viewerState.networkDetailIndex !== fullTimelineIndex ? fullTimelineIndex : null;
-  renderViewerNetworkDetail();
-});
-
-viewerTimeline.addEventListener("contextmenu", (event) => {
-  if (!(event.target instanceof Element)) return;
-  const item = event.target.closest<HTMLButtonElement>("[data-role='timeline-item']");
-  if (!item || item.dataset.section !== "actions") return;
-  event.preventDefault();
-
-  const itemId = item.dataset.itemId ?? "";
-  contextTargetId = itemId;
-  if (!viewerState.selectedActionIds.has(itemId)) {
-    const selection = selectSingleAction(itemId);
-    viewerState.selectedActionIds = selection.selectedActionIds;
-    viewerState.anchorActionId = selection.anchorActionId;
-    renderViewerTimeline();
-  }
-
-  const isMerged = item.dataset.merged === "true";
-  ctxMergeBtn.hidden = isMerged || getSelectedActionEntryIds().length < 2;
-  ctxUnmergeBtn.hidden = !isMerged;
-
-  viewerContextMenu.hidden = false;
-  viewerContextMenu.style.left = `${event.clientX}px`;
-  viewerContextMenu.style.top = `${event.clientY}px`;
-});
-
-viewerSectionTabs.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element)) return;
-  const tab = event.target.closest<HTMLButtonElement>("[data-role='section-tab']");
-  if (!tab) return;
-  const section = tab.dataset.section as TimelineSection | undefined;
-  if (!section) return;
-  viewerState.activeSection = section;
-  viewerState.networkDetailIndex = null;
-  renderViewerSectionTabs();
-  renderViewerNetworkFilter();
-  renderViewerTimeline();
-  renderViewerNetworkDetail();
-  updateTimelineHighlight();
-});
-
-viewerNetworkFilter.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element)) return;
-  const btn = event.target.closest<HTMLButtonElement>("[data-role='subtype-filter']");
-  if (!btn) return;
-  const subtype = btn.dataset.subtype as NetworkSubtype | "all" | undefined;
-  if (!subtype) return;
-  viewerState.networkSubtypeFilter = subtype;
-  viewerState.networkDetailIndex = null;
-  renderViewerNetworkFilter();
-  renderViewerTimeline();
-  renderViewerNetworkDetail();
-  updateTimelineHighlight();
-});
-
-viewerSectionBody.addEventListener("scroll", () => {
-  if (isAutoScrolling) return;
-  if (viewerState.autoFollow) {
-    viewerState.autoFollow = false;
-    viewerFocusBtn.hidden = false;
-  }
-});
-
-viewerFocusBtn.addEventListener("click", () => {
-  viewerState.autoFollow = true;
-  viewerFocusBtn.hidden = true;
-  updateTimelineHighlight();
-});
-
-ctxMergeBtn.addEventListener("click", () => {
-  hideContextMenu();
-  const selectedActionIds = getSelectedActionEntryIds();
-  if (selectedActionIds.length < 2) {
-    state.feedback = { tone: "error", text: "Select at least two actions before merging." };
-    render();
-    return;
-  }
-
-  openViewerMergeDialog(selectedActionIds);
-});
-
-ctxUnmergeBtn.addEventListener("click", () => {
-  const targetId = contextTargetId;
-  hideContextMenu();
-  if (!targetId) return;
-  viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
-  viewerState.selectedActionIds = new Set();
-  void persistViewerReviewState("Merge removed.");
-});
-
 document.addEventListener("click", (event) => {
-  if (!viewerContextMenu.hidden && event.target instanceof Element && !viewerContextMenu.contains(event.target)) {
+  if (contextMenuState.open && event.target instanceof Element && !viewerReactRootElement.contains(event.target)) {
     hideContextMenu();
   }
 });
@@ -1190,7 +926,6 @@ async function closeViewer(): Promise<void> {
   resetViewerState(viewerState);
 
   hideContextMenu();
-  viewerFocusBtn.hidden = true;
   viewerVideo.pause();
   viewerVideoState.loadVersion += 1;
   viewerVideo.src = "";
@@ -1245,181 +980,244 @@ function renderViewer(): void {
   viewerNotesSave.hidden = isReadOnly;
   viewerNotesSave.disabled = !viewerState.notesDirty || viewerState.notesSaving;
 
-  renderViewerSectionTabs();
-  renderViewerNetworkFilter();
-  renderViewerTimeline();
-  renderViewerNetworkDetail();
-  renderViewerMergeDialog();
-}
-
-function renderViewerTimeline(): void {
-  const payload = viewerState.payload;
-  if (!payload) {
-    viewerTimeline.innerHTML = `<span class="viewer-timeline-empty">No events recorded.</span>`;
-    return;
-  }
-
-  const section = viewerState.activeSection;
-  const items = deriveSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
-
-  if (section === "actions") {
-    const mergedMemberIds = new Set(viewerState.mergeGroups.flatMap((g) => g.memberIds));
-
-    const rows: string[] = [];
-    const seenGroupIds = new Set<string>();
-
-    for (const item of items) {
-      const group = viewerState.mergeGroups.find((g) => g.memberIds.includes(item.id));
-
-      if (group) {
-        if (seenGroupIds.has(group.id)) continue;
-        seenGroupIds.add(group.id);
-
-        const memberItems = items.filter((i) => group.memberIds.includes(i.id));
-        const firstMs = Math.min(...memberItems.map((i) => i.offsetMs));
-        const lastMs = Math.max(...memberItems.map((i) => i.offsetMs));
-        const tagChips = group.tags.map((t) => `<span class="tl-tag">${escapeHtml(t)}</span>`).join("");
-        const isSelected = viewerState.selectedActionIds.has(group.id);
-
-        rows.push(`<button
-          class="timeline-item timeline-item-merged"
-          type="button"
-          data-role="timeline-item"
-          data-item-id="${escapeHtml(group.id)}"
-          data-offset-ms="${firstMs}"
-          data-section="actions"
-          data-merged="true"
-          data-active="false"
-          data-selected="${isSelected ? "true" : "false"}"
-        ><span class="timeline-offset">${escapeHtml(formatOffset(firstMs))}–${escapeHtml(formatOffset(lastMs))}</span><span class="tl-merged-badge">merged</span><span class="timeline-label">${escapeHtml(group.label)}</span>${tagChips ? `<span class="tl-tags">${tagChips}</span>` : ""}</button>`);
-        continue;
-      }
-
-      if (mergedMemberIds.has(item.id)) continue;
-
-      const isSelected = viewerState.selectedActionIds.has(item.id);
-      const tagChips = (item.tags ?? []).map((t) => `<span class="tl-tag">${escapeHtml(t)}</span>`).join("");
-
-      rows.push(`<button
-        class="timeline-item"
-        type="button"
-        data-role="timeline-item"
-        data-item-id="${escapeHtml(item.id)}"
-        data-offset-ms="${item.offsetMs}"
-        data-section="actions"
-        data-kind="${escapeHtml(item.kind)}"
-        data-active="false"
-        data-selected="${isSelected ? "true" : "false"}"
-      ><span class="timeline-offset">${escapeHtml(formatOffset(item.offsetMs))}</span><span class="timeline-label">${escapeHtml(item.label)}</span>${tagChips ? `<span class="tl-tags">${tagChips}</span>` : ""}</button>`);
-    }
-
-    viewerTimeline.innerHTML = rows.length > 0 ? rows.join("") : `<span class="viewer-timeline-empty">No actions recorded.</span>`;
-  } else {
-    if (items.length === 0) {
-      viewerTimeline.innerHTML = `<span class="viewer-timeline-empty">No ${section} events recorded.</span>`;
-      return;
-    }
-
-    viewerTimeline.innerHTML = items
-      .map((item, idx) => {
-        const isActive = idx === viewerState.activeIndex;
-        return `<button
-          class="timeline-item"
-          type="button"
-          data-role="timeline-item"
-          data-item-id="${escapeHtml(item.id)}"
-          data-index="${idx}"
-          data-offset-ms="${item.offsetMs}"
-          data-section="${escapeHtml(section)}"
-          data-kind="${escapeHtml(item.kind)}"
-          data-active="${isActive ? "true" : "false"}"
-        ><span class="timeline-offset">${escapeHtml(formatOffset(item.offsetMs))}</span><span class="timeline-label">${escapeHtml(item.label)}</span></button>`;
-      })
-      .join("");
-  }
+  renderViewerPane();
 }
 
 function updateTimelineHighlight(): void {
   const payload = viewerState.payload;
   if (!payload) return;
+  const items = deriveSectionTimeline(payload.archive, viewerState.activeSection, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
+  viewerState.activeIndex = findActiveIndex(items, viewerVideo.currentTime * 1000);
+  renderViewerPane();
+}
+
+function buildTimelineRows() {
+  const payload = viewerState.payload;
+  if (!payload) return [];
 
   const section = viewerState.activeSection;
   const items = deriveSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
-  const currentTimeMs = viewerVideo.currentTime * 1000;
-  const nextActive = findActiveIndex(items, currentTimeMs);
-  viewerState.activeIndex = nextActive;
 
-  const buttons = viewerTimeline.querySelectorAll<HTMLButtonElement>("[data-role='timeline-item']");
-  let activeBtn: HTMLButtonElement | null = null;
-
-  const activeItemId = (() => {
-    const activeItem = nextActive >= 0 ? items[nextActive] : undefined;
-    if (!activeItem) return null;
-    if (section !== "actions") return activeItem.id;
-    return viewerState.mergeGroups.find((group) => group.memberIds.includes(activeItem.id))?.id ?? activeItem.id;
-  })();
-
-  buttons.forEach((btn, idx) => {
-    const isActive = section === "actions" ? btn.dataset.itemId === activeItemId : idx === nextActive;
-    btn.dataset.active = isActive ? "true" : "false";
-    if (isActive) activeBtn = btn;
-  });
-
-  if (viewerState.autoFollow && activeBtn !== null) {
-    isAutoScrolling = true;
-    (activeBtn as HTMLButtonElement).scrollIntoView({ block: "nearest", behavior: "smooth" });
-    setTimeout(() => { isAutoScrolling = false; }, 300);
+  if (section !== "actions") {
+    return items.map((item) => ({
+      id: item.id,
+      offsetMs: item.offsetMs,
+      section,
+      label: item.label,
+      kind: item.kind,
+      selected: false,
+      merged: false,
+      tags: [] as string[]
+    }));
   }
+
+  const mergedMemberIds = new Set(viewerState.mergeGroups.flatMap((g) => g.memberIds));
+  const rows: Array<{ id: string; offsetMs: number; section: TimelineSection; label: string; kind: string; selected: boolean; merged: boolean; mergedRange?: string; tags: string[] }> = [];
+  const seenGroupIds = new Set<string>();
+
+  for (const item of items) {
+    const group = viewerState.mergeGroups.find((g) => g.memberIds.includes(item.id));
+    if (group) {
+      if (seenGroupIds.has(group.id)) continue;
+      seenGroupIds.add(group.id);
+      const memberItems = items.filter((candidate) => group.memberIds.includes(candidate.id));
+      const firstMs = Math.min(...memberItems.map((candidate) => candidate.offsetMs));
+      const lastMs = Math.max(...memberItems.map((candidate) => candidate.offsetMs));
+      rows.push({
+        id: group.id,
+        offsetMs: firstMs,
+        section,
+        label: group.label,
+        kind: "action",
+        selected: viewerState.selectedActionIds.has(group.id),
+        merged: true,
+        mergedRange: `${formatOffset(firstMs)}–${formatOffset(lastMs)}`,
+        tags: group.tags
+      });
+      continue;
+    }
+    if (mergedMemberIds.has(item.id)) continue;
+    rows.push({
+      id: item.id,
+      offsetMs: item.offsetMs,
+      section,
+      label: item.label,
+      kind: item.kind,
+      selected: viewerState.selectedActionIds.has(item.id),
+      merged: false,
+      tags: item.tags ?? []
+    });
+  }
+
+  return rows;
 }
 
-function renderViewerSectionTabs(): void {
-  viewerSectionTabs.querySelectorAll<HTMLButtonElement>("[data-role='section-tab']").forEach((tab) => {
-    tab.dataset.active = tab.dataset.section === viewerState.activeSection ? "true" : "false";
-  });
-}
+function renderViewerPane(): void {
+  const payload = viewerState.payload;
+  const timelineRows = buildTimelineRows();
+  const detailItem = viewerState.networkDetailIndex === null ? null : viewerState.timeline[viewerState.networkDetailIndex] ?? null;
 
-function renderViewerNetworkFilter(): void {
-  const isNetwork = viewerState.activeSection === "network";
-  viewerNetworkFilter.hidden = !isNetwork;
-  viewerNetworkFilter.style.display = isNetwork ? "flex" : "none";
-  viewerNetworkSearch.value = viewerState.networkSearchQuery;
-  if (!isNetwork) return;
-  viewerNetworkFilter.querySelectorAll<HTMLButtonElement>("[data-role='subtype-filter']").forEach((btn) => {
-    btn.dataset.active = btn.dataset.subtype === viewerState.networkSubtypeFilter ? "true" : "false";
-  });
+  const sectionItems = payload
+    ? deriveSectionTimeline(payload.archive, viewerState.activeSection, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery)
+    : [];
+  const activeItem = viewerState.activeIndex >= 0 ? sectionItems[viewerState.activeIndex] : null;
+  const activeItemId = activeItem
+    ? viewerState.activeSection === "actions"
+      ? viewerState.mergeGroups.find((group) => group.memberIds.includes(activeItem.id))?.id ?? activeItem.id
+      : activeItem.id
+    : null;
+
+  viewerReactRoot.render(
+    <ViewerPane
+      activeSection={viewerState.activeSection}
+      networkSearchQuery={viewerState.networkSearchQuery}
+      networkSubtypeFilter={viewerState.networkSubtypeFilter}
+      timelineRows={timelineRows}
+      activeItemId={activeItemId}
+      autoFollow={viewerState.autoFollow}
+      focusVisible={!viewerState.autoFollow}
+      networkDetail={detailItem}
+      contextMenu={contextMenuState}
+      mergeDialog={{ open: viewerState.mergeDialogOpen, value: viewerState.mergeDialogValue, error: viewerState.mergeDialogError }}
+      onSectionChange={(section) => {
+        viewerState.activeSection = section;
+        viewerState.networkDetailIndex = null;
+        renderViewerPane();
+        updateTimelineHighlight();
+      }}
+      onSubtypeChange={(subtype) => {
+        viewerState.networkSubtypeFilter = subtype;
+        viewerState.networkDetailIndex = null;
+        renderViewerPane();
+        updateTimelineHighlight();
+      }}
+      onSearchChange={(value) => {
+        viewerState.networkSearchQuery = value;
+        viewerState.networkDetailIndex = null;
+        renderViewerPane();
+        updateTimelineHighlight();
+      }}
+      onTimelineClick={(itemId, offsetMs, event) => {
+        viewerVideo.currentTime = Math.max(0, offsetMs / 1000);
+        if (viewerState.activeSection === "actions" && payload) {
+          if (event.metaKey || event.ctrlKey) {
+            const selection = toggleActionSelection({ selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId }, itemId);
+            viewerState.selectedActionIds = selection.selectedActionIds;
+            viewerState.anchorActionId = selection.anchorActionId;
+          } else if (event.shiftKey && viewerState.anchorActionId) {
+            const selection = selectActionRange(payload.archive, viewerState.mergeGroups, { selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId }, itemId);
+            if (selection.selectedActionIds.size > 0) {
+              viewerState.selectedActionIds = selection.selectedActionIds;
+            }
+          } else {
+            const selection = selectSingleAction(itemId);
+            viewerState.selectedActionIds = selection.selectedActionIds;
+            viewerState.anchorActionId = selection.anchorActionId;
+          }
+        } else {
+          const fullTimelineIndex = viewerState.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
+          if (fullTimelineIndex !== -1) {
+            const timelineItem = viewerState.timeline[fullTimelineIndex];
+            viewerState.networkDetailIndex = timelineItem?.kind === "network" && viewerState.networkDetailIndex !== fullTimelineIndex ? fullTimelineIndex : null;
+          }
+        }
+        renderViewerPane();
+        updateTimelineHighlight();
+      }}
+      onTimelineContext={(itemId, event) => {
+        if (viewerState.activeSection !== "actions" || !payload) return;
+        event.preventDefault();
+        contextTargetId = itemId;
+        if (!viewerState.selectedActionIds.has(itemId)) {
+          const selection = selectSingleAction(itemId);
+          viewerState.selectedActionIds = selection.selectedActionIds;
+          viewerState.anchorActionId = selection.anchorActionId;
+        }
+        const isMerged = Boolean(viewerState.mergeGroups.find((group) => group.id === itemId));
+        const selectedActionIds = getSelectedActionEntryIds();
+        contextMenuState = {
+          open: true,
+          x: event.clientX,
+          y: event.clientY,
+          canMerge: !isMerged && selectedActionIds.length >= 2,
+          canUnmerge: isMerged
+        };
+        renderViewerPane();
+      }}
+      onFocus={() => {
+        viewerState.autoFollow = true;
+        renderViewerPane();
+        updateTimelineHighlight();
+      }}
+      onCloseDetail={() => {
+        viewerState.networkDetailIndex = null;
+        renderViewerPane();
+      }}
+      onCopy={(value, label) => {
+        void copyViewerValue(value, label);
+      }}
+      onContextMerge={() => {
+        hideContextMenu();
+        const selectedActionIds = getSelectedActionEntryIds();
+        if (selectedActionIds.length < 2) {
+          state.feedback = { tone: "error", text: "Select at least two actions before merging." };
+          render();
+          return;
+        }
+        openViewerMergeDialog(selectedActionIds);
+      }}
+      onContextUnmerge={() => {
+        const targetId = contextTargetId;
+        hideContextMenu();
+        if (!targetId) return;
+        viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
+        viewerState.selectedActionIds = new Set();
+        void persistViewerReviewState("Merge removed.");
+      }}
+      onDismissContext={() => {
+        if (contextMenuState.open) {
+          hideContextMenu();
+        }
+        if (viewerState.autoFollow) {
+          viewerState.autoFollow = false;
+        }
+      }}
+      onMergeValueChange={(value) => {
+        viewerState.mergeDialogValue = value;
+        viewerState.mergeDialogError = null;
+        renderViewerPane();
+      }}
+      onMergeConfirm={() => {
+        submitViewerMergeDialog();
+      }}
+      onMergeCancel={() => {
+        closeViewerMergeDialog();
+      }}
+    />
+  );
 }
 
 function hideContextMenu(): void {
-  viewerContextMenu.hidden = true;
+  contextMenuState = { ...contextMenuState, open: false };
   contextTargetId = null;
-}
-
-function renderViewerMergeDialog(): void {
-  viewerMergeDialogBackdrop.hidden = !viewerState.mergeDialogOpen;
-  viewerMergeDialogInput.value = viewerState.mergeDialogValue;
-  viewerMergeDialogError.hidden = viewerState.mergeDialogError === null;
-  viewerMergeDialogError.textContent = viewerState.mergeDialogError ?? "";
-
-  if (viewerState.mergeDialogOpen) {
-    queueMicrotask(() => viewerMergeDialogInput.focus());
-  }
+  renderViewerPane();
 }
 
 function openViewerMergeDialog(selectedActionIds: string[]): void {
   openMergeDialogState(viewerState, selectedActionIds);
-  renderViewerMergeDialog();
+  renderViewerPane();
 }
 
 function closeViewerMergeDialog(): void {
   closeMergeDialogState(viewerState);
-  renderViewerMergeDialog();
+  renderViewerPane();
 }
 
 function submitViewerMergeDialog(): void {
   const validation = validateMergeDialog(viewerState);
   if (!validation.ok) {
     viewerState.mergeDialogError = validation.error;
-    renderViewerMergeDialog();
+    renderViewerPane();
     return;
   }
 
@@ -1433,82 +1231,6 @@ function submitViewerMergeDialog(): void {
   viewerState.selectedActionIds = new Set();
   closeViewerMergeDialog();
   void persistViewerReviewState("Merged actions.");
-}
-
-function renderViewerNetworkDetail(): void {
-  const idx = viewerState.networkDetailIndex;
-  if (idx === null) {
-    viewerNetworkDetail.hidden = true;
-    return;
-  }
-
-  const item = viewerState.timeline[idx];
-  if (!item || item.kind !== "network") {
-    viewerNetworkDetail.hidden = true;
-    return;
-  }
-
-  const p = item.payload;
-  if (p.kind !== "network") {
-    viewerNetworkDetail.hidden = true;
-    return;
-  }
-
-  viewerNetworkDetail.hidden = false;
-
-  const statusCode = p.status ?? null;
-  const isSuccess = statusCode !== null && statusCode >= 200 && statusCode < 300;
-  const isError = statusCode !== null && statusCode >= 400;
-  const statusClass = isSuccess ? "network-status-success" : isError ? "network-status-error" : "";
-  const statusText = statusCode !== null ? `${statusCode}${p.statusText ? ` ${p.statusText}` : ""}` : "—";
-  const durationText = p.durationMs !== undefined ? `${p.durationMs.toFixed(0)} ms` : "—";
-
-  const reqHeaders = p.request.headers
-    .map(
-      (h) => `<div class="network-header-row">${renderCopyableValue(h.name, "header name", "network-header-name")} ${renderCopyableValue(h.value, "header value", "network-header-value")}</div>`
-    )
-    .join("");
-
-  const resHeaders = (p.response?.headers ?? [])
-    .map(
-      (h) => `<div class="network-header-row">${renderCopyableValue(h.name, "header name", "network-header-name")} ${renderCopyableValue(h.value, "header value", "network-header-value")}</div>`
-    )
-    .join("");
-
-  const reqBody = p.request.body
-    ? renderBodyCapture(p.request.body)
-    : `<span class="network-body-empty">No request body</span>`;
-
-  const resBody = p.response?.body
-    ? renderBodyCapture(p.response.body)
-    : `<span class="network-body-empty">No response body</span>`;
-
-  viewerNetworkDetailBody.innerHTML = `
-    <div class="network-detail-section">
-      <span class="network-detail-label">Request</span>
-      <div class="network-detail-row"><span class="network-detail-key">Method</span>${renderCopyableValue(p.method, "request method", "network-detail-val")}</div>
-      <div class="network-detail-row"><span class="network-detail-key">URL</span>${renderCopyableValue(p.url, "request URL", "network-detail-val network-url")}</div>
-      <div class="network-detail-row"><span class="network-detail-key">Status</span>${renderCopyableValue(statusText, "response status", `network-detail-val ${statusClass}`)}</div>
-      <div class="network-detail-row"><span class="network-detail-key">Duration</span>${renderCopyableValue(durationText, "request duration", "network-detail-val")}</div>
-      ${p.failureText ? `<div class="network-detail-row"><span class="network-detail-key">Failure</span>${renderCopyableValue(p.failureText, "failure message", "network-detail-val network-status-error")}</div>` : ""}
-    </div>
-    <div class="network-detail-section">
-      <span class="network-detail-label">Request headers</span>
-      ${reqHeaders || `<span class="network-body-empty">No headers</span>`}
-    </div>
-    <div class="network-detail-section">
-      <span class="network-detail-label">Request body</span>
-      ${reqBody}
-    </div>
-    <div class="network-detail-section">
-      <span class="network-detail-label">Response headers</span>
-      ${resHeaders || `<span class="network-body-empty">No headers</span>`}
-    </div>
-    <div class="network-detail-section">
-      <span class="network-detail-label">Response body</span>
-      ${resBody}
-    </div>
-  `;
 }
 
 function renderBodyCapture(body: { disposition: string; encoding?: "utf8" | "base64" | undefined; mimeType?: string | undefined; value?: string | undefined; byteLength?: number | undefined; omittedByteLength?: number | undefined; reason?: string | undefined }): string {
@@ -1584,8 +1306,7 @@ async function persistViewerReviewState(successText?: string): Promise<void> {
   if (!payload) return;
 
   if (!shouldPersistViewerReviewState(payload.source) || !desktopBridge) {
-    renderViewerTimeline();
-    renderViewerNetworkDetail();
+    renderViewerPane();
     if (successText) {
       state.feedback = { tone: "neutral", text: successText };
       render();
@@ -1607,8 +1328,7 @@ async function persistViewerReviewState(successText?: string): Promise<void> {
   };
   viewerState.timeline = deriveTimeline(response.archive);
   viewerState.mergeGroups = getArchiveMergeGroups(response.archive);
-  renderViewerTimeline();
-  renderViewerNetworkDetail();
+  renderViewerPane();
 
   if (successText) {
     state.feedback = { tone: "success", text: successText };
