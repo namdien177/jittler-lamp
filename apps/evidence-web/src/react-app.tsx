@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  buildVisibleActionRows,
   buildSectionTimeline,
   findActiveIndex,
   formatOffset,
@@ -105,7 +106,7 @@ function App(): React.JSX.Element {
     applyMergeGroup(validation);
   };
 
-  const handleTimelineItemClick = (event: React.MouseEvent<HTMLButtonElement>, itemId: string, itemOffsetMs: number, index: number): void => {
+  const handleTimelineItemClick = (event: React.MouseEvent<HTMLButtonElement>, itemId: string, itemOffsetMs: number): void => {
     if (state.activeSection === "actions") {
       if (event.metaKey || event.ctrlKey) {
         const selection = toggleActionSelection(
@@ -126,7 +127,18 @@ function App(): React.JSX.Element {
         setState((prev) => ({ ...prev, selectedActionIds: selection.selectedActionIds, anchorActionId: selection.anchorActionId }));
       }
     } else if (state.activeSection === "network") {
-      setState((prev) => ({ ...prev, networkDetailIndex: prev.networkDetailIndex === index ? null : index }));
+      setState((prev) => {
+        const fullTimelineIndex = prev.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
+        if (fullTimelineIndex === -1) return prev;
+
+        const timelineItem = prev.timeline[fullTimelineIndex];
+        if (!timelineItem || timelineItem.kind !== "network") return prev;
+
+        return {
+          ...prev,
+          networkDetailIndex: prev.networkDetailIndex === fullTimelineIndex ? null : fullTimelineIndex
+        };
+      });
     }
 
     if (videoRef.current) videoRef.current.currentTime = itemOffsetMs / 1000;
@@ -195,18 +207,50 @@ function App(): React.JSX.Element {
     };
   }, [state.videoUrl]);
 
-  const sectionItems = useMemo(
-    () =>
-      state.archive
-        ? buildSectionTimeline(
-            state.archive,
-            state.activeSection,
-            state.networkSubtypeFilter,
-            state.networkSearchQuery
-          )
-        : [],
-    [state.archive, state.activeSection, state.networkSubtypeFilter, state.networkSearchQuery]
-  );
+  const sectionItems = useMemo(() => {
+    if (!state.archive) return [];
+
+    const baseItems = buildSectionTimeline(
+      state.archive,
+      state.activeSection,
+      state.networkSubtypeFilter,
+      state.networkSearchQuery
+    );
+
+    if (state.activeSection !== "actions") {
+      return baseItems;
+    }
+
+    const itemsById = new Map(baseItems.map((item) => [item.id, item]));
+    const rows = buildVisibleActionRows(state.archive, state.mergeGroups);
+
+    return rows
+      .map((row) => {
+        if (row.memberActionIds.length === 1) {
+          return itemsById.get(row.id);
+        }
+
+        const memberItems = row.memberActionIds
+          .map((memberId) => itemsById.get(memberId))
+          .filter((item): item is NonNullable<typeof item> => item !== undefined);
+        const firstItem = memberItems[0];
+        const group = state.mergeGroups.find((candidate) => candidate.id === row.id);
+        if (!firstItem || !group) return undefined;
+
+        const firstMs = Math.min(...memberItems.map((item) => item.offsetMs));
+        const lastMs = Math.max(...memberItems.map((item) => item.offsetMs));
+
+        return {
+          ...firstItem,
+          id: group.id,
+          offsetMs: firstMs,
+          label: group.label,
+          tags: group.tags,
+          mergedRangeText: `${formatOffset(firstMs)}–${formatOffset(lastMs)}`
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== undefined);
+  }, [state.archive, state.activeSection, state.networkSubtypeFilter, state.networkSearchQuery, state.mergeGroups]);
 
   const updateHighlight = (): void => {
     const videoEl = videoRef.current;
@@ -319,16 +363,7 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <div
-      className="viewer"
-      onScroll={(event) => {
-        const target = event.target as HTMLElement;
-        if (!target.closest("[data-role='viewer-section-body']") || autoScrollingRef.current || !state.autoFollow) {
-          return;
-        }
-        setState((prev) => ({ ...prev, autoFollow: false }));
-      }}
-    >
+    <div className="viewer">
       <div className="viewer-header">
         <div className="viewer-header-left">
           <span className="viewer-title">{state.archive.name}</span>
@@ -363,7 +398,14 @@ function App(): React.JSX.Element {
             />
           ) : null}
 
-          <div className="viewer-section-body" data-role="viewer-section-body">
+          <div
+            className="viewer-section-body"
+            data-role="viewer-section-body"
+            onScroll={() => {
+              if (autoScrollingRef.current || !state.autoFollow) return;
+              setState((prev) => ({ ...prev, autoFollow: false }));
+            }}
+          >
             <TimelineList
               timelineRef={timelineRef}
               items={sectionItems}
@@ -454,11 +496,11 @@ function NetworkFilterBar(props: {
 
 function TimelineList(props: {
   timelineRef: React.RefObject<HTMLDivElement | null>;
-  items: ReturnType<typeof buildSectionTimeline>;
+  items: Array<ReturnType<typeof buildSectionTimeline>[number] & { mergedRangeText?: string }>;
   activeSection: TimelineSection;
   activeIndex: number;
   selectedActionIds: ReadonlySet<string>;
-  onItemClick: (event: React.MouseEvent<HTMLButtonElement>, itemId: string, itemOffsetMs: number, index: number) => void;
+  onItemClick: (event: React.MouseEvent<HTMLButtonElement>, itemId: string, itemOffsetMs: number) => void;
   onItemContextMenu: (event: React.MouseEvent<HTMLButtonElement>, itemId: string) => void;
 }): React.JSX.Element {
   return (
@@ -474,11 +516,12 @@ function TimelineList(props: {
           data-section={props.activeSection}
           data-active={idx === props.activeIndex ? "true" : "false"}
           data-selected={props.selectedActionIds.has(item.id) ? "true" : "false"}
+          data-merged={item.mergedRangeText ? "true" : undefined}
           type="button"
-          onClick={(event) => props.onItemClick(event, item.id, item.offsetMs, idx)}
+          onClick={(event) => props.onItemClick(event, item.id, item.offsetMs)}
           onContextMenu={(event) => props.onItemContextMenu(event, item.id)}
         >
-          <span className="timeline-offset">{formatOffset(item.offsetMs)}</span>
+          <span className="timeline-offset">{item.mergedRangeText ?? formatOffset(item.offsetMs)}</span>
           <span className="timeline-label">{item.label}</span>
         </button>
       ))}
