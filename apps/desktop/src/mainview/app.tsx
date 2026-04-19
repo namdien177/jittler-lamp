@@ -315,10 +315,6 @@ viewerVideo.addEventListener("error", () => {
   render();
 });
 
-document.addEventListener("click", () => {
-  contextTargetId = null;
-});
-
 drawerClose.addEventListener("click", () => {
   closeDrawer();
 });
