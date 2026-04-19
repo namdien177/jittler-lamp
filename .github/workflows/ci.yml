@@ -30,6 +30,15 @@ jobs:
       - name: Check version sync
         run: bun run release:check-version
 
+      - name: Lint backend
+        run: bun run --cwd apps/backend lint
+
+      - name: Typecheck backend
+        run: bun run --cwd apps/backend typecheck
+
+      - name: Test backend
+        run: bun run --cwd apps/backend test
+
       - name: Typecheck workspace
         run: bun run typecheck
 
