@@ -1158,15 +1158,24 @@ function renderViewerPane(): void {
         updateTimelineHighlight();
       }}
       onTimelineContext={(itemId, event) => {
-        if (viewerState.activeSection !== "actions" || !payload) return;
+        if (viewerState.activeSection !== "actions" || !payload || !desktopBridge) return;
         event.preventDefault();
         contextTargetId = itemId;
         if (!viewerState.selectedActionIds.has(itemId)) {
           const selection = selectSingleAction(itemId);
           viewerState.selectedActionIds = selection.selectedActionIds;
           viewerState.anchorActionId = selection.anchorActionId;
-          renderViewerPane();
         }
+        const isMerged = Boolean(viewerState.mergeGroups.find((group) => group.id === itemId));
+        const selectedActionIds = getSelectedActionEntryIds();
+        const canMerge = !isMerged && selectedActionIds.length >= 2;
+        const canUnmerge = isMerged;
+        if (!canMerge && !canUnmerge) return;
+        const menu: import("../rpc").ContextMenuItem[] = [];
+        if (canMerge) menu.push({ label: "Merge Actions…", action: "merge" });
+        if (canUnmerge) menu.push({ label: "Un-merge", action: "unmerge" });
+        void desktopBridge.rpc.request.showContextMenu({ menu });
+        renderViewerPane();
       }}
       onFocus={() => {
         viewerState.autoFollow = true;
