@@ -38,9 +38,9 @@ function networkEdgeCaseEvents(): SessionEvent[] {
             value: JSON.stringify({ query: "query EdgeCase { viewer { id } }", variables: { unicode: "🙂", nullish: null } })
           }
         },
+        status: 500,
+        statusText: "Internal Server Error",
         response: {
-          status: 500,
-          statusText: "Internal Server Error",
           headers: [{ name: "content-type", value: "application/json" }],
           setCookieHeaders: ["id=abc; Secure; HttpOnly"],
           setCookies: [{ name: "id", value: "abc", raw: "id=abc; Secure; HttpOnly", secure: true, httpOnly: true }],
@@ -65,9 +65,9 @@ function networkEdgeCaseEvents(): SessionEvent[] {
           headers: [{ name: "accept", value: "*/*" }],
           cookies: []
         },
+        status: 200,
+        statusText: "OK",
         response: {
-          status: 200,
-          statusText: "OK",
           headers: [{ name: "content-encoding", value: "gzip" }],
           setCookieHeaders: [],
           setCookies: [],
@@ -103,7 +103,6 @@ function networkEdgeCaseEvents(): SessionEvent[] {
 
 function createCanonicalArchive(actionCount: number): SessionArchive {
   const draft = createSessionDraft({
-    sessionId: CANONICAL_SESSION_ID,
     page: {
       title: "Canonical Fixture",
       url: "https://example.com"
