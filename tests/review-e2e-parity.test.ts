@@ -100,7 +100,7 @@ function assertGoldenReviewFlow(archive: ReturnType<typeof makeSampleArchive>, m
 describe("review E2E parity: web evidence app", () => {
   test("loads sample bundle, navigates timeline/filtering, merges actions, exports reviewed ZIP, and re-imports annotations", async () => {
     const zipBytes = makeSampleZip();
-    const loaded = await loadSessionZip(new File([zipBytes], "sample.zip", { type: "application/zip" }));
+    const loaded = await loadSessionZip(new File([zipBytes as Uint8Array<ArrayBuffer>], "sample.zip", { type: "application/zip" }));
     const mergeGroup = buildMergeGroupFromArchive(loaded.archive);
 
     const exportedZip = buildReviewedSessionZip({
@@ -110,7 +110,7 @@ describe("review E2E parity: web evidence app", () => {
       now: new Date("2026-02-10T12:00:00.000Z")
     });
 
-    const reloaded = await loadSessionZip(new File([exportedZip], "reviewed.zip", { type: "application/zip" }));
+    const reloaded = await loadSessionZip(new File([exportedZip as Uint8Array<ArrayBuffer>], "reviewed.zip", { type: "application/zip" }));
 
     assertGoldenReviewFlow(loaded.archive, reloaded.archive);
 
