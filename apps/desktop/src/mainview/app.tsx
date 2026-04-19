@@ -11,6 +11,7 @@ import { applyViewerPayload, createViewerState, resetViewerState, type ViewerSta
 import { getViewerSourceLabel, shouldClearViewerTempSession } from "./viewer-source";
 import { ViewerPane } from "./viewer-pane";
 import { createDesktopNotesAdapter, createDesktopPlaybackAdapter, createDesktopShareAdapter, createDesktopStorageAdapter } from "./adapters";
+import { reportDesktopViewerTelemetry } from "./viewer-rollout";
 
 type FeedbackTone = "neutral" | "success" | "error";
 
@@ -217,6 +218,8 @@ const viewerNotesTextarea = queryRequiredElement<HTMLTextAreaElement>(appRoot, "
 const viewerNotesSave = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-notes-save']");
 const viewerReactRootElement = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-react-root']");
 const viewerReactRoot = createRoot(viewerReactRootElement);
+let hasReportedViewerBoot = false;
+reportDesktopViewerTelemetry({ implementation: "react", phase: "selected" });
 const playbackAdapter = desktopBridge
   ? createDesktopPlaybackAdapter({
     bridge: desktopBridge,
@@ -1085,7 +1088,7 @@ function buildTimelineRows() {
   return rows;
 }
 
-function renderViewerPane(): void {
+function renderReactViewerPane(): void {
   const payload = viewerState.payload;
   const timelineRows = buildTimelineRows();
   const detailItem = viewerState.networkDetailIndex === null ? null : viewerState.timeline[viewerState.networkDetailIndex] ?? null;
@@ -1202,6 +1205,19 @@ function renderViewerPane(): void {
       }}
     />
   );
+}
+
+function renderViewerPane(): void {
+  try {
+    renderReactViewerPane();
+    if (!hasReportedViewerBoot) {
+      reportDesktopViewerTelemetry({ implementation: "react", phase: "booted" });
+      hasReportedViewerBoot = true;
+    }
+  } catch (error) {
+    reportDesktopViewerTelemetry({ implementation: "react", phase: "boot_failed", error });
+    throw error;
+  }
 }
 
 function openViewerMergeDialog(selectedActionIds: string[]): void {
