@@ -5,54 +5,29 @@ import { join } from "node:path";
 
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { sessionArchiveSchema } from "@jittle-lamp/shared";
+import {
+  CANONICAL_NOW,
+  canonicalArchiveBundles,
+  canonicalCorruptedZipBundles,
+  canonicalRecordingBytes,
+  createFixtureZip
+} from "./fixtures/canonical-fixtures";
 
 import { _testOverrideDb, getSessionNotes, loadLibrarySession, saveLibrarySessionReviewState, scanLibrarySessions, setSessionNotes } from "../apps/desktop/src/companion/sessions-db";
 import { buildSessionZip, clearTempSession, importZipBundle, loadLocalSession } from "../apps/desktop/src/bun/zip-import";
 import { buildReviewedArchive, buildReviewedSessionZip } from "../apps/evidence-web/src/archive-export";
 
-const NOW = new Date("2024-06-01T12:00:00.000Z").toISOString();
-const SESSION_ID = "jl_test_session_001";
-
-const VALID_BUNDLE = {
-  schemaVersion: 3,
-  sessionId: SESSION_ID,
-  name: "Test Session",
-  createdAt: NOW,
-  updatedAt: NOW,
-  phase: "ready",
-  page: {
-    url: "https://example.com/",
-    title: "Example"
-  },
-  artifacts: [
-    { kind: "recording.webm", relativePath: `${SESSION_ID}/recording.webm`, mimeType: "video/webm" },
-    { kind: "session.archive.json", relativePath: `${SESSION_ID}/session.archive.json`, mimeType: "application/json" }
-  ],
-  sections: {
-    actions: [
-      {
-        id: `${SESSION_ID}:actions:000000`,
-        seq: 0,
-        at: NOW,
-        tags: [],
-        payload: { kind: "lifecycle", phase: "ready", detail: "Session complete." }
-      }
-    ],
-    console: [],
-    network: []
-  },
-  annotations: [],
-  notes: []
-};
+const NOW = CANONICAL_NOW;
+const VALID_BUNDLE = canonicalArchiveBundles.small;
+const SESSION_ID = VALID_BUNDLE.sessionId;
 
 function makeZip(bundleOverride?: object): Uint8Array {
-  const bundle = bundleOverride ?? VALID_BUNDLE;
-  const eventsBytes = strToU8(JSON.stringify(bundle));
-  const webmBytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]);
-
+  if (!bundleOverride) return createFixtureZip(VALID_BUNDLE);
+  const merged = { ...VALID_BUNDLE, ...(bundleOverride as object) };
+  const eventsBytes = strToU8(JSON.stringify(merged));
   return zipSync({
     "session.archive.json": eventsBytes,
-    "recording.webm": webmBytes
+    "recording.webm": canonicalRecordingBytes
   });
 }
 
@@ -318,8 +293,7 @@ describe("importZipBundle", () => {
   });
 
   test("throws when session.archive.json is missing from ZIP", async () => {
-    const webmBytes = new Uint8Array([0x1a, 0x45]);
-    const zip = zipSync({ "recording.webm": webmBytes });
+    const zip = canonicalCorruptedZipBundles.missingArchive;
 
     try {
       await importZipBundle(zip);
@@ -331,8 +305,7 @@ describe("importZipBundle", () => {
   });
 
   test("throws when recording.webm is missing from ZIP", async () => {
-    const eventsBytes = strToU8(JSON.stringify(VALID_BUNDLE));
-    const zip = zipSync({ "session.archive.json": eventsBytes });
+    const zip = canonicalCorruptedZipBundles.missingRecording;
 
     try {
       await importZipBundle(zip);
@@ -346,7 +319,7 @@ describe("importZipBundle", () => {
   test("accepts nested archive and video entries inside ZIPs", async () => {
     const nestedZip = zipSync({
       [`${SESSION_ID}/session.archive.json`]: strToU8(JSON.stringify(VALID_BUNDLE)),
-      [`${SESSION_ID}/recording.webm`]: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])
+      [`${SESSION_ID}/recording.webm`]: canonicalRecordingBytes
     });
 
     const payload = await importZipBundle(nestedZip);
@@ -355,10 +328,20 @@ describe("importZipBundle", () => {
   });
 
   test("throws when session.archive.json fails schema validation", async () => {
-    const zip = makeZip({ schemaVersion: 99, bad: "data" });
+    const zip = canonicalCorruptedZipBundles.schemaInvalidArchive;
     try {
       await importZipBundle(zip);
       throw new Error("Expected importZipBundle to reject invalid session bundle JSON.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect(String(error)).toContain("Invalid session bundle");
+    }
+  });
+
+  test("throws when session.archive.json is corrupted JSON", async () => {
+    try {
+      await importZipBundle(canonicalCorruptedZipBundles.invalidArchiveJson);
+      throw new Error("Expected importZipBundle to reject malformed JSON.");
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect(String(error)).toContain("Invalid session bundle");
@@ -417,7 +400,7 @@ describe("web review-state export helpers", () => {
           createdAt: NOW
         }
       ],
-      recordingBytes: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]),
+      recordingBytes: canonicalRecordingBytes,
       now: new Date("2024-06-01T12:06:00.000Z")
     });
 
@@ -466,7 +449,7 @@ describe("loadLocalSession", () => {
 
   test("returns a ViewerPayload with source=local for a valid folder", async () => {
     await writeFile(join(folderPath, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
-    await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]));
+    await writeFile(join(folderPath, "recording.webm"), canonicalRecordingBytes);
 
     const payload = await loadLocalSession(folderPath);
 
@@ -542,7 +525,7 @@ describe("buildSessionZip / export round-trip", () => {
     folderPath = join(tmpdir(), `jl-test-export-${Date.now()}`);
     await mkdir(folderPath, { recursive: true });
     await writeFile(join(folderPath, "session.archive.json"), JSON.stringify(VALID_BUNDLE));
-    await writeFile(join(folderPath, "recording.webm"), new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]));
+    await writeFile(join(folderPath, "recording.webm"), canonicalRecordingBytes);
   });
 
   afterEach(async () => {
@@ -583,7 +566,7 @@ describe("buildSessionZip / export round-trip", () => {
   });
 
   test("round-trip preserves the original webm bytes exactly", async () => {
-    const originalBytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]);
+    const originalBytes = canonicalRecordingBytes;
 
     const zipBytes = await buildSessionZip(folderPath);
     const files = unzipSync(zipBytes);
