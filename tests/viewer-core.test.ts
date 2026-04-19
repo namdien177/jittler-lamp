@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { createSessionArchive, createSessionDraft, sessionArchiveSchema, type SessionEvent } from "@jittle-lamp/shared";
+import { createSessionArchive, createSessionDraft, sessionArchiveSchema, type SessionArchive, type SessionEvent } from "@jittle-lamp/shared";
+import { CANONICAL_NOW, canonicalArchiveBundles } from "./fixtures/canonical-fixtures";
 import {
   applyArchiveToViewerCore,
   closeMergeDialog,
@@ -17,7 +18,7 @@ import {
   type ViewerCoreState
 } from "@jittle-lamp/viewer-core";
 
-const NOW = "2024-06-01T12:00:00.000Z";
+const NOW = CANONICAL_NOW;
 
 function makeArchive(events: SessionEvent[]) {
   const draft = createSessionDraft({
@@ -52,42 +53,8 @@ function makeAnnotatedArchive(events: SessionEvent[]) {
   });
 }
 
-function makeMergeArchive() {
-  return makeArchive([
-    { at: NOW, payload: { kind: "lifecycle", phase: "recording", detail: "Started" } },
-    { at: "2024-06-01T12:00:01.000Z", payload: { kind: "interaction", type: "click", selector: "#a" } },
-    { at: "2024-06-01T12:00:02.000Z", payload: { kind: "interaction", type: "click", selector: "#b" } },
-    { at: "2024-06-01T12:00:03.000Z", payload: { kind: "interaction", type: "click", selector: "#c" } },
-    { at: "2024-06-01T12:00:04.000Z", payload: { kind: "interaction", type: "click", selector: "#d" } },
-    {
-      at: "2024-06-01T12:00:05.000Z",
-      payload: {
-        kind: "network",
-        method: "GET",
-        url: "https://example.com/api/users",
-        subtype: "xhr",
-        request: {
-          headers: [{ name: "x-trace-id", value: "trace-123" }],
-          cookies: []
-        },
-        response: {
-          headers: [{ name: "content-type", value: "application/json" }],
-          setCookieHeaders: [],
-          setCookies: [],
-          body: { disposition: "captured", value: "hello response", encoding: "utf8" }
-        }
-      }
-    },
-    {
-      at: "2024-06-01T12:00:06.000Z",
-      payload: {
-        kind: "network",
-        method: "GET",
-        url: "https://example.com/assets/app.css",
-        request: { headers: [], cookies: [] }
-      }
-    }
-  ]);
+function makeMergeArchive(): SessionArchive {
+  return canonicalArchiveBundles.medium;
 }
 
 function mutateCoreState(state: ViewerCoreState): void {
@@ -248,10 +215,10 @@ describe("viewer core command helpers", () => {
   test("filter/search results remain consistent across repeated and equivalent queries", () => {
     const archive = makeMergeArchive();
 
-    const first = deriveSectionTimeline(archive, "network", "all", "trace-123").map((item) => item.id);
-    const second = deriveSectionTimeline(archive, "network", "all", "TRACE-123").map((item) => item.id);
-    const regex = deriveSectionTimeline(archive, "network", "all", "/trace-\\d+/i").map((item) => item.id);
-    const subtypeFiltered = deriveSectionTimeline(archive, "network", "xhr", "trace-123").map((item) => item.id);
+    const first = deriveSectionTimeline(archive, "network", "all", "req-timeout").map((item) => item.id);
+    const second = deriveSectionTimeline(archive, "network", "all", "REQ-TIMEOUT").map((item) => item.id);
+    const regex = deriveSectionTimeline(archive, "network", "all", "/req-timeout/i").map((item) => item.id);
+    const subtypeFiltered = deriveSectionTimeline(archive, "network", "xhr", "req-timeout").map((item) => item.id);
 
     expect(first).toEqual(second);
     expect(first).toEqual(regex);
@@ -272,7 +239,7 @@ describe("viewer core command helpers", () => {
       selectedActionIds: [actionIds[1]!, actionIds[2]!]
     });
 
-    expect(getContiguousMergeableSelection(archive, [], [actionIds[0]!, actionIds[1]!, actionIds[2]!, actionIds[3]!])).toEqual(actionIds);
+    expect(getContiguousMergeableSelection(archive, [], [actionIds[0]!, actionIds[1]!, actionIds[2]!, actionIds[3]!])).toEqual(actionIds.slice(0, 4));
     expect(getContiguousMergeableSelection(archive, [], [actionIds[0]!, actionIds[3]!])).toEqual([]);
     expect(getContiguousMergeableSelection(archive, [merged], [actionIds[0]!, actionIds[3]!])).toEqual([]);
     expect(getContiguousMergeableSelection(archive, [merged], ["merge-middle", actionIds[3]!])).toEqual([]);
