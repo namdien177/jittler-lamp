@@ -1,16 +1,16 @@
 import { Elysia } from "elysia";
 
 export const requestContext = new Elysia({ name: "request-context" })
-	.derive(({ request, store }) => {
+	.derive(({ request, logger }) => {
 		const incomingRequestId = request.headers.get("x-request-id");
 		const requestId = incomingRequestId ?? crypto.randomUUID();
-		const logger = (
-			store as { logger: { child: (meta: object) => unknown } }
-		).logger.child({ requestId });
+		const requestLogger = (
+			logger as { child: (meta: object) => unknown }
+		).child({ requestId });
 
 		return {
 			requestId,
-			logger,
+			logger: requestLogger,
 		};
 	})
 	.onAfterHandle(({ requestId, set }) => {
