@@ -11,6 +11,9 @@ const hasMacSigningCredentials = Boolean(
   process.env.ELECTROBUN_DEVELOPER_ID && process.env.ELECTROBUN_TEAMID && (hasAppleApiKeyAuth || hasAppleIdAuth)
 );
 
+const buildEnv = process.env.ELECTROBUN_BUILD_ENV ?? "dev";
+const useCEF = buildEnv === "dev";
+
 const config = {
   app: {
     name: "Jittle Lamp",
@@ -36,7 +39,9 @@ const config = {
       target: "dmg",
       category: "public.app-category.productivity",
       codesign: hasMacSigningCredentials,
-      notarize: hasMacSigningCredentials
+      notarize: hasMacSigningCredentials,
+      bundleCEF: useCEF,
+      defaultRenderer: useCEF ? "cef" : "native"
     }
   }
 };

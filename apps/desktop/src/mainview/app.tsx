@@ -1,6 +1,6 @@
 import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, SessionRecord, ViewerPayload } from "../rpc";
 import { findActiveIndex, formatOffset } from "@jittle-lamp/shared";
-import type { NetworkSubtype, TimelineSection } from "@jittle-lamp/shared";
+import type { TimelineSection } from "@jittle-lamp/shared";
 import { createMergeGroup, deriveSectionTimeline, deriveTimeline, getArchiveMergeGroups, getContiguousMergeableSelection, openMergeDialog as openMergeDialogState, closeMergeDialog as closeMergeDialogState, selectActionRange, selectSingleAction, toggleActionSelection, validateMergeDialog } from "@jittle-lamp/viewer-core";
 import { createRoot } from "react-dom/client";
 import { createDesktopBridge } from "./desktop-bridge";
@@ -228,7 +228,25 @@ const playbackAdapter = desktopBridge
   : null;
 
 let contextTargetId: string | null = null;
-let contextMenuState = { open: false, x: 0, y: 0, canMerge: false, canUnmerge: false };
+
+desktopBridge?.onContextMenuClicked(({ action }) => {
+  if (action === "merge") {
+    const selectedActionIds = getSelectedActionEntryIds();
+    if (selectedActionIds.length < 2) {
+      state.feedback = { tone: "error", text: "Select at least two actions before merging." };
+      render();
+      return;
+    }
+    openViewerMergeDialog(selectedActionIds);
+  } else if (action === "unmerge") {
+    const targetId = contextTargetId;
+    contextTargetId = null;
+    if (!targetId) return;
+    viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
+    viewerState.selectedActionIds = new Set();
+    void persistViewerReviewState("Merge removed.");
+  }
+});
 
 gearBtn.addEventListener("click", () => {
   openDrawer();
@@ -297,10 +315,8 @@ viewerVideo.addEventListener("error", () => {
   render();
 });
 
-document.addEventListener("click", (event) => {
-  if (contextMenuState.open && event.target instanceof Element && !viewerReactRootElement.contains(event.target)) {
-    hideContextMenu();
-  }
+document.addEventListener("click", () => {
+  contextTargetId = null;
 });
 
 drawerClose.addEventListener("click", () => {
@@ -941,7 +957,7 @@ async function closeViewer(): Promise<void> {
 
   resetViewerState(viewerState);
 
-  hideContextMenu();
+  contextTargetId = null;
   playbackAdapter?.releaseSource?.();
   viewerVideoState.loadVersion += 1;
   viewerOverlay.dataset.open = "false";
@@ -1098,7 +1114,6 @@ function renderViewerPane(): void {
       autoFollow={viewerState.autoFollow}
       focusVisible={!viewerState.autoFollow}
       networkDetail={detailItem}
-      contextMenu={contextMenuState}
       mergeDialog={{ open: viewerState.mergeDialogOpen, value: viewerState.mergeDialogValue, error: viewerState.mergeDialogError }}
       onSectionChange={(section) => {
         viewerState.activeSection = section;
@@ -1154,17 +1169,8 @@ function renderViewerPane(): void {
           const selection = selectSingleAction(itemId);
           viewerState.selectedActionIds = selection.selectedActionIds;
           viewerState.anchorActionId = selection.anchorActionId;
+          renderViewerPane();
         }
-        const isMerged = Boolean(viewerState.mergeGroups.find((group) => group.id === itemId));
-        const selectedActionIds = getSelectedActionEntryIds();
-        contextMenuState = {
-          open: true,
-          x: event.clientX,
-          y: event.clientY,
-          canMerge: !isMerged && selectedActionIds.length >= 2,
-          canUnmerge: isMerged
-        };
-        renderViewerPane();
       }}
       onFocus={() => {
         viewerState.autoFollow = true;
@@ -1177,29 +1183,6 @@ function renderViewerPane(): void {
       }}
       onCopy={(value, label) => {
         void copyViewerValue(value, label);
-      }}
-      onContextMerge={() => {
-        hideContextMenu();
-        const selectedActionIds = getSelectedActionEntryIds();
-        if (selectedActionIds.length < 2) {
-          state.feedback = { tone: "error", text: "Select at least two actions before merging." };
-          render();
-          return;
-        }
-        openViewerMergeDialog(selectedActionIds);
-      }}
-      onContextUnmerge={() => {
-        const targetId = contextTargetId;
-        hideContextMenu();
-        if (!targetId) return;
-        viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
-        viewerState.selectedActionIds = new Set();
-        void persistViewerReviewState("Merge removed.");
-      }}
-      onDismissContext={() => {
-        if (contextMenuState.open) {
-          hideContextMenu();
-        }
       }}
       onMergeValueChange={(value) => {
         viewerState.mergeDialogValue = value;
@@ -1214,12 +1197,6 @@ function renderViewerPane(): void {
       }}
     />
   );
-}
-
-function hideContextMenu(): void {
-  contextMenuState = { ...contextMenuState, open: false };
-  contextTargetId = null;
-  renderViewerPane();
 }
 
 function openViewerMergeDialog(selectedActionIds: string[]): void {

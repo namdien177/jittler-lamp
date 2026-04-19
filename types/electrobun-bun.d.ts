@@ -36,7 +36,9 @@ declare module "electrobun/bun" {
         requests: Record<string, (params: any) => Promise<any> | any>;
         messages: Record<string, (payload: any) => Promise<void> | void>;
       };
-    }): unknown;
+    }): {
+      send: Record<string, (payload: any) => void>;
+    };
   };
 
   export const Utils: {
@@ -50,4 +52,23 @@ declare module "electrobun/bun" {
     openPath(path: string): void;
     showItemInFolder(path: string): void;
   };
+
+  export interface ContextMenuItemConfig {
+    type?: "normal" | "divider" | "separator";
+    label?: string;
+    tooltip?: string;
+    action?: string;
+    role?: string;
+    data?: unknown;
+    submenu?: ContextMenuItemConfig[];
+    enabled?: boolean;
+    checked?: boolean;
+    hidden?: boolean;
+    accelerator?: string;
+  }
+
+  export namespace ContextMenu {
+    function showContextMenu(menu: ContextMenuItemConfig[]): void;
+    function on(name: "context-menu-clicked", handler: (event: unknown) => void): void;
+  }
 }
