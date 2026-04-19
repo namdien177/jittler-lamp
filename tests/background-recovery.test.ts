@@ -38,6 +38,35 @@ beforeEach(async () => {
 });
 
 describe("background recovery", () => {
+  test("does not claim offscreen-only runtime messages", async () => {
+    const result = await chromeHarness.dispatchRuntimeMessage({
+      type: "jl/offscreen-stop-and-export",
+      sessionId: "jl_test1234",
+      archive: {
+        schemaVersion: 3,
+        sessionId: "jl_test1234",
+        name: "Example",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        phase: "processing",
+        page: {
+          title: "Example",
+          url: "https://example.com"
+        },
+        artifacts: [],
+        sections: {
+          actions: [],
+          console: [],
+          network: []
+        },
+        annotations: [],
+        notes: []
+      }
+    });
+
+    expect(result.responded).toBeFalse();
+  });
+
   test("marks pending recovery and schedules an alarm when debugger detaches during loading", async () => {
     const draft = createRecordingDraft();
     chromeHarness.setTab({
@@ -128,6 +157,27 @@ describe("background recovery", () => {
     expect(
       chromeHarness.runtimeMessages.some((message) => hasMessageType(message, "jl/offscreen-stop-and-export"))
     ).toBeTrue();
+  });
+
+  test("returns a clear error when the offscreen recorder does not answer stop requests", async () => {
+    chromeHarness.setOffscreenStopResponse(undefined);
+    await backgroundTest.saveDraft(createRecordingDraft());
+
+    const result = await chromeHarness.dispatchRuntimeMessage({
+      type: "jl/popup-stop-recording"
+    });
+
+    const activeDraft = await backgroundTest.readDraft();
+
+    expect(result.responded).toBeTrue();
+    expect(
+      result.response &&
+        typeof result.response === "object" &&
+        "ok" in result.response &&
+        (result.response as { ok?: unknown }).ok === false
+    ).toBeTrue();
+    expect(activeDraft?.phase).toBe("failed");
+    expect(lastLifecycleDetail(activeDraft)).toContain("Failed to finalize recording: Offscreen recorder did not respond.");
   });
 
   test("worker restart resumes stored recovery when the tab is already complete", async () => {
@@ -301,6 +351,15 @@ function createChromeHarness() {
   const clearedAlarms: string[] = [];
 
   let offscreenPresent = false;
+  let offscreenStartResponse: unknown = {
+    ok: true
+  };
+  let offscreenStopResponse: unknown = {
+    ok: true,
+    destination: "downloads",
+    recordingBytes: 128,
+    eventBytes: 64
+  };
 
   const chrome = {
     runtime: {
@@ -325,18 +384,11 @@ function createChromeHarness() {
         runtimeMessages.push(message);
 
         if (hasMessageType(message, "jl/offscreen-stop-and-export")) {
-          return {
-            ok: true,
-            destination: "downloads",
-            recordingBytes: 128,
-            eventBytes: 64
-          };
+          return offscreenStopResponse;
         }
 
         if (hasMessageType(message, "jl/offscreen-start-recording")) {
-          return {
-            ok: true
-          };
+          return offscreenStartResponse;
         }
 
         return { ok: true };
@@ -490,6 +542,62 @@ function createChromeHarness() {
     getSessionValue(key: string): unknown {
       return sessionStorage.get(key);
     },
+    async dispatchRuntimeMessage(
+      message: unknown,
+      sender: chrome.runtime.MessageSender = {}
+    ): Promise<{ responded: boolean; response?: unknown }> {
+      return await new Promise((resolve) => {
+        let pendingAsyncResponse = false;
+        let settled = false;
+
+        const sendResponse = (response?: unknown) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          resolve({
+            responded: true,
+            response
+          });
+        };
+
+        for (const listener of messageListeners) {
+          const result = listener(message, sender, sendResponse);
+
+          if (result === true) {
+            pendingAsyncResponse = true;
+          }
+        }
+
+        queueMicrotask(() => {
+          if (!pendingAsyncResponse && !settled) {
+            settled = true;
+            resolve({
+              responded: false
+            });
+            return;
+          }
+
+          setTimeout(() => {
+            if (settled) {
+              return;
+            }
+
+            settled = true;
+            resolve({
+              responded: false
+            });
+          }, 25);
+        });
+      });
+    },
+    setOffscreenStartResponse(response: unknown): void {
+      offscreenStartResponse = response;
+    },
+    setOffscreenStopResponse(response: unknown): void {
+      offscreenStopResponse = response;
+    },
     getClientMatches(): Array<{ url: string }> {
       return offscreenPresent ? [{ url: chrome.runtime.getURL("offscreen.html") }] : [];
     },
@@ -504,6 +612,15 @@ function createChromeHarness() {
       tabsById.clear();
       alarms.clear();
       offscreenPresent = false;
+      offscreenStartResponse = {
+        ok: true
+      };
+      offscreenStopResponse = {
+        ok: true,
+        destination: "downloads",
+        recordingBytes: 128,
+        eventBytes: 64
+      };
 
       if (!options?.preserveStorage) {
         sessionStorage.clear();

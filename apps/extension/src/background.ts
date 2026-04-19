@@ -221,6 +221,10 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
+  if (!isHandledRuntimeMessage(rawMessage)) {
+    return false;
+  }
+
   void handleIncomingMessage(rawMessage, sender)
     .then((response) => {
       if (response !== undefined) {
@@ -332,14 +336,12 @@ async function startRecordingSession(): Promise<void> {
 
     const streamId = await getTabMediaStreamId(tab.id);
 
-    const offscreenResponse = offscreenResponseSchema.parse(
-      await chrome.runtime.sendMessage({
-        type: "jl/offscreen-start-recording",
-        sessionId: draft.sessionId,
-        tabId: tab.id,
-        streamId
-      })
-    );
+    const offscreenResponse = await sendOffscreenMessage({
+      type: "jl/offscreen-start-recording",
+      sessionId: draft.sessionId,
+      tabId: tab.id,
+      streamId
+    });
 
     if (!offscreenResponse.ok) {
       throw new Error(offscreenResponse.error ?? "Offscreen recorder failed to start.");
@@ -392,13 +394,11 @@ async function stopRecordingSession(detail: string): Promise<void> {
     await signalContentCaptureEnded(tabId, processingDraft.sessionId);
     await safeDetachDebugger(tabId);
 
-    const offscreenResponse = offscreenResponseSchema.parse(
-        await chrome.runtime.sendMessage({
-          type: "jl/offscreen-stop-and-export",
-          sessionId: processingDraft.sessionId,
-          archive: createSessionArchive(processingDraft)
-        })
-      );
+    const offscreenResponse = await sendOffscreenMessage({
+      type: "jl/offscreen-stop-and-export",
+      sessionId: processingDraft.sessionId,
+      archive: createSessionArchive(processingDraft)
+    });
 
     if (!offscreenResponse.ok) {
       throw new Error(offscreenResponse.error ?? "Offscreen export failed.");
@@ -2043,6 +2043,33 @@ function toConsoleLevel(type: string | undefined): "debug" | "info" | "warn" | "
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isHandledRuntimeMessage(rawMessage: unknown): boolean {
+  return popupRequestSchema.safeParse(rawMessage).success || contentRuntimeMessageSchema.safeParse(rawMessage).success;
+}
+
+async function sendOffscreenMessage(
+  message:
+    | {
+        type: "jl/offscreen-start-recording";
+        sessionId: string;
+        tabId: number;
+        streamId: string;
+      }
+    | {
+        type: "jl/offscreen-stop-and-export";
+        sessionId: string;
+        archive: ReturnType<typeof createSessionArchive>;
+      }
+) {
+  const rawResponse = await chrome.runtime.sendMessage(message);
+
+  if (rawResponse === undefined) {
+    throw new Error("Offscreen recorder did not respond.");
+  }
+
+  return offscreenResponseSchema.parse(rawResponse);
 }
 
 async function queueDraftMutation<T>(operation: () => Promise<T>): Promise<T> {
