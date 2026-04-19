@@ -22,10 +22,12 @@ describe("web session strategies", () => {
     const strategies = createWebSessionStrategies();
 
     for (const [size, zipBytes] of Object.entries(canonicalZipBundles)) {
+      const expectedArchive = canonicalArchiveBundles[size as keyof typeof canonicalArchiveBundles];
       const zipFile = new File([toArrayBuffer(zipBytes)], `${size}.zip`, { type: "application/zip" });
       const payload = await strategies.local.load(zipFile);
 
-      expect(payload.archive.sessionId).toBe(canonicalArchiveBundles[size as keyof typeof canonicalArchiveBundles].sessionId);
+      expect(payload.archive.sessionId).toBe(expectedArchive.sessionId);
+      expect(payload.archive.sections.actions.length).toBe(expectedArchive.sections.actions.length);
       expect(payload.archive.sections.network.length).toBeGreaterThan(0);
       expect(payload.archive.annotations.some((annotation) => annotation.kind === "merge-group")).toBe(true);
     }

@@ -119,11 +119,12 @@ function createCanonicalArchive(actionCount: number): SessionArchive {
     ...makeActionEvents(actionCount),
     ...networkEdgeCaseEvents()
   ];
+  const updatedAt = events.reduce((latest, event) => (event.at > latest ? event.at : latest), CANONICAL_NOW);
 
   const archive = createSessionArchive({
     ...draft,
     createdAt: CANONICAL_NOW,
-    updatedAt: events.at(-1)?.at ?? CANONICAL_NOW,
+    updatedAt,
     phase: "ready",
     events
   });
