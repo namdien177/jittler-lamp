@@ -3,13 +3,16 @@ import type { NotesAdapter, PlaybackAdapter, ShareAdapter, StorageAdapter, Viewe
 
 import { buildReviewedSessionZip } from "./archive-export";
 import { loadSessionZip } from "./loader";
+import { createWebSessionStrategies } from "./session-strategy";
 
 export type WebLoadedSession = Awaited<ReturnType<typeof loadSessionZip>>;
 export type WebViewerAdapters = ViewerAdapters<WebLoadedSession, "web">;
 
 export function createWebStorageAdapter(): StorageAdapter<WebLoadedSession> {
+  const strategies = createWebSessionStrategies();
+
   return {
-    loadFromZipFile: (file) => loadSessionZip(file)
+    loadFromZipFile: (file) => strategies.local.load(file)
   };
 }
 
