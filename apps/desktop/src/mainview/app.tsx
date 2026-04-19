@@ -1118,19 +1118,19 @@ function renderReactViewerPane(): void {
       onSectionChange={(section) => {
         viewerState.activeSection = section;
         viewerState.networkDetailIndex = null;
-        renderReactViewerPane();
+        renderViewerPane();
         updateTimelineHighlight();
       }}
       onSubtypeChange={(subtype) => {
         viewerState.networkSubtypeFilter = subtype;
         viewerState.networkDetailIndex = null;
-        renderReactViewerPane();
+        renderViewerPane();
         updateTimelineHighlight();
       }}
       onSearchChange={(value) => {
         viewerState.networkSearchQuery = value;
         viewerState.networkDetailIndex = null;
-        renderReactViewerPane();
+        renderViewerPane();
         updateTimelineHighlight();
       }}
       onTimelineClick={(itemId, offsetMs, event) => {
@@ -1158,7 +1158,7 @@ function renderReactViewerPane(): void {
             viewerState.networkDetailIndex = timelineItem?.kind === "network" && viewerState.networkDetailIndex !== fullTimelineIndex ? fullTimelineIndex : null;
           }
         }
-        renderReactViewerPane();
+        renderViewerPane();
         updateTimelineHighlight();
       }}
       onTimelineContext={(itemId, event) => {
@@ -1179,16 +1179,16 @@ function renderReactViewerPane(): void {
         if (canMerge) menu.push({ label: "Merge Actions…", action: "merge" });
         if (canUnmerge) menu.push({ label: "Un-merge", action: "unmerge" });
         void desktopBridge.rpc.request.showContextMenu({ menu });
-        renderReactViewerPane();
+        renderViewerPane();
       }}
       onFocus={() => {
         viewerState.autoFollow = true;
-        renderReactViewerPane();
+        renderViewerPane();
         updateTimelineHighlight();
       }}
       onCloseDetail={() => {
         viewerState.networkDetailIndex = null;
-        renderReactViewerPane();
+        renderViewerPane();
       }}
       onCopy={(value, label) => {
         void copyViewerValue(value, label);
@@ -1196,7 +1196,7 @@ function renderReactViewerPane(): void {
       onMergeValueChange={(value) => {
         viewerState.mergeDialogValue = value;
         viewerState.mergeDialogError = null;
-        renderReactViewerPane();
+        renderViewerPane();
       }}
       onMergeConfirm={() => {
         submitViewerMergeDialog();

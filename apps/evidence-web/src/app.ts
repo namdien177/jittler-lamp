@@ -7,8 +7,21 @@ import {
 } from "./viewer-rollout";
 
 function bootstrapLegacy(): void {
-  // Legacy path currently reuses the existing viewer shell while rollout stabilizes.
-  bootstrapReact();
+  const root = document.getElementById("app");
+  if (!root) throw new Error("Evidence web root element was not found.");
+  root.innerHTML = "";
+
+  const container = document.createElement("main");
+  container.className = "viewer-empty";
+
+  const title = document.createElement("h2");
+  title.textContent = "Legacy viewer";
+
+  const message = document.createElement("p");
+  message.textContent = "React viewer could not be loaded in this session. Legacy mode is active for stability.";
+
+  container.append(title, message);
+  root.append(container);
 }
 
 function bootstrapWithRollout(): void {
