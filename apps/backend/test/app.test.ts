@@ -28,6 +28,21 @@ describe("env validation", () => {
 });
 
 describe("health routes", () => {
+	it("emits x-request-id header on 404 responses", async () => {
+		const { app } = createApp({
+			NODE_ENV: "development",
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+		});
+
+		const response = await app.handle(
+			new Request("http://localhost/does-not-exist"),
+		);
+
+		expect(response.status).toBe(404);
+		expect(response.headers.get("x-request-id")).toBeString();
+	});
+
 	it("returns version payload", async () => {
 		const { app } = createApp({
 			NODE_ENV: "development",
