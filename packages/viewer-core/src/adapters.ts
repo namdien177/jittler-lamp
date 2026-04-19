@@ -20,7 +20,7 @@ export interface PlaybackAdapter {
     onBridgeUnavailable?: () => void;
     onLoadFailure?: (error: unknown, diagnostics: unknown) => void;
   }): void;
-  releaseSource?(): void;
+  releaseSource?(args?: { videoPath?: string }): void;
 }
 
 export interface ShareAdapter {

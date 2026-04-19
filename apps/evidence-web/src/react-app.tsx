@@ -244,7 +244,7 @@ function App(): React.JSX.Element {
       const loaded = await storageAdapter.loadFromZipFile?.(file);
       if (!loaded) throw new Error("Web ZIP storage adapter is unavailable.");
       setState((prev) => {
-        if (prev.videoUrl) playbackAdapter.releaseSource?.();
+        if (prev.videoUrl) playbackAdapter.releaseSource?.({ videoPath: prev.videoUrl });
         playbackAdapter.loadSource({ videoPath: loaded.videoUrl, mimeType: "video/webm" });
         return {
           ...prev,
@@ -279,7 +279,7 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     return () => {
-      if (state.videoUrl) playbackAdapter.releaseSource?.();
+      if (state.videoUrl) playbackAdapter.releaseSource?.({ videoPath: state.videoUrl });
     };
   }, [state.videoUrl]);
 
@@ -409,7 +409,7 @@ function App(): React.JSX.Element {
 
   const closeViewer = (): void => {
     setState((prev) => {
-      if (prev.videoUrl) playbackAdapter.releaseSource?.();
+      if (prev.videoUrl) playbackAdapter.releaseSource?.({ videoPath: prev.videoUrl });
       const next = initialState();
       resetViewerCoreState(next);
       return next;

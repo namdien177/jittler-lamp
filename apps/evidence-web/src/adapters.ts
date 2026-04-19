@@ -20,11 +20,12 @@ export function createWebPlaybackAdapter(): PlaybackAdapter {
     loadSource: ({ videoPath }) => {
       objectUrl = videoPath;
     },
-    releaseSource: () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-        objectUrl = null;
-      }
+    releaseSource: (args) => {
+      const targetUrl = args?.videoPath ?? objectUrl;
+      if (!targetUrl) return;
+
+      URL.revokeObjectURL(targetUrl);
+      if (targetUrl === objectUrl) objectUrl = null;
     }
   };
 }
