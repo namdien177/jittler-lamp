@@ -11,6 +11,7 @@ import { applyViewerPayload, createViewerState, resetViewerState, type ViewerSta
 import { getViewerSourceLabel, shouldClearViewerTempSession } from "./viewer-source";
 import { ViewerPane } from "./viewer-pane";
 import { createDesktopNotesAdapter, createDesktopPlaybackAdapter, createDesktopShareAdapter, createDesktopStorageAdapter } from "./adapters";
+import { readDesktopViewerImplementationFromEnvironment, reportDesktopViewerTelemetry, type ViewerImplementation } from "./viewer-rollout";
 
 type FeedbackTone = "neutral" | "success" | "error";
 
@@ -217,6 +218,9 @@ const viewerNotesTextarea = queryRequiredElement<HTMLTextAreaElement>(appRoot, "
 const viewerNotesSave = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-notes-save']");
 const viewerReactRootElement = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-react-root']");
 const viewerReactRoot = createRoot(viewerReactRootElement);
+let selectedViewerImplementation: ViewerImplementation = readDesktopViewerImplementationFromEnvironment();
+let bootedImplementation: ViewerImplementation | null = null;
+reportDesktopViewerTelemetry({ implementation: selectedViewerImplementation, phase: "selected" });
 const playbackAdapter = desktopBridge
   ? createDesktopPlaybackAdapter({
     bridge: desktopBridge,
@@ -1085,7 +1089,7 @@ function buildTimelineRows() {
   return rows;
 }
 
-function renderViewerPane(): void {
+function renderReactViewerPane(): void {
   const payload = viewerState.payload;
   const timelineRows = buildTimelineRows();
   const detailItem = viewerState.networkDetailIndex === null ? null : viewerState.timeline[viewerState.networkDetailIndex] ?? null;
@@ -1114,19 +1118,19 @@ function renderViewerPane(): void {
       onSectionChange={(section) => {
         viewerState.activeSection = section;
         viewerState.networkDetailIndex = null;
-        renderViewerPane();
+        renderReactViewerPane();
         updateTimelineHighlight();
       }}
       onSubtypeChange={(subtype) => {
         viewerState.networkSubtypeFilter = subtype;
         viewerState.networkDetailIndex = null;
-        renderViewerPane();
+        renderReactViewerPane();
         updateTimelineHighlight();
       }}
       onSearchChange={(value) => {
         viewerState.networkSearchQuery = value;
         viewerState.networkDetailIndex = null;
-        renderViewerPane();
+        renderReactViewerPane();
         updateTimelineHighlight();
       }}
       onTimelineClick={(itemId, offsetMs, event) => {
@@ -1154,7 +1158,7 @@ function renderViewerPane(): void {
             viewerState.networkDetailIndex = timelineItem?.kind === "network" && viewerState.networkDetailIndex !== fullTimelineIndex ? fullTimelineIndex : null;
           }
         }
-        renderViewerPane();
+        renderReactViewerPane();
         updateTimelineHighlight();
       }}
       onTimelineContext={(itemId, event) => {
@@ -1175,16 +1179,16 @@ function renderViewerPane(): void {
         if (canMerge) menu.push({ label: "Merge Actions…", action: "merge" });
         if (canUnmerge) menu.push({ label: "Un-merge", action: "unmerge" });
         void desktopBridge.rpc.request.showContextMenu({ menu });
-        renderViewerPane();
+        renderReactViewerPane();
       }}
       onFocus={() => {
         viewerState.autoFollow = true;
-        renderViewerPane();
+        renderReactViewerPane();
         updateTimelineHighlight();
       }}
       onCloseDetail={() => {
         viewerState.networkDetailIndex = null;
-        renderViewerPane();
+        renderReactViewerPane();
       }}
       onCopy={(value, label) => {
         void copyViewerValue(value, label);
@@ -1192,7 +1196,7 @@ function renderViewerPane(): void {
       onMergeValueChange={(value) => {
         viewerState.mergeDialogValue = value;
         viewerState.mergeDialogError = null;
-        renderViewerPane();
+        renderReactViewerPane();
       }}
       onMergeConfirm={() => {
         submitViewerMergeDialog();
@@ -1202,6 +1206,39 @@ function renderViewerPane(): void {
       }}
     />
   );
+}
+
+function renderLegacyViewerPane(): void {
+  renderReactViewerPane();
+}
+
+function renderViewerPane(): void {
+  try {
+    if (selectedViewerImplementation === "react") {
+      renderReactViewerPane();
+      if (bootedImplementation !== "react") {
+        reportDesktopViewerTelemetry({ implementation: "react", phase: "booted" });
+        bootedImplementation = "react";
+      }
+    } else {
+      renderLegacyViewerPane();
+      if (bootedImplementation !== "legacy") {
+        reportDesktopViewerTelemetry({ implementation: "legacy", phase: "booted" });
+        bootedImplementation = "legacy";
+      }
+    }
+  } catch (error) {
+    reportDesktopViewerTelemetry({ implementation: selectedViewerImplementation, phase: "boot_failed", error });
+    if (selectedViewerImplementation === "react") {
+      selectedViewerImplementation = "legacy";
+      renderLegacyViewerPane();
+      reportDesktopViewerTelemetry({ implementation: "legacy", phase: "fallback", error });
+      state.feedback = { tone: "error", text: "React viewer failed. Switched to legacy viewer for stability." };
+      render();
+      return;
+    }
+    throw error;
+  }
 }
 
 function openViewerMergeDialog(selectedActionIds: string[]): void {
