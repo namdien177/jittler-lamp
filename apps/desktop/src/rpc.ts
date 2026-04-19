@@ -7,6 +7,16 @@ import type { CompanionArtifactWrite, CompanionRuntimeState } from "./companion/
 
 export type { SessionArtifact, SessionRecord } from "./companion/sessions-db";
 
+export type ContextMenuItem =
+  | { type: "separator" }
+  | {
+      type?: "normal";
+      label: string;
+      action?: string;
+      data?: unknown;
+      enabled?: boolean;
+    };
+
 /**
  * The stable shape the renderer receives when opening any session for viewing,
  * regardless of whether it came from the library, a ZIP import, or a local
@@ -180,11 +190,24 @@ export type DesktopRPC = {
           archive: SessionArchive;
         };
       };
+      showContextMenu: {
+        params: {
+          menu: ContextMenuItem[];
+        };
+        response: {
+          ok: true;
+        };
+      };
     };
     messages: {};
   }>;
   webview: RPCSchema<{
     requests: {};
-    messages: {};
+    messages: {
+      contextMenuClicked: {
+        action: string;
+        data?: unknown;
+      };
+    };
   }>;
 };

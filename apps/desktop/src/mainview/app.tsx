@@ -1,35 +1,74 @@
-import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, SessionRecord, ViewerPayload } from "../rpc";
-import { findActiveIndex, formatOffset } from "@jittle-lamp/shared";
-import type { NetworkSubtype, TimelineSection } from "@jittle-lamp/shared";
-import { createMergeGroup, deriveSectionTimeline, deriveTimeline, getArchiveMergeGroups, getContiguousMergeableSelection, openMergeDialog as openMergeDialogState, closeMergeDialog as closeMergeDialogState, selectActionRange, selectSingleAction, toggleActionSelection, validateMergeDialog } from "@jittle-lamp/viewer-core";
-import { createRoot } from "react-dom/client";
-import { createDesktopBridge } from "./desktop-bridge";
-import { filterSessions, formatRuntimeLabel, formatSourceLabel, isDatePreset, renderInlineTagAutocompleteHtml, renderSessionsHtml, renderTagAutocompleteHtml, renderTagFilterHtml, type DatePreset } from "./catalog-view";
-import { escapeHtml, formatBytes, formatErrorMessage, formatRelativeTime, queryRequiredElement } from "./utils";
-import { collectViewerVideoDiagnostics, createViewerVideoState, loadViewerVideoSource, recordViewerVideoEvent, resetViewerVideoDiagnostics } from "./viewer-video";
-import { applyViewerPayload, createViewerState, resetViewerState, type ViewerState } from "./viewer-state";
-import { canEditViewerNotes, getViewerReadOnlyNotice, getViewerSourceLabel, shouldClearViewerTempSession, shouldPersistViewerReviewState } from "./viewer-source";
-import { ViewerPane } from "./viewer-pane";
+import type {
+    DesktopCompanionConfigSnapshot,
+    DesktopCompanionRuntimeSnapshot,
+    SessionRecord,
+    ViewerPayload
+} from "../rpc";
+import type {TimelineSection} from "@jittle-lamp/shared";
+import {findActiveIndex, formatOffset} from "@jittle-lamp/shared";
+import {
+    closeMergeDialog as closeMergeDialogState,
+    createMergeGroup,
+    deriveSectionTimeline,
+    deriveTimeline,
+    getArchiveMergeGroups,
+    getContiguousMergeableSelection,
+    openMergeDialog as openMergeDialogState,
+    selectActionRange,
+    selectSingleAction,
+    toggleActionSelection,
+    validateMergeDialog
+} from "@jittle-lamp/viewer-core";
+import {createRoot} from "react-dom/client";
+import {createDesktopBridge} from "./desktop-bridge";
+import {
+    type DatePreset,
+    filterSessions,
+    formatRuntimeLabel,
+    formatSourceLabel,
+    isDatePreset,
+    renderInlineTagAutocompleteHtml,
+    renderSessionsHtml,
+    renderTagAutocompleteHtml,
+    renderTagFilterHtml
+} from "./catalog-view";
+import {escapeHtml, formatBytes, formatErrorMessage, formatRelativeTime, queryRequiredElement} from "./utils";
+import {
+    collectViewerVideoDiagnostics,
+    createViewerVideoState,
+    loadViewerVideoSource,
+    recordViewerVideoEvent,
+    resetViewerVideoDiagnostics
+} from "./viewer-video";
+import {applyViewerPayload, createViewerState, resetViewerState, type ViewerState} from "./viewer-state";
+import {
+    canEditViewerNotes,
+    getViewerReadOnlyNotice,
+    getViewerSourceLabel,
+    shouldClearViewerTempSession,
+    shouldPersistViewerReviewState
+} from "./viewer-source";
+import {ViewerPane} from "./viewer-pane";
 
 type FeedbackTone = "neutral" | "success" | "error";
 
 type ViewState = {
-  bridgeError: string | null;
-  config: DesktopCompanionConfigSnapshot | null;
-  runtime: DesktopCompanionRuntimeSnapshot | null;
-  sessions: SessionRecord[];
-  allTags: string[];
-  dateFilter: DatePreset;
-  tagFilter: string | null;
-  drawerOpen: boolean;
-  editingTagSessionId: string | null;
-  tagInputValue: string;
-  pendingDeleteId: string | null;
-  draftOutputDir: string;
-  feedback: { text: string; tone: FeedbackTone };
-  isChoosingFolder: boolean;
-  isLoading: boolean;
-  isSaving: boolean;
+    bridgeError: string | null;
+    config: DesktopCompanionConfigSnapshot | null;
+    runtime: DesktopCompanionRuntimeSnapshot | null;
+    sessions: SessionRecord[];
+    allTags: string[];
+    dateFilter: DatePreset;
+    tagFilter: string | null;
+    drawerOpen: boolean;
+    editingTagSessionId: string | null;
+    tagInputValue: string;
+    pendingDeleteId: string | null;
+    draftOutputDir: string;
+    feedback: { text: string; tone: FeedbackTone };
+    isChoosingFolder: boolean;
+    isLoading: boolean;
+    isSaving: boolean;
 };
 
 const runtimePollIntervalMs = 2_000;
@@ -40,29 +79,48 @@ let isAutoScrolling = false;
 
 const viewerState: ViewerState = createViewerState();
 
+desktopBridge?.onContextMenuClicked(({action, data}) => {
+    if (action === "merge") {
+        const selectedActionIds = getSelectedActionEntryIds();
+        if (selectedActionIds.length < 2) {
+            state.feedback = {tone: "error", text: "Select at least two actions before merging."};
+            render();
+            return;
+        }
+        openViewerMergeDialog(selectedActionIds);
+    } else if (action === "unmerge") {
+        const targetId = contextTargetId;
+        contextTargetId = null;
+        if (!targetId) return;
+        viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
+        viewerState.selectedActionIds = new Set();
+        void persistViewerReviewState("Merge removed.");
+    }
+});
+
 const state: ViewState = {
-  bridgeError: null,
-  config: null,
-  runtime: null,
-  sessions: [],
-  allTags: [],
-  dateFilter: "all",
-  tagFilter: null,
-  drawerOpen: false,
-  editingTagSessionId: null,
-  tagInputValue: "",
-  pendingDeleteId: null,
-  draftOutputDir: "",
-  feedback: { text: "Loading desktop companion status…", tone: "neutral" },
-  isChoosingFolder: false,
-  isLoading: true,
-  isSaving: false
+    bridgeError: null,
+    config: null,
+    runtime: null,
+    sessions: [],
+    allTags: [],
+    dateFilter: "all",
+    tagFilter: null,
+    drawerOpen: false,
+    editingTagSessionId: null,
+    tagInputValue: "",
+    pendingDeleteId: null,
+    draftOutputDir: "",
+    feedback: {text: "Loading desktop companion status…", tone: "neutral"},
+    isChoosingFolder: false,
+    isLoading: true,
+    isSaving: false
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
 
 if (!app) {
-  throw new Error("Desktop main view root element was not found.");
+    throw new Error("Desktop main view root element was not found.");
 }
 
 const appRoot = app;
@@ -214,1167 +272,1158 @@ const viewerReactRootElement = queryRequiredElement<HTMLDivElement>(appRoot, "[d
 const viewerReactRoot = createRoot(viewerReactRootElement);
 
 let contextTargetId: string | null = null;
-let contextMenuState = { open: false, x: 0, y: 0, canMerge: false, canUnmerge: false };
 
 gearBtn.addEventListener("click", () => {
-  openDrawer();
+    openDrawer();
 });
 
 importZipBtn.addEventListener("click", () => {
-  void handleImportZip();
+    void handleImportZip();
 });
 
 openLocalBtn.addEventListener("click", () => {
-  void handleOpenLocalSession();
+    void handleOpenLocalSession();
 });
 
 viewerClose.addEventListener("click", () => {
-  void closeViewer();
+    void closeViewer();
 });
 
 viewerOverlay.addEventListener("click", (event) => {
-  if (event.target === viewerOverlay) {
-    void closeViewer();
-  }
+    if (event.target === viewerOverlay) {
+        void closeViewer();
+    }
 });
 
 viewerNotesTextarea.addEventListener("input", () => {
-  viewerState.notesValue = viewerNotesTextarea.value;
-  viewerState.notesDirty = viewerState.notesValue !== (viewerState.payload?.notes ?? "");
-  viewerNotesSave.disabled = !viewerState.notesDirty || viewerState.notesSaving;
+    viewerState.notesValue = viewerNotesTextarea.value;
+    viewerState.notesDirty = viewerState.notesValue !== (viewerState.payload?.notes ?? "");
+    viewerNotesSave.disabled = !viewerState.notesDirty || viewerState.notesSaving;
 });
 
 viewerNotesSave.addEventListener("click", () => {
-  void saveViewerNotes();
+    void saveViewerNotes();
 });
 
 viewerVideo.addEventListener("timeupdate", () => {
-  updateTimelineHighlight();
+    updateTimelineHighlight();
 });
 
 for (const mediaEventName of [
-  "loadstart",
-  "loadedmetadata",
-  "loadeddata",
-  "canplay",
-  "canplaythrough",
-  "play",
-  "playing",
-  "waiting",
-  "stalled",
-  "suspend",
-  "abort",
-  "emptied",
-  "pause",
-  "error"
+    "loadstart",
+    "loadedmetadata",
+    "loadeddata",
+    "canplay",
+    "canplaythrough",
+    "play",
+    "playing",
+    "waiting",
+    "stalled",
+    "suspend",
+    "abort",
+    "emptied",
+    "pause",
+    "error"
 ] as const) {
-  viewerVideo.addEventListener(mediaEventName, () => {
-    recordViewerVideoEvent(viewerVideo, viewerVideoState, mediaEventName);
-  });
+    viewerVideo.addEventListener(mediaEventName, () => {
+        recordViewerVideoEvent(viewerVideo, viewerVideoState, mediaEventName);
+    });
 }
 
 viewerVideo.addEventListener("error", () => {
-  const diagnostics = collectViewerVideoDiagnostics(viewerVideo, viewerVideoState, "error-event");
-  console.error("[jittle-lamp][viewer-video] playback failed", diagnostics);
-  state.feedback = {
-    tone: "error",
-    text: `Unable to play the evidence video (${diagnostics.error.codeLabel}). Full media diagnostics logged.`
-  };
-  render();
-});
-
-document.addEventListener("click", (event) => {
-  if (contextMenuState.open && event.target instanceof Element && !viewerReactRootElement.contains(event.target)) {
-    hideContextMenu();
-  }
+    const diagnostics = collectViewerVideoDiagnostics(viewerVideo, viewerVideoState, "error-event");
+    console.error("[jittle-lamp][viewer-video] playback failed", diagnostics);
+    state.feedback = {
+        tone: "error",
+        text: `Unable to play the evidence video (${diagnostics.error.codeLabel}). Full media diagnostics logged.`
+    };
+    render();
 });
 
 drawerClose.addEventListener("click", () => {
-  closeDrawer();
+    closeDrawer();
 });
 
 drawerOverlay.addEventListener("click", () => {
-  closeDrawer();
+    closeDrawer();
 });
 
 chooseButton.addEventListener("click", () => {
-  void chooseFolder();
+    void chooseFolder();
 });
 
 saveButton.addEventListener("click", () => {
-  void saveFolder();
+    void saveFolder();
 });
 
 openOutputButton.addEventListener("click", () => {
-  void openCurrentOutputFolder();
+    void openCurrentOutputFolder();
 });
 
 openConfigButton.addEventListener("click", () => {
-  if (!desktopBridge || !state.config) return;
-  void desktopBridge.rpc.request.openPath({ path: state.config.configFilePath });
+    if (!desktopBridge || !state.config) return;
+    void desktopBridge.rpc.request.openPath({path: state.config.configFilePath});
 });
 
 appRoot.querySelectorAll<HTMLButtonElement>("[data-role='date-toggle']").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const preset = btn.dataset.preset;
-    if (!isDatePreset(preset)) return;
-    state.dateFilter = preset;
-    render();
-  });
+    btn.addEventListener("click", () => {
+        const preset = btn.dataset.preset;
+        if (!isDatePreset(preset)) return;
+        state.dateFilter = preset;
+        render();
+    });
 });
 
 tagFilterWrapper.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element)) return;
-  const removeBtn = event.target.closest<HTMLButtonElement>("[data-role='tag-filter-remove']");
-  if (removeBtn) {
-    state.tagFilter = null;
-    render();
-  }
+    if (!(event.target instanceof Element)) return;
+    const removeBtn = event.target.closest<HTMLButtonElement>("[data-role='tag-filter-remove']");
+    if (removeBtn) {
+        state.tagFilter = null;
+        render();
+    }
 });
 
 tagFilterWrapper.addEventListener("input", (event) => {
-  if (!(event.target instanceof HTMLInputElement)) return;
-  if (event.target.dataset.role !== "tag-filter-input") return;
-  updateTagFilterAutocomplete(event.target.value);
+    if (!(event.target instanceof HTMLInputElement)) return;
+    if (event.target.dataset.role !== "tag-filter-input") return;
+    updateTagFilterAutocomplete(event.target.value);
 });
 
 tagFilterWrapper.addEventListener("keydown", (event) => {
-  if (!(event.target instanceof HTMLInputElement)) return;
-  if (event.target.dataset.role !== "tag-filter-input") return;
-  if (event.key === "Escape") {
-    event.target.value = "";
-    updateTagFilterAutocomplete("");
-  }
+    if (!(event.target instanceof HTMLInputElement)) return;
+    if (event.target.dataset.role !== "tag-filter-input") return;
+    if (event.key === "Escape") {
+        event.target.value = "";
+        updateTagFilterAutocomplete("");
+    }
 });
 
 sessionsScroll.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element)) return;
+    if (!(event.target instanceof Element)) return;
 
-  const viewBtn = event.target.closest<HTMLButtonElement>("[data-role='session-view-btn']");
-  if (viewBtn) {
-    const sessionId = viewBtn.dataset.sessionId;
-    if (!sessionId || !desktopBridge) return;
-    void handleViewSession(sessionId);
-    return;
-  }
+    const viewBtn = event.target.closest<HTMLButtonElement>("[data-role='session-view-btn']");
+    if (viewBtn) {
+        const sessionId = viewBtn.dataset.sessionId;
+        if (!sessionId || !desktopBridge) return;
+        void handleViewSession(sessionId);
+        return;
+    }
 
-  const openBtn = event.target.closest<HTMLButtonElement>("[data-role='session-open-btn']");
-  if (openBtn) {
-    const sessionId = openBtn.dataset.sessionId;
-    if (!sessionId || !desktopBridge) return;
-    const session = state.sessions.find((s) => s.sessionId === sessionId);
-    if (!session) return;
-    void desktopBridge.rpc.request.openPath({ path: session.sessionFolder });
-    return;
-  }
+    const openBtn = event.target.closest<HTMLButtonElement>("[data-role='session-open-btn']");
+    if (openBtn) {
+        const sessionId = openBtn.dataset.sessionId;
+        if (!sessionId || !desktopBridge) return;
+        const session = state.sessions.find((s) => s.sessionId === sessionId);
+        if (!session) return;
+        void desktopBridge.rpc.request.openPath({path: session.sessionFolder});
+        return;
+    }
 
-  const zipBtn = event.target.closest<HTMLButtonElement>("[data-role='session-zip-btn']");
-  if (zipBtn) {
-    const sessionId = zipBtn.dataset.sessionId;
-    if (!sessionId || !desktopBridge) return;
-    void handleExportSessionZip(sessionId);
-    return;
-  }
+    const zipBtn = event.target.closest<HTMLButtonElement>("[data-role='session-zip-btn']");
+    if (zipBtn) {
+        const sessionId = zipBtn.dataset.sessionId;
+        if (!sessionId || !desktopBridge) return;
+        void handleExportSessionZip(sessionId);
+        return;
+    }
 
-  const deleteBtn = event.target.closest<HTMLButtonElement>("[data-role='session-delete-btn']");
-  if (deleteBtn) {
-    const sessionId = deleteBtn.dataset.sessionId;
-    if (!sessionId) return;
-    handleDeleteClick(sessionId);
-    return;
-  }
+    const deleteBtn = event.target.closest<HTMLButtonElement>("[data-role='session-delete-btn']");
+    if (deleteBtn) {
+        const sessionId = deleteBtn.dataset.sessionId;
+        if (!sessionId) return;
+        handleDeleteClick(sessionId);
+        return;
+    }
 
-  const tagX = event.target.closest<HTMLButtonElement>("[data-role='tag-chip-x']");
-  if (tagX) {
-    const sessionId = tagX.dataset.sessionId;
-    const tag = tagX.dataset.tag;
-    if (!sessionId || !tag) return;
-    void removeTagFromSession(sessionId, tag);
-    return;
-  }
+    const tagX = event.target.closest<HTMLButtonElement>("[data-role='tag-chip-x']");
+    if (tagX) {
+        const sessionId = tagX.dataset.sessionId;
+        const tag = tagX.dataset.tag;
+        if (!sessionId || !tag) return;
+        void removeTagFromSession(sessionId, tag);
+        return;
+    }
 
-  const addBtn = event.target.closest<HTMLButtonElement>("[data-role='tag-add-btn']");
-  if (addBtn) {
-    const sessionId = addBtn.dataset.sessionId;
-    if (!sessionId) return;
-    state.editingTagSessionId = sessionId;
-    state.tagInputValue = "";
-    render();
-    focusTagInput();
-    return;
-  }
+    const addBtn = event.target.closest<HTMLButtonElement>("[data-role='tag-add-btn']");
+    if (addBtn) {
+        const sessionId = addBtn.dataset.sessionId;
+        if (!sessionId) return;
+        state.editingTagSessionId = sessionId;
+        state.tagInputValue = "";
+        render();
+        focusTagInput();
+        return;
+    }
 
-  const tagOption = event.target.closest<HTMLButtonElement>("[data-role='tag-inline-option']");
-  if (tagOption) {
-    const sessionId = tagOption.dataset.sessionId;
-    const tag = tagOption.dataset.tag;
-    if (!sessionId || !tag) return;
-    state.tagInputValue = tag;
-    void addTagToSession(sessionId, tag);
-    return;
-  }
+    const tagOption = event.target.closest<HTMLButtonElement>("[data-role='tag-inline-option']");
+    if (tagOption) {
+        const sessionId = tagOption.dataset.sessionId;
+        const tag = tagOption.dataset.tag;
+        if (!sessionId || !tag) return;
+        state.tagInputValue = tag;
+        void addTagToSession(sessionId, tag);
+        return;
+    }
 });
 
 sessionsScroll.addEventListener("keydown", (event) => {
-  if (!(event.target instanceof HTMLInputElement)) return;
-  if (event.target.dataset.role !== "tag-input-inline") return;
+    if (!(event.target instanceof HTMLInputElement)) return;
+    if (event.target.dataset.role !== "tag-input-inline") return;
 
-  const sessionId = event.target.dataset.sessionId;
-  if (!sessionId) return;
+    const sessionId = event.target.dataset.sessionId;
+    if (!sessionId) return;
 
-  if (event.key === "Enter") {
-    const value = event.target.value.trim();
-    if (value) {
-      state.tagInputValue = value;
-      void addTagToSession(sessionId, value);
+    if (event.key === "Enter") {
+        const value = event.target.value.trim();
+        if (value) {
+            state.tagInputValue = value;
+            void addTagToSession(sessionId, value);
+        }
+    } else if (event.key === "Escape") {
+        state.editingTagSessionId = null;
+        state.tagInputValue = "";
+        render();
     }
-  } else if (event.key === "Escape") {
-    state.editingTagSessionId = null;
-    state.tagInputValue = "";
-    render();
-  }
 });
 
 sessionsScroll.addEventListener("input", (event) => {
-  if (!(event.target instanceof HTMLInputElement)) return;
-  if (event.target.dataset.role !== "tag-input-inline") return;
-  state.tagInputValue = event.target.value;
-  updateInlineTagAutocomplete(event.target.dataset.sessionId ?? "", event.target.value);
+    if (!(event.target instanceof HTMLInputElement)) return;
+    if (event.target.dataset.role !== "tag-input-inline") return;
+    state.tagInputValue = event.target.value;
+    updateInlineTagAutocomplete(event.target.dataset.sessionId ?? "", event.target.value);
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    if (viewerState.mergeDialogOpen) {
-      closeViewerMergeDialog();
-    } else if (viewerState.open) {
-      void closeViewer();
-    } else if (state.drawerOpen) {
-      closeDrawer();
-    } else if (state.editingTagSessionId !== null) {
-      state.editingTagSessionId = null;
-      state.tagInputValue = "";
-      render();
+    if (event.key === "Escape") {
+        if (viewerState.mergeDialogOpen) {
+            closeViewerMergeDialog();
+        } else if (viewerState.open) {
+            void closeViewer();
+        } else if (state.drawerOpen) {
+            closeDrawer();
+        } else if (state.editingTagSessionId !== null) {
+            state.editingTagSessionId = null;
+            state.tagInputValue = "";
+            render();
+        }
+
+        return;
     }
 
-    return;
-  }
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "q") {
+        event.preventDefault();
 
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "q") {
-    event.preventDefault();
-
-    if (desktopBridge) {
-      void desktopBridge.rpc.request.exitApp(undefined);
+        if (desktopBridge) {
+            void desktopBridge.rpc.request.exitApp(undefined);
+        }
     }
-  }
 });
 
 void loadInitialData();
 
 function render(): void {
-  const config = state.config;
-  const runtime = state.runtime;
-  const hasBridgeError = state.bridgeError !== null;
-  const isEnvOverrideActive = config?.envOverrideActive ?? false;
-  const draftOutputDir = config ? state.draftOutputDir : "";
-  const isDirty = Boolean(config && draftOutputDir !== config.outputDir);
+    const config = state.config;
+    const runtime = state.runtime;
+    const hasBridgeError = state.bridgeError !== null;
+    const isEnvOverrideActive = config?.envOverrideActive ?? false;
+    const draftOutputDir = config ? state.draftOutputDir : "";
+    const isDirty = Boolean(config && draftOutputDir !== config.outputDir);
 
-  runtimePill.textContent = formatRuntimeLabel(runtime?.status);
-  runtimePill.dataset.status = runtime?.status ?? "starting";
+    runtimePill.textContent = formatRuntimeLabel(runtime?.status);
+    runtimePill.dataset.status = runtime?.status ?? "starting";
 
-  outputPath.textContent = runtime?.outputDir ?? config?.outputDir ?? "—";
+    outputPath.textContent = runtime?.outputDir ?? config?.outputDir ?? "—";
 
-  feedback.textContent = state.feedback.text;
-  feedback.dataset.tone = state.feedback.tone;
+    feedback.textContent = state.feedback.text;
+    feedback.dataset.tone = state.feedback.tone;
 
-  currentOutputDir.textContent = config?.outputDir ?? runtime?.outputDir ?? "—";
-  effectiveSummary.textContent = config
-    ? isEnvOverrideActive
-      ? "Environment override is active — the desktop route is locked until that variable is removed."
-      : "The extension will use this folder whenever the local companion is online."
-    : "Reading the current output folder…";
+    currentOutputDir.textContent = config?.outputDir ?? runtime?.outputDir ?? "—";
+    effectiveSummary.textContent = config
+        ? isEnvOverrideActive
+            ? "Environment override is active — the desktop route is locked until that variable is removed."
+            : "The extension will use this folder whenever the local companion is online."
+        : "Reading the current output folder…";
 
-  envOverrideWarning.hidden = !isEnvOverrideActive;
+    envOverrideWarning.hidden = !isEnvOverrideActive;
 
-  outputDirField.value = draftOutputDir;
-  outputDirField.disabled = true;
+    outputDirField.value = draftOutputDir;
+    outputDirField.disabled = true;
 
-  detailSource.textContent = config ? formatSourceLabel(config.source) : "—";
-  detailSavedOutput.textContent = config?.savedOutputDir ?? "No saved override";
-  detailDefaultOutput.textContent = config?.defaultOutputDir ?? "—";
-  detailConfigPath.textContent = config?.configFilePath ?? "—";
+    detailSource.textContent = config ? formatSourceLabel(config.source) : "—";
+    detailSavedOutput.textContent = config?.savedOutputDir ?? "No saved override";
+    detailDefaultOutput.textContent = config?.defaultOutputDir ?? "—";
+    detailConfigPath.textContent = config?.configFilePath ?? "—";
 
-  chooseButton.disabled = hasBridgeError || state.isLoading || state.isChoosingFolder || state.isSaving || isEnvOverrideActive;
-  chooseButton.textContent = state.isChoosingFolder ? "Choosing…" : "Choose folder…";
+    chooseButton.disabled = hasBridgeError || state.isLoading || state.isChoosingFolder || state.isSaving || isEnvOverrideActive;
+    chooseButton.textContent = state.isChoosingFolder ? "Choosing…" : "Choose folder…";
 
-  saveButton.disabled = hasBridgeError || state.isLoading || state.isSaving || !isDirty || isEnvOverrideActive;
-  saveButton.textContent = state.isSaving ? "Saving…" : "Save route";
+    saveButton.disabled = hasBridgeError || state.isLoading || state.isSaving || !isDirty || isEnvOverrideActive;
+    saveButton.textContent = state.isSaving ? "Saving…" : "Save route";
 
-  openOutputButton.disabled = hasBridgeError || state.isLoading || !config;
-  openConfigButton.disabled = hasBridgeError || state.isLoading || !config;
+    openOutputButton.disabled = hasBridgeError || state.isLoading || !config;
+    openConfigButton.disabled = hasBridgeError || state.isLoading || !config;
 
-  settingsDrawer.dataset.open = state.drawerOpen ? "true" : "false";
-  drawerOverlay.dataset.open = state.drawerOpen ? "true" : "false";
+    settingsDrawer.dataset.open = state.drawerOpen ? "true" : "false";
+    drawerOverlay.dataset.open = state.drawerOpen ? "true" : "false";
 
-  appRoot.querySelectorAll<HTMLButtonElement>("[data-role='date-toggle']").forEach((btn) => {
-    btn.dataset.active = btn.dataset.preset === state.dateFilter ? "true" : "false";
-  });
+    appRoot.querySelectorAll<HTMLButtonElement>("[data-role='date-toggle']").forEach((btn) => {
+        btn.dataset.active = btn.dataset.preset === state.dateFilter ? "true" : "false";
+    });
 
-  const filtered = getFilteredSessions();
-  resultsCount.textContent = `${filtered.length} session${filtered.length === 1 ? "" : "s"}`;
+    const filtered = getFilteredSessions();
+    resultsCount.textContent = `${filtered.length} session${filtered.length === 1 ? "" : "s"}`;
 
-  renderTagFilterWrapper();
-  renderSessions(filtered);
+    renderTagFilterWrapper();
+    renderSessions(filtered);
 
-  if (state.editingTagSessionId !== null) {
-    focusTagInput();
-  }
+    if (state.editingTagSessionId !== null) {
+        focusTagInput();
+    }
 }
 
 function renderTagFilterWrapper(): void {
-  const existingInput = tagFilterWrapper.querySelector<HTMLInputElement>("[data-role='tag-filter-input']");
-  if (state.tagFilter === null && existingInput) {
-    return;
-  }
+    const existingInput = tagFilterWrapper.querySelector<HTMLInputElement>("[data-role='tag-filter-input']");
+    if (state.tagFilter === null && existingInput) {
+        return;
+    }
 
-  tagFilterWrapper.innerHTML = renderTagFilterHtml(state.tagFilter, escapeHtml);
+    tagFilterWrapper.innerHTML = renderTagFilterHtml(state.tagFilter, escapeHtml);
 }
 
 function updateTagFilterAutocomplete(value: string): void {
-  const autocomplete = tagFilterWrapper.querySelector<HTMLDivElement>("[data-role='tag-filter-autocomplete']");
-  if (!autocomplete) return;
+    const autocomplete = tagFilterWrapper.querySelector<HTMLDivElement>("[data-role='tag-filter-autocomplete']");
+    if (!autocomplete) return;
 
-  const trimmed = value.trim().toLowerCase();
-  if (!trimmed) {
-    autocomplete.hidden = true;
-    autocomplete.innerHTML = "";
-    return;
-  }
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) {
+        autocomplete.hidden = true;
+        autocomplete.innerHTML = "";
+        return;
+    }
 
-  const matches = state.allTags.filter((t) => t.toLowerCase().includes(trimmed));
-  if (matches.length === 0) {
-    autocomplete.hidden = true;
-    autocomplete.innerHTML = "";
-    return;
-  }
+    const matches = state.allTags.filter((t) => t.toLowerCase().includes(trimmed));
+    if (matches.length === 0) {
+        autocomplete.hidden = true;
+        autocomplete.innerHTML = "";
+        return;
+    }
 
-  autocomplete.hidden = false;
-  autocomplete.innerHTML = renderTagAutocompleteHtml(matches, escapeHtml);
+    autocomplete.hidden = false;
+    autocomplete.innerHTML = renderTagAutocompleteHtml(matches, escapeHtml);
 
-  autocomplete.querySelectorAll<HTMLButtonElement>("[data-role='tag-filter-option']").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const tag = btn.dataset.tag;
-      if (!tag) return;
-      state.tagFilter = tag;
-      render();
+    autocomplete.querySelectorAll<HTMLButtonElement>("[data-role='tag-filter-option']").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const tag = btn.dataset.tag;
+            if (!tag) return;
+            state.tagFilter = tag;
+            render();
+        });
     });
-  });
 }
 
 function renderSessions(filtered: SessionRecord[]): void {
-  sessionsScroll.innerHTML = renderSessionsHtml({
-    sessions: filtered,
-    pendingDeleteId: state.pendingDeleteId,
-    editingTagSessionId: state.editingTagSessionId,
-    tagInputValue: state.tagInputValue,
-    escapeHtml,
-    formatRelativeTime,
-    formatBytes
-  });
+    sessionsScroll.innerHTML = renderSessionsHtml({
+        sessions: filtered,
+        pendingDeleteId: state.pendingDeleteId,
+        editingTagSessionId: state.editingTagSessionId,
+        tagInputValue: state.tagInputValue,
+        escapeHtml,
+        formatRelativeTime,
+        formatBytes
+    });
 
-  if (isEditing()) {
-    const sessionId = state.editingTagSessionId;
-    if (sessionId && state.tagInputValue) {
-      updateInlineTagAutocomplete(sessionId, state.tagInputValue);
+    if (isEditing()) {
+        const sessionId = state.editingTagSessionId;
+        if (sessionId && state.tagInputValue) {
+            updateInlineTagAutocomplete(sessionId, state.tagInputValue);
+        }
     }
-  }
 }
 
 function isEditing(): boolean {
-  return state.editingTagSessionId !== null;
+    return state.editingTagSessionId !== null;
 }
 
 function focusTagInput(): void {
-  const input = sessionsScroll.querySelector<HTMLInputElement>("[data-role='tag-input-inline']");
-  if (!input) return;
-  input.focus();
-  const len = input.value.length;
-  input.setSelectionRange(len, len);
+    const input = sessionsScroll.querySelector<HTMLInputElement>("[data-role='tag-input-inline']");
+    if (!input) return;
+    input.focus();
+    const len = input.value.length;
+    input.setSelectionRange(len, len);
 }
 
 function updateInlineTagAutocomplete(sessionId: string, value: string): void {
-  const autocomplete = sessionsScroll.querySelector<HTMLDivElement>(
-    `[data-role='tag-inline-autocomplete'][data-session-id='${CSS.escape(sessionId)}']`
-  );
-  if (!autocomplete) return;
+    const autocomplete = sessionsScroll.querySelector<HTMLDivElement>(
+        `[data-role='tag-inline-autocomplete'][data-session-id='${CSS.escape(sessionId)}']`
+    );
+    if (!autocomplete) return;
 
-  const trimmed = value.trim().toLowerCase();
-  if (!trimmed) {
-    autocomplete.hidden = true;
-    autocomplete.innerHTML = "";
-    return;
-  }
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) {
+        autocomplete.hidden = true;
+        autocomplete.innerHTML = "";
+        return;
+    }
 
-  const session = state.sessions.find((s) => s.sessionId === sessionId);
-  const existingTags = session?.tags ?? [];
-  const matches = state.allTags.filter((t) => !existingTags.includes(t) && t.toLowerCase().includes(trimmed));
+    const session = state.sessions.find((s) => s.sessionId === sessionId);
+    const existingTags = session?.tags ?? [];
+    const matches = state.allTags.filter((t) => !existingTags.includes(t) && t.toLowerCase().includes(trimmed));
 
-  if (matches.length === 0) {
-    autocomplete.hidden = true;
-    autocomplete.innerHTML = "";
-    return;
-  }
+    if (matches.length === 0) {
+        autocomplete.hidden = true;
+        autocomplete.innerHTML = "";
+        return;
+    }
 
-  autocomplete.hidden = false;
-  autocomplete.innerHTML = renderInlineTagAutocompleteHtml({ sessionId, tags: matches, escapeHtml });
+    autocomplete.hidden = false;
+    autocomplete.innerHTML = renderInlineTagAutocompleteHtml({sessionId, tags: matches, escapeHtml});
 }
 
 function getFilteredSessions(): SessionRecord[] {
-  return filterSessions({
-    sessions: state.sessions,
-    tagFilter: state.tagFilter,
-    dateFilter: state.dateFilter
-  });
+    return filterSessions({
+        sessions: state.sessions,
+        tagFilter: state.tagFilter,
+        dateFilter: state.dateFilter
+    });
 }
 
 function openDrawer(): void {
-  state.drawerOpen = true;
-  render();
+    state.drawerOpen = true;
+    render();
 }
 
 function closeDrawer(): void {
-  state.drawerOpen = false;
-  render();
+    state.drawerOpen = false;
+    render();
 }
 
 async function loadInitialData(): Promise<void> {
-  if (!desktopBridge) {
-    state.bridgeError = "Electrobun view RPC did not initialize in this renderer.";
-    state.feedback = { tone: "error", text: "Desktop runtime unavailable." };
-    state.isLoading = false;
-    render();
-    return;
-  }
+    if (!desktopBridge) {
+        state.bridgeError = "Electrobun view RPC did not initialize in this renderer.";
+        state.feedback = {tone: "error", text: "Desktop runtime unavailable."};
+        state.isLoading = false;
+        render();
+        return;
+    }
 
-  try {
-    const [config, runtime, sessions, allTags] = await Promise.all([
-      desktopBridge.rpc.request.getCompanionConfig(undefined),
-      desktopBridge.rpc.request.getCompanionRuntime(undefined),
-      desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => []),
-      desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => [])
-    ]);
+    try {
+        const [config, runtime, sessions, allTags] = await Promise.all([
+            desktopBridge.rpc.request.getCompanionConfig(undefined),
+            desktopBridge.rpc.request.getCompanionRuntime(undefined),
+            desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => []),
+            desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => [])
+        ]);
 
-    state.config = config;
-    state.runtime = runtime;
-    state.sessions = sessions;
-    state.allTags = allTags;
-    state.draftOutputDir = config.outputDir;
-    state.feedback = {
-      tone: runtime.status === "error" ? "error" : "neutral",
-      text:
-        runtime.status === "error"
-          ? runtime.lastError ?? "The desktop companion failed to start."
-          : config.envOverrideActive
-            ? "JITTLE_LAMP_OUTPUT_DIR is currently overriding the saved desktop setting."
-            : "Choose a folder, save it, and keep this app open while recording."
-    };
-  } catch (error) {
-    state.feedback = {
-      tone: "error",
-      text: formatErrorMessage(error, "Unable to load desktop companion state.")
-    };
-  } finally {
-    state.isLoading = false;
-    render();
-    startRuntimePolling();
-  }
+        state.config = config;
+        state.runtime = runtime;
+        state.sessions = sessions;
+        state.allTags = allTags;
+        state.draftOutputDir = config.outputDir;
+        state.feedback = {
+            tone: runtime.status === "error" ? "error" : "neutral",
+            text:
+                runtime.status === "error"
+                    ? runtime.lastError ?? "The desktop companion failed to start."
+                    : config.envOverrideActive
+                        ? "JITTLE_LAMP_OUTPUT_DIR is currently overriding the saved desktop setting."
+                        : "Choose a folder, save it, and keep this app open while recording."
+        };
+    } catch (error) {
+        state.feedback = {
+            tone: "error",
+            text: formatErrorMessage(error, "Unable to load desktop companion state.")
+        };
+    } finally {
+        state.isLoading = false;
+        render();
+        startRuntimePolling();
+    }
 }
 
 function startRuntimePolling(): void {
-  if (!desktopBridge) return;
+    if (!desktopBridge) return;
 
-  setInterval(() => {
-    void refreshRuntimeState();
-  }, runtimePollIntervalMs);
+    setInterval(() => {
+        void refreshRuntimeState();
+    }, runtimePollIntervalMs);
 }
 
 async function refreshRuntimeState(): Promise<void> {
-  if (!desktopBridge) return;
+    if (!desktopBridge) return;
 
-  try {
-    const [runtime, sessions, allTags] = await Promise.all([
-      desktopBridge.rpc.request.getCompanionRuntime(undefined),
-      desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => state.sessions),
-      desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => state.allTags)
-    ]);
+    try {
+        const [runtime, sessions, allTags] = await Promise.all([
+            desktopBridge.rpc.request.getCompanionRuntime(undefined),
+            desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => state.sessions),
+            desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => state.allTags)
+        ]);
 
-    state.runtime = runtime;
-    state.sessions = sessions;
-    state.allTags = allTags;
+        state.runtime = runtime;
+        state.sessions = sessions;
+        state.allTags = allTags;
 
-    if (runtime.status === "error") {
-      state.feedback = {
-        tone: "error",
-        text: runtime.lastError ?? "The desktop companion runtime is reporting an error."
-      };
-    } else if (state.feedback.tone !== "success" && !state.isSaving && !state.isChoosingFolder) {
-      state.feedback = {
-        tone: "neutral",
-        text:
-          runtime.status === "listening"
-            ? "Desktop companion is listening locally. Extension exports should land here without browser download prompts."
-            : "Waiting for the desktop companion runtime."
-      };
+        if (runtime.status === "error") {
+            state.feedback = {
+                tone: "error",
+                text: runtime.lastError ?? "The desktop companion runtime is reporting an error."
+            };
+        } else if (state.feedback.tone !== "success" && !state.isSaving && !state.isChoosingFolder) {
+            state.feedback = {
+                tone: "neutral",
+                text:
+                    runtime.status === "listening"
+                        ? "Desktop companion is listening locally. Extension exports should land here without browser download prompts."
+                        : "Waiting for the desktop companion runtime."
+            };
+        }
+
+        render();
+    } catch (error) {
+        state.feedback = {
+            tone: "error",
+            text: formatErrorMessage(error, "Unable to refresh the companion runtime.")
+        };
+        render();
     }
-
-    render();
-  } catch (error) {
-    state.feedback = {
-      tone: "error",
-      text: formatErrorMessage(error, "Unable to refresh the companion runtime.")
-    };
-    render();
-  }
 }
 
 async function chooseFolder(): Promise<void> {
-  if (!desktopBridge || !state.config || state.config.envOverrideActive) return;
+    if (!desktopBridge || !state.config || state.config.envOverrideActive) return;
 
-  state.isChoosingFolder = true;
-  state.feedback = { tone: "neutral", text: "Waiting for a local folder selection…" };
-  render();
-
-  try {
-    const { selectedPath } = await desktopBridge.rpc.request.chooseOutputDirectory({
-      startingFolder: state.draftOutputDir || state.config.outputDir
-    });
-
-    if (selectedPath) {
-      state.draftOutputDir = selectedPath;
-      state.feedback = { tone: "neutral", text: "Folder selected. Save route to switch the running companion." };
-    } else {
-      state.feedback = { tone: "neutral", text: "Folder selection cancelled." };
-    }
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Unable to open the native folder picker.") };
-  } finally {
-    state.isChoosingFolder = false;
+    state.isChoosingFolder = true;
+    state.feedback = {tone: "neutral", text: "Waiting for a local folder selection…"};
     render();
-  }
+
+    try {
+        const {selectedPath} = await desktopBridge.rpc.request.chooseOutputDirectory({
+            startingFolder: state.draftOutputDir || state.config.outputDir
+        });
+
+        if (selectedPath) {
+            state.draftOutputDir = selectedPath;
+            state.feedback = {tone: "neutral", text: "Folder selected. Save route to switch the running companion."};
+        } else {
+            state.feedback = {tone: "neutral", text: "Folder selection cancelled."};
+        }
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Unable to open the native folder picker.")};
+    } finally {
+        state.isChoosingFolder = false;
+        render();
+    }
 }
 
 async function saveFolder(): Promise<void> {
-  if (!desktopBridge || !state.config || state.config.envOverrideActive) return;
+    if (!desktopBridge || !state.config || state.config.envOverrideActive) return;
 
-  state.isSaving = true;
-  state.feedback = { tone: "neutral", text: "Saving folder route and refreshing the running companion…" };
-  render();
-
-  try {
-    const nextConfig = await desktopBridge.rpc.request.saveOutputDirectory({ outputDir: state.draftOutputDir });
-    const nextRuntime = await desktopBridge.rpc.request.getCompanionRuntime(undefined);
-
-    state.config = nextConfig;
-    state.runtime = nextRuntime;
-    state.draftOutputDir = nextConfig.outputDir;
-    state.feedback = { tone: "success", text: "Saved. New extension exports will use this folder immediately." };
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Unable to save the output folder.") };
-  } finally {
-    state.isSaving = false;
+    state.isSaving = true;
+    state.feedback = {tone: "neutral", text: "Saving folder route and refreshing the running companion…"};
     render();
-  }
+
+    try {
+        const nextConfig = await desktopBridge.rpc.request.saveOutputDirectory({outputDir: state.draftOutputDir});
+        const nextRuntime = await desktopBridge.rpc.request.getCompanionRuntime(undefined);
+
+        state.config = nextConfig;
+        state.runtime = nextRuntime;
+        state.draftOutputDir = nextConfig.outputDir;
+        state.feedback = {tone: "success", text: "Saved. New extension exports will use this folder immediately."};
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Unable to save the output folder.")};
+    } finally {
+        state.isSaving = false;
+        render();
+    }
 }
 
 async function openCurrentOutputFolder(): Promise<void> {
-  if (!desktopBridge || !state.config) return;
-  await desktopBridge.rpc.request.openPath({ path: state.config.outputDir });
+    if (!desktopBridge || !state.config) return;
+    await desktopBridge.rpc.request.openPath({path: state.config.outputDir});
 }
 
 function handleDeleteClick(sessionId: string): void {
-  if (state.pendingDeleteId === sessionId) {
-    if (pendingDeleteTimer !== null) {
-      clearTimeout(pendingDeleteTimer);
-      pendingDeleteTimer = null;
-    }
-    state.pendingDeleteId = null;
-    void deleteSessionById(sessionId);
-  } else {
-    if (pendingDeleteTimer !== null) clearTimeout(pendingDeleteTimer);
-    state.pendingDeleteId = sessionId;
-    render();
+    if (state.pendingDeleteId === sessionId) {
+        if (pendingDeleteTimer !== null) {
+            clearTimeout(pendingDeleteTimer);
+            pendingDeleteTimer = null;
+        }
+        state.pendingDeleteId = null;
+        void deleteSessionById(sessionId);
+    } else {
+        if (pendingDeleteTimer !== null) clearTimeout(pendingDeleteTimer);
+        state.pendingDeleteId = sessionId;
+        render();
 
-    pendingDeleteTimer = setTimeout(() => {
-      state.pendingDeleteId = null;
-      pendingDeleteTimer = null;
-      render();
-    }, 3_000);
-  }
+        pendingDeleteTimer = setTimeout(() => {
+            state.pendingDeleteId = null;
+            pendingDeleteTimer = null;
+            render();
+        }, 3_000);
+    }
 }
 
 async function deleteSessionById(sessionId: string): Promise<void> {
-  if (!desktopBridge) return;
+    if (!desktopBridge) return;
 
-  try {
-    await desktopBridge.rpc.request.deleteSession({ sessionId });
-    state.sessions = state.sessions.filter((s) => s.sessionId !== sessionId);
-    state.feedback = { tone: "success", text: "Session deleted." };
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to delete the session.") };
-  }
+    try {
+        await desktopBridge.rpc.request.deleteSession({sessionId});
+        state.sessions = state.sessions.filter((s) => s.sessionId !== sessionId);
+        state.feedback = {tone: "success", text: "Session deleted."};
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to delete the session.")};
+    }
 
-  render();
+    render();
 }
 
 async function addTagToSession(sessionId: string, tag: string): Promise<void> {
-  if (!desktopBridge) return;
+    if (!desktopBridge) return;
 
-  const trimmed = tag.trim();
-  if (!trimmed) return;
+    const trimmed = tag.trim();
+    if (!trimmed) return;
 
-  try {
-    await desktopBridge.rpc.request.addSessionTag({ sessionId, tag: trimmed });
-    const [sessions, allTags] = await Promise.all([
-      desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => state.sessions),
-      desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => state.allTags)
-    ]);
-    state.sessions = sessions;
-    state.allTags = allTags;
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to add tag.") };
-  } finally {
-    state.editingTagSessionId = null;
-    state.tagInputValue = "";
-    render();
-  }
+    try {
+        await desktopBridge.rpc.request.addSessionTag({sessionId, tag: trimmed});
+        const [sessions, allTags] = await Promise.all([
+            desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => state.sessions),
+            desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => state.allTags)
+        ]);
+        state.sessions = sessions;
+        state.allTags = allTags;
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to add tag.")};
+    } finally {
+        state.editingTagSessionId = null;
+        state.tagInputValue = "";
+        render();
+    }
 }
 
 async function removeTagFromSession(sessionId: string, tag: string): Promise<void> {
-  if (!desktopBridge) return;
+    if (!desktopBridge) return;
 
-  try {
-    await desktopBridge.rpc.request.removeSessionTag({ sessionId, tag });
-    const [sessions, allTags] = await Promise.all([
-      desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => state.sessions),
-      desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => state.allTags)
-    ]);
-    state.sessions = sessions;
-    state.allTags = allTags;
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to remove tag.") };
-  }
+    try {
+        await desktopBridge.rpc.request.removeSessionTag({sessionId, tag});
+        const [sessions, allTags] = await Promise.all([
+            desktopBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => state.sessions),
+            desktopBridge.rpc.request.listAllTags(undefined).catch((): string[] => state.allTags)
+        ]);
+        state.sessions = sessions;
+        state.allTags = allTags;
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to remove tag.")};
+    }
 
-  render();
+    render();
 }
 
 async function handleImportZip(): Promise<void> {
-  if (!desktopBridge) return;
-  if (viewerState.isOpening) return;
+    if (!desktopBridge) return;
+    if (viewerState.isOpening) return;
 
-  viewerState.isOpening = true;
-  state.feedback = { tone: "neutral", text: "Opening ZIP file picker…" };
-  render();
-
-  try {
-    const payload = await desktopBridge.rpc.request.importZipSession(undefined);
-    openViewer(payload);
-    state.feedback = { tone: "neutral", text: "ZIP session loaded." };
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to import ZIP session.") };
+    viewerState.isOpening = true;
+    state.feedback = {tone: "neutral", text: "Opening ZIP file picker…"};
     render();
-  } finally {
-    viewerState.isOpening = false;
-  }
+
+    try {
+        const payload = await desktopBridge.rpc.request.importZipSession(undefined);
+        openViewer(payload);
+        state.feedback = {tone: "neutral", text: "ZIP session loaded."};
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to import ZIP session.")};
+        render();
+    } finally {
+        viewerState.isOpening = false;
+    }
 }
 
 async function handleViewSession(sessionId: string): Promise<void> {
-  if (!desktopBridge) return;
-  if (viewerState.isOpening) return;
+    if (!desktopBridge) return;
+    if (viewerState.isOpening) return;
 
-  viewerState.isOpening = true;
-  state.feedback = { tone: "neutral", text: "Loading session…" };
-  render();
-
-  try {
-    const payload = await desktopBridge.rpc.request.loadLibrarySession({ sessionId });
-    openViewer(payload);
-    state.feedback = { tone: "neutral", text: "Session loaded." };
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to load session.") };
+    viewerState.isOpening = true;
+    state.feedback = {tone: "neutral", text: "Loading session…"};
     render();
-  } finally {
-    viewerState.isOpening = false;
-  }
+
+    try {
+        const payload = await desktopBridge.rpc.request.loadLibrarySession({sessionId});
+        openViewer(payload);
+        state.feedback = {tone: "neutral", text: "Session loaded."};
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to load session.")};
+        render();
+    } finally {
+        viewerState.isOpening = false;
+    }
 }
 
 function openViewer(payload: ViewerPayload): void {
-  const previousPayload = viewerState.payload;
-  if (previousPayload && shouldClearViewerTempSession(previousPayload) && desktopBridge) {
-    const previousTempId = previousPayload.tempId;
-    if (previousTempId !== undefined) {
-      void desktopBridge.rpc.request.clearTempSession({ tempId: previousTempId }).catch(() => undefined);
+    const previousPayload = viewerState.payload;
+    if (previousPayload && shouldClearViewerTempSession(previousPayload) && desktopBridge) {
+        const previousTempId = previousPayload.tempId;
+        if (previousTempId !== undefined) {
+            void desktopBridge.rpc.request.clearTempSession({tempId: previousTempId}).catch(() => undefined);
+        }
     }
-  }
 
-  applyViewerPayload(viewerState, payload);
+    applyViewerPayload(viewerState, payload);
 
-  renderViewer();
+    renderViewer();
 }
 
 async function closeViewer(): Promise<void> {
-  const payload = viewerState.payload;
+    const payload = viewerState.payload;
 
-  resetViewerState(viewerState);
+    resetViewerState(viewerState);
 
-  hideContextMenu();
-  viewerVideo.pause();
-  viewerVideoState.loadVersion += 1;
-  viewerVideo.src = "";
-  viewerOverlay.dataset.open = "false";
-  resetViewerVideoDiagnostics(viewerVideoState);
+    contextTargetId = null;
+    viewerVideo.pause();
+    viewerVideoState.loadVersion += 1;
+    viewerVideo.src = "";
+    viewerOverlay.dataset.open = "false";
+    resetViewerVideoDiagnostics(viewerVideoState);
 
-  if (payload && shouldClearViewerTempSession(payload) && desktopBridge) {
-    const tempId = payload.tempId;
-    if (tempId !== undefined) {
-      await desktopBridge.rpc.request.clearTempSession({ tempId }).catch(() => undefined);
+    if (payload && shouldClearViewerTempSession(payload) && desktopBridge) {
+        const tempId = payload.tempId;
+        if (tempId !== undefined) {
+            await desktopBridge.rpc.request.clearTempSession({tempId}).catch(() => undefined);
+        }
     }
-  }
 }
 
 function renderViewer(): void {
-  const payload = viewerState.payload;
-  if (!payload) return;
+    const payload = viewerState.payload;
+    if (!payload) return;
 
-  viewerOverlay.dataset.open = "true";
-  viewerTitle.textContent = payload.archive.name;
-  viewerSourceBadge.textContent = getViewerSourceLabel(payload.source);
-  viewerSourceBadge.dataset.source = payload.source;
+    viewerOverlay.dataset.open = "true";
+    viewerTitle.textContent = payload.archive.name;
+    viewerSourceBadge.textContent = getViewerSourceLabel(payload.source);
+    viewerSourceBadge.dataset.source = payload.source;
 
-  const recordingArtifact = payload.archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
-  void loadViewerVideoSource({
-    videoPath: payload.videoPath,
-    mimeType: recordingArtifact?.mimeType || "video/webm",
-    viewerVideo,
-    viewerVideoState,
-    desktopBridge,
-    getViewerSource: () => viewerState.payload?.source ?? "unknown",
-    isViewerOpen: () => viewerState.open,
-    onBridgeUnavailable: () => {
-      state.feedback = { tone: "error", text: "Desktop bridge unavailable for evidence video loading." };
-      render();
-    },
-    onLoadFailure: (error, diagnostics) => {
-      console.warn(formatErrorMessage(error, "Unable to load the evidence video through desktop RPC."), diagnostics);
+    const recordingArtifact = payload.archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
+    void loadViewerVideoSource({
+        videoPath: payload.videoPath,
+        mimeType: recordingArtifact?.mimeType || "video/webm",
+        viewerVideo,
+        viewerVideoState,
+        desktopBridge,
+        getViewerSource: () => viewerState.payload?.source ?? "unknown",
+        isViewerOpen: () => viewerState.open,
+        onBridgeUnavailable: () => {
+            state.feedback = {tone: "error", text: "Desktop bridge unavailable for evidence video loading."};
+            render();
+        },
+        onLoadFailure: (error, diagnostics) => {
+            console.warn(formatErrorMessage(error, "Unable to load the evidence video through desktop RPC."), diagnostics);
+        }
+    });
+
+    const readOnlyNotice = getViewerReadOnlyNotice(payload.source);
+    const isReadOnly = !canEditViewerNotes(payload.source);
+    if (readOnlyNotice) {
+        viewerZipNotice.hidden = false;
+        viewerZipNotice.textContent = readOnlyNotice;
+    } else {
+        viewerZipNotice.hidden = true;
     }
-  });
+    viewerNotesTextarea.value = viewerState.notesValue;
+    viewerNotesTextarea.readOnly = isReadOnly;
+    viewerNotesSave.hidden = isReadOnly;
+    viewerNotesSave.disabled = !viewerState.notesDirty || viewerState.notesSaving;
 
-  const readOnlyNotice = getViewerReadOnlyNotice(payload.source);
-  const isReadOnly = !canEditViewerNotes(payload.source);
-  if (readOnlyNotice) {
-    viewerZipNotice.hidden = false;
-    viewerZipNotice.textContent = readOnlyNotice;
-  } else {
-    viewerZipNotice.hidden = true;
-  }
-  viewerNotesTextarea.value = viewerState.notesValue;
-  viewerNotesTextarea.readOnly = isReadOnly;
-  viewerNotesSave.hidden = isReadOnly;
-  viewerNotesSave.disabled = !viewerState.notesDirty || viewerState.notesSaving;
-
-  renderViewerPane();
+    renderViewerPane();
 }
 
 function updateTimelineHighlight(): void {
-  const payload = viewerState.payload;
-  if (!payload) return;
-  const items = deriveSectionTimeline(payload.archive, viewerState.activeSection, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
-  viewerState.activeIndex = findActiveIndex(items, viewerVideo.currentTime * 1000);
-  renderViewerPane();
-  scrollActiveTimelineItemIntoView();
+    const payload = viewerState.payload;
+    if (!payload) return;
+    const items = deriveSectionTimeline(payload.archive, viewerState.activeSection, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
+    viewerState.activeIndex = findActiveIndex(items, viewerVideo.currentTime * 1000);
+    renderViewerPane();
+    scrollActiveTimelineItemIntoView();
 }
 
 function scrollActiveTimelineItemIntoView(): void {
-  if (!viewerState.autoFollow || isAutoScrolling) return;
-  isAutoScrolling = true;
-  requestAnimationFrame(() => {
-    const activeRow = viewerReactRootElement.querySelector<HTMLElement>(".viewer-timeline .timeline-item[data-active='true']");
-    activeRow?.scrollIntoView({ block: "nearest" });
-    isAutoScrolling = false;
-  });
+    if (!viewerState.autoFollow || isAutoScrolling) return;
+    isAutoScrolling = true;
+    requestAnimationFrame(() => {
+        const activeRow = viewerReactRootElement.querySelector<HTMLElement>(".viewer-timeline .timeline-item[data-active='true']");
+        activeRow?.scrollIntoView({block: "nearest"});
+        isAutoScrolling = false;
+    });
 }
 
 function buildTimelineRows() {
-  const payload = viewerState.payload;
-  if (!payload) return [];
+    const payload = viewerState.payload;
+    if (!payload) return [];
 
-  const section = viewerState.activeSection;
-  const items = deriveSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
+    const section = viewerState.activeSection;
+    const items = deriveSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
 
-  if (section !== "actions") {
-    return items.map((item) => ({
-      id: item.id,
-      offsetMs: item.offsetMs,
-      section,
-      label: item.label,
-      kind: item.kind,
-      selected: false,
-      merged: false,
-      tags: [] as string[]
-    }));
-  }
-
-  const mergedMemberIds = new Set(viewerState.mergeGroups.flatMap((g) => g.memberIds));
-  const rows: Array<{ id: string; offsetMs: number; section: TimelineSection; label: string; kind: string; selected: boolean; merged: boolean; mergedRange?: string; tags: string[] }> = [];
-  const seenGroupIds = new Set<string>();
-
-  for (const item of items) {
-    const group = viewerState.mergeGroups.find((g) => g.memberIds.includes(item.id));
-    if (group) {
-      if (seenGroupIds.has(group.id)) continue;
-      seenGroupIds.add(group.id);
-      const memberItems = items.filter((candidate) => group.memberIds.includes(candidate.id));
-      const firstMs = Math.min(...memberItems.map((candidate) => candidate.offsetMs));
-      const lastMs = Math.max(...memberItems.map((candidate) => candidate.offsetMs));
-      rows.push({
-        id: group.id,
-        offsetMs: firstMs,
-        section,
-        label: group.label,
-        kind: "action",
-        selected: viewerState.selectedActionIds.has(group.id),
-        merged: true,
-        mergedRange: `${formatOffset(firstMs)}–${formatOffset(lastMs)}`,
-        tags: group.tags
-      });
-      continue;
+    if (section !== "actions") {
+        return items.map((item) => ({
+            id: item.id,
+            offsetMs: item.offsetMs,
+            section,
+            label: item.label,
+            kind: item.kind,
+            selected: false,
+            merged: false,
+            tags: [] as string[]
+        }));
     }
-    if (mergedMemberIds.has(item.id)) continue;
-    rows.push({
-      id: item.id,
-      offsetMs: item.offsetMs,
-      section,
-      label: item.label,
-      kind: item.kind,
-      selected: viewerState.selectedActionIds.has(item.id),
-      merged: false,
-      tags: item.tags ?? []
-    });
-  }
 
-  return rows;
+    const mergedMemberIds = new Set(viewerState.mergeGroups.flatMap((g) => g.memberIds));
+    const rows: Array<{
+        id: string;
+        offsetMs: number;
+        section: TimelineSection;
+        label: string;
+        kind: string;
+        selected: boolean;
+        merged: boolean;
+        mergedRange?: string;
+        tags: string[]
+    }> = [];
+    const seenGroupIds = new Set<string>();
+
+    for (const item of items) {
+        const group = viewerState.mergeGroups.find((g) => g.memberIds.includes(item.id));
+        if (group) {
+            if (seenGroupIds.has(group.id)) continue;
+            seenGroupIds.add(group.id);
+            const memberItems = items.filter((candidate) => group.memberIds.includes(candidate.id));
+            const firstMs = Math.min(...memberItems.map((candidate) => candidate.offsetMs));
+            const lastMs = Math.max(...memberItems.map((candidate) => candidate.offsetMs));
+            rows.push({
+                id: group.id,
+                offsetMs: firstMs,
+                section,
+                label: group.label,
+                kind: "action",
+                selected: viewerState.selectedActionIds.has(group.id),
+                merged: true,
+                mergedRange: `${formatOffset(firstMs)}–${formatOffset(lastMs)}`,
+                tags: group.tags
+            });
+            continue;
+        }
+        if (mergedMemberIds.has(item.id)) continue;
+        rows.push({
+            id: item.id,
+            offsetMs: item.offsetMs,
+            section,
+            label: item.label,
+            kind: item.kind,
+            selected: viewerState.selectedActionIds.has(item.id),
+            merged: false,
+            tags: item.tags ?? []
+        });
+    }
+
+    return rows;
 }
 
 function renderViewerPane(): void {
-  const payload = viewerState.payload;
-  const timelineRows = buildTimelineRows();
-  const detailItem = viewerState.networkDetailIndex === null ? null : viewerState.timeline[viewerState.networkDetailIndex] ?? null;
+    const payload = viewerState.payload;
+    const timelineRows = buildTimelineRows();
+    const detailItem = viewerState.networkDetailIndex === null ? null : viewerState.timeline[viewerState.networkDetailIndex] ?? null;
 
-  const sectionItems = payload
-    ? deriveSectionTimeline(payload.archive, viewerState.activeSection, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery)
-    : [];
-  const activeItem = viewerState.activeIndex >= 0 ? sectionItems[viewerState.activeIndex] : null;
-  const activeItemId = activeItem
-    ? viewerState.activeSection === "actions"
-      ? viewerState.mergeGroups.find((group) => group.memberIds.includes(activeItem.id))?.id ?? activeItem.id
-      : activeItem.id
-    : null;
+    const sectionItems = payload
+        ? deriveSectionTimeline(payload.archive, viewerState.activeSection, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery)
+        : [];
+    const activeItem = viewerState.activeIndex >= 0 ? sectionItems[viewerState.activeIndex] : null;
+    const activeItemId = activeItem
+        ? viewerState.activeSection === "actions"
+            ? viewerState.mergeGroups.find((group) => group.memberIds.includes(activeItem.id))?.id ?? activeItem.id
+            : activeItem.id
+        : null;
 
-  viewerReactRoot.render(
-    <ViewerPane
-      activeSection={viewerState.activeSection}
-      networkSearchQuery={viewerState.networkSearchQuery}
-      networkSubtypeFilter={viewerState.networkSubtypeFilter}
-      timelineRows={timelineRows}
-      activeItemId={activeItemId}
-      autoFollow={viewerState.autoFollow}
-      focusVisible={!viewerState.autoFollow}
-      networkDetail={detailItem}
-      contextMenu={contextMenuState}
-      mergeDialog={{ open: viewerState.mergeDialogOpen, value: viewerState.mergeDialogValue, error: viewerState.mergeDialogError }}
-      onSectionChange={(section) => {
-        viewerState.activeSection = section;
-        viewerState.networkDetailIndex = null;
-        renderViewerPane();
-        updateTimelineHighlight();
-      }}
-      onSubtypeChange={(subtype) => {
-        viewerState.networkSubtypeFilter = subtype;
-        viewerState.networkDetailIndex = null;
-        renderViewerPane();
-        updateTimelineHighlight();
-      }}
-      onSearchChange={(value) => {
-        viewerState.networkSearchQuery = value;
-        viewerState.networkDetailIndex = null;
-        renderViewerPane();
-        updateTimelineHighlight();
-      }}
-      onTimelineClick={(itemId, offsetMs, event) => {
-        viewerState.autoFollow = false;
-        viewerVideo.currentTime = Math.max(0, offsetMs / 1000);
-        if (viewerState.activeSection === "actions" && payload) {
-          if (event.metaKey || event.ctrlKey) {
-            const selection = toggleActionSelection({ selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId }, itemId);
-            viewerState.selectedActionIds = selection.selectedActionIds;
-            viewerState.anchorActionId = selection.anchorActionId;
-          } else if (event.shiftKey && viewerState.anchorActionId) {
-            const selection = selectActionRange(payload.archive, viewerState.mergeGroups, { selectedActionIds: viewerState.selectedActionIds, anchorActionId: viewerState.anchorActionId }, itemId);
-            if (selection.selectedActionIds.size > 0) {
-              viewerState.selectedActionIds = selection.selectedActionIds;
-            }
-          } else {
-            const selection = selectSingleAction(itemId);
-            viewerState.selectedActionIds = selection.selectedActionIds;
-            viewerState.anchorActionId = selection.anchorActionId;
-          }
-        } else {
-          const fullTimelineIndex = viewerState.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
-          if (fullTimelineIndex !== -1) {
-            const timelineItem = viewerState.timeline[fullTimelineIndex];
-            viewerState.networkDetailIndex = timelineItem?.kind === "network" && viewerState.networkDetailIndex !== fullTimelineIndex ? fullTimelineIndex : null;
-          }
-        }
-        renderViewerPane();
-        updateTimelineHighlight();
-      }}
-      onTimelineContext={(itemId, event) => {
-        if (viewerState.activeSection !== "actions" || !payload) return;
-        event.preventDefault();
-        contextTargetId = itemId;
-        if (!viewerState.selectedActionIds.has(itemId)) {
-          const selection = selectSingleAction(itemId);
-          viewerState.selectedActionIds = selection.selectedActionIds;
-          viewerState.anchorActionId = selection.anchorActionId;
-        }
-        const isMerged = Boolean(viewerState.mergeGroups.find((group) => group.id === itemId));
-        const selectedActionIds = getSelectedActionEntryIds();
-        contextMenuState = {
-          open: true,
-          x: event.clientX,
-          y: event.clientY,
-          canMerge: !isMerged && selectedActionIds.length >= 2,
-          canUnmerge: isMerged
-        };
-        renderViewerPane();
-      }}
-      onFocus={() => {
-        viewerState.autoFollow = true;
-        renderViewerPane();
-        updateTimelineHighlight();
-      }}
-      onCloseDetail={() => {
-        viewerState.networkDetailIndex = null;
-        renderViewerPane();
-      }}
-      onCopy={(value, label) => {
-        void copyViewerValue(value, label);
-      }}
-      onContextMerge={() => {
-        hideContextMenu();
-        const selectedActionIds = getSelectedActionEntryIds();
-        if (selectedActionIds.length < 2) {
-          state.feedback = { tone: "error", text: "Select at least two actions before merging." };
-          render();
-          return;
-        }
-        openViewerMergeDialog(selectedActionIds);
-      }}
-      onContextUnmerge={() => {
-        const targetId = contextTargetId;
-        hideContextMenu();
-        if (!targetId) return;
-        viewerState.mergeGroups = viewerState.mergeGroups.filter((g) => g.id !== targetId);
-        viewerState.selectedActionIds = new Set();
-        void persistViewerReviewState("Merge removed.");
-      }}
-      onDismissContext={() => {
-        if (contextMenuState.open) {
-          hideContextMenu();
-        }
-      }}
-      onMergeValueChange={(value) => {
-        viewerState.mergeDialogValue = value;
-        viewerState.mergeDialogError = null;
-        renderViewerPane();
-      }}
-      onMergeConfirm={() => {
-        submitViewerMergeDialog();
-      }}
-      onMergeCancel={() => {
-        closeViewerMergeDialog();
-      }}
-    />
-  );
-}
-
-function hideContextMenu(): void {
-  contextMenuState = { ...contextMenuState, open: false };
-  contextTargetId = null;
-  renderViewerPane();
+    viewerReactRoot.render(
+        <ViewerPane
+            activeSection={viewerState.activeSection}
+            networkSearchQuery={viewerState.networkSearchQuery}
+            networkSubtypeFilter={viewerState.networkSubtypeFilter}
+            timelineRows={timelineRows}
+            activeItemId={activeItemId}
+            autoFollow={viewerState.autoFollow}
+            focusVisible={!viewerState.autoFollow}
+            networkDetail={detailItem}
+            mergeDialog={{
+                open: viewerState.mergeDialogOpen,
+                value: viewerState.mergeDialogValue,
+                error: viewerState.mergeDialogError
+            }}
+            onSectionChange={(section) => {
+                viewerState.activeSection = section;
+                viewerState.networkDetailIndex = null;
+                renderViewerPane();
+                updateTimelineHighlight();
+            }}
+            onSubtypeChange={(subtype) => {
+                viewerState.networkSubtypeFilter = subtype;
+                viewerState.networkDetailIndex = null;
+                renderViewerPane();
+                updateTimelineHighlight();
+            }}
+            onSearchChange={(value) => {
+                viewerState.networkSearchQuery = value;
+                viewerState.networkDetailIndex = null;
+                renderViewerPane();
+                updateTimelineHighlight();
+            }}
+            onTimelineClick={(itemId, offsetMs, event) => {
+                viewerState.autoFollow = false;
+                viewerVideo.currentTime = Math.max(0, offsetMs / 1000);
+                if (viewerState.activeSection === "actions" && payload) {
+                    if (event.metaKey || event.ctrlKey) {
+                        const selection = toggleActionSelection({
+                            selectedActionIds: viewerState.selectedActionIds,
+                            anchorActionId: viewerState.anchorActionId
+                        }, itemId);
+                        viewerState.selectedActionIds = selection.selectedActionIds;
+                        viewerState.anchorActionId = selection.anchorActionId;
+                    } else if (event.shiftKey && viewerState.anchorActionId) {
+                        const selection = selectActionRange(payload.archive, viewerState.mergeGroups, {
+                            selectedActionIds: viewerState.selectedActionIds,
+                            anchorActionId: viewerState.anchorActionId
+                        }, itemId);
+                        if (selection.selectedActionIds.size > 0) {
+                            viewerState.selectedActionIds = selection.selectedActionIds;
+                        }
+                    } else {
+                        const selection = selectSingleAction(itemId);
+                        viewerState.selectedActionIds = selection.selectedActionIds;
+                        viewerState.anchorActionId = selection.anchorActionId;
+                    }
+                } else {
+                    const fullTimelineIndex = viewerState.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
+                    if (fullTimelineIndex !== -1) {
+                        const timelineItem = viewerState.timeline[fullTimelineIndex];
+                        viewerState.networkDetailIndex = timelineItem?.kind === "network" && viewerState.networkDetailIndex !== fullTimelineIndex ? fullTimelineIndex : null;
+                    }
+                }
+                renderViewerPane();
+                updateTimelineHighlight();
+            }}
+            onTimelineContext={(itemId, event) => {
+                if (viewerState.activeSection !== "actions" || !payload || !desktopBridge) return;
+                event.preventDefault();
+                contextTargetId = itemId;
+                if (!viewerState.selectedActionIds.has(itemId)) {
+                    const selection = selectSingleAction(itemId);
+                    viewerState.selectedActionIds = selection.selectedActionIds;
+                    viewerState.anchorActionId = selection.anchorActionId;
+                }
+                const isMerged = Boolean(viewerState.mergeGroups.find((group) => group.id === itemId));
+                const selectedActionIds = getSelectedActionEntryIds();
+                const canMerge = !isMerged && selectedActionIds.length >= 2;
+                const canUnmerge = isMerged;
+                if (!canMerge && !canUnmerge) return;
+                const menu: import("../rpc").ContextMenuItem[] = [];
+                if (canMerge) menu.push({label: "Merge Actions…", action: "merge"});
+                if (canUnmerge) menu.push({label: "Un-merge", action: "unmerge"});
+                void desktopBridge.rpc.request.showContextMenu({menu});
+                renderViewerPane();
+            }}
+            onFocus={() => {
+                viewerState.autoFollow = true;
+                renderViewerPane();
+                updateTimelineHighlight();
+            }}
+            onCloseDetail={() => {
+                viewerState.networkDetailIndex = null;
+                renderViewerPane();
+            }}
+            onCopy={(value, label) => {
+                void copyViewerValue(value, label);
+            }}
+            onMergeValueChange={(value) => {
+                viewerState.mergeDialogValue = value;
+                viewerState.mergeDialogError = null;
+                renderViewerPane();
+            }}
+            onMergeConfirm={() => {
+                submitViewerMergeDialog();
+            }}
+            onMergeCancel={() => {
+                closeViewerMergeDialog();
+            }}
+        />
+    );
 }
 
 function openViewerMergeDialog(selectedActionIds: string[]): void {
-  openMergeDialogState(viewerState, selectedActionIds);
-  renderViewerPane();
+    openMergeDialogState(viewerState, selectedActionIds);
+    renderViewerPane();
 }
 
 function closeViewerMergeDialog(): void {
-  closeMergeDialogState(viewerState);
-  renderViewerPane();
+    closeMergeDialogState(viewerState);
+    renderViewerPane();
 }
 
 function submitViewerMergeDialog(): void {
-  const validation = validateMergeDialog(viewerState);
-  if (!validation.ok) {
-    viewerState.mergeDialogError = validation.error;
-    renderViewerPane();
-    return;
-  }
+    const validation = validateMergeDialog(viewerState);
+    if (!validation.ok) {
+        viewerState.mergeDialogError = validation.error;
+        renderViewerPane();
+        return;
+    }
 
-  const group = createMergeGroup({
-    id: `mg-${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    label: validation.label,
-    selectedActionIds: validation.selectedActionIds
-  });
-  viewerState.mergeGroups = [...viewerState.mergeGroups, group];
-  viewerState.selectedActionIds = new Set();
-  closeViewerMergeDialog();
-  void persistViewerReviewState("Merged actions.");
+    const group = createMergeGroup({
+        id: `mg-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        label: validation.label,
+        selectedActionIds: validation.selectedActionIds
+    });
+    viewerState.mergeGroups = [...viewerState.mergeGroups, group];
+    viewerState.selectedActionIds = new Set();
+    closeViewerMergeDialog();
+    void persistViewerReviewState("Merged actions.");
 }
 
-function renderBodyCapture(body: { disposition: string; encoding?: "utf8" | "base64" | undefined; mimeType?: string | undefined; value?: string | undefined; byteLength?: number | undefined; omittedByteLength?: number | undefined; reason?: string | undefined }): string {
-  if (body.disposition === "captured" && body.value !== undefined) {
-    const display = body.encoding === "base64"
-      ? `[base64, ${body.byteLength ?? "?"} bytes]`
-      : escapeHtml(body.value.slice(0, 2000));
-    return `<button class="network-copy-block" type="button" data-role="copy-value" data-copy-label="request detail" data-copy-value="${escapeHtml(body.value)}"><pre class="network-body-pre">${display}</pre></button>`;
-  }
-  const reason = body.reason ? ` (${body.reason})` : "";
-  return `<span class="network-body-empty">${escapeHtml(body.disposition)}${escapeHtml(reason)}</span>`;
+function renderBodyCapture(body: {
+    disposition: string;
+    encoding?: "utf8" | "base64" | undefined;
+    mimeType?: string | undefined;
+    value?: string | undefined;
+    byteLength?: number | undefined;
+    omittedByteLength?: number | undefined;
+    reason?: string | undefined
+}): string {
+    if (body.disposition === "captured" && body.value !== undefined) {
+        const display = body.encoding === "base64"
+            ? `[base64, ${body.byteLength ?? "?"} bytes]`
+            : escapeHtml(body.value.slice(0, 2000));
+        return `<button class="network-copy-block" type="button" data-role="copy-value" data-copy-label="request detail" data-copy-value="${escapeHtml(body.value)}"><pre class="network-body-pre">${display}</pre></button>`;
+    }
+    const reason = body.reason ? ` (${body.reason})` : "";
+    return `<span class="network-body-empty">${escapeHtml(body.disposition)}${escapeHtml(reason)}</span>`;
 }
 
 function renderCopyableValue(value: string, label: string, className: string): string {
-  return `<button class="network-copy-inline ${className}" type="button" data-role="copy-value" data-copy-label="${escapeHtml(label)}" data-copy-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
+    return `<button class="network-copy-inline ${className}" type="button" data-role="copy-value" data-copy-label="${escapeHtml(label)}" data-copy-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
 }
 
 async function copyViewerValue(value: string, label: string): Promise<void> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = value;
-      textarea.setAttribute("readonly", "true");
-      textarea.style.position = "absolute";
-      textarea.style.opacity = "0";
-      document.body.append(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      textarea.remove();
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+        } else {
+            const textarea = document.createElement("textarea");
+            textarea.value = value;
+            textarea.setAttribute("readonly", "true");
+            textarea.style.position = "absolute";
+            textarea.style.opacity = "0";
+            document.body.append(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            textarea.remove();
+        }
+
+        state.feedback = {tone: "success", text: `Copied ${label}.`};
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, `Failed to copy ${label}.`)};
     }
 
-    state.feedback = { tone: "success", text: `Copied ${label}.` };
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, `Failed to copy ${label}.`) };
-  }
-
-  render();
+    render();
 }
 
 async function saveViewerNotes(): Promise<void> {
-  const payload = viewerState.payload;
-  if (!payload || !shouldPersistViewerReviewState(payload.source) || !desktopBridge) return;
+    const payload = viewerState.payload;
+    if (!payload || !shouldPersistViewerReviewState(payload.source) || !desktopBridge) return;
 
-  viewerState.notesSaving = true;
-  viewerNotesSave.disabled = true;
-  viewerNotesSave.textContent = "Saving…";
+    viewerState.notesSaving = true;
+    viewerNotesSave.disabled = true;
+    viewerNotesSave.textContent = "Saving…";
 
-  try {
-    await persistViewerReviewState("Notes saved.");
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to save notes.") };
-    render();
-  } finally {
-    viewerState.notesSaving = false;
-    viewerNotesSave.textContent = "Save notes";
-    viewerNotesSave.disabled = !viewerState.notesDirty;
-  }
+    try {
+        await persistViewerReviewState("Notes saved.");
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to save notes.")};
+        render();
+    } finally {
+        viewerState.notesSaving = false;
+        viewerNotesSave.textContent = "Save notes";
+        viewerNotesSave.disabled = !viewerState.notesDirty;
+    }
 }
 
 function getSelectedActionEntryIds(): string[] {
-  const payload = viewerState.payload;
-  if (!payload) {
-    return [];
-  }
+    const payload = viewerState.payload;
+    if (!payload) {
+        return [];
+    }
 
-  return getContiguousMergeableSelection(payload.archive, viewerState.mergeGroups, viewerState.selectedActionIds);
+    return getContiguousMergeableSelection(payload.archive, viewerState.mergeGroups, viewerState.selectedActionIds);
 }
 
 async function persistViewerReviewState(successText?: string): Promise<void> {
-  const payload = viewerState.payload;
-  if (!payload) return;
+    const payload = viewerState.payload;
+    if (!payload) return;
 
-  if (!shouldPersistViewerReviewState(payload.source) || !desktopBridge) {
-    renderViewerPane();
-    if (successText) {
-      state.feedback = { tone: "neutral", text: successText };
-      render();
+    if (!shouldPersistViewerReviewState(payload.source) || !desktopBridge) {
+        renderViewerPane();
+        if (successText) {
+            state.feedback = {tone: "neutral", text: successText};
+            render();
+        }
+        return;
     }
-    return;
-  }
 
-  const response = await desktopBridge.rpc.request.saveSessionReviewState({
-    sessionId: payload.archive.sessionId,
-    notes: viewerState.notesValue,
-    annotations: viewerState.mergeGroups
-  });
+    const response = await desktopBridge.rpc.request.saveSessionReviewState({
+        sessionId: payload.archive.sessionId,
+        notes: viewerState.notesValue,
+        annotations: viewerState.mergeGroups
+    });
 
-  viewerState.notesDirty = false;
-  viewerState.payload = {
-    ...payload,
-    archive: response.archive,
-    notes: viewerState.notesValue
-  };
-  viewerState.timeline = deriveTimeline(response.archive);
-  viewerState.mergeGroups = getArchiveMergeGroups(response.archive);
-  renderViewerPane();
+    viewerState.notesDirty = false;
+    viewerState.payload = {
+        ...payload,
+        archive: response.archive,
+        notes: viewerState.notesValue
+    };
+    viewerState.timeline = deriveTimeline(response.archive);
+    viewerState.mergeGroups = getArchiveMergeGroups(response.archive);
+    renderViewerPane();
 
-  if (successText) {
-    state.feedback = { tone: "success", text: successText };
-    render();
-  }
+    if (successText) {
+        state.feedback = {tone: "success", text: successText};
+        render();
+    }
 }
 
 async function handleOpenLocalSession(): Promise<void> {
-  if (!desktopBridge) return;
-  if (viewerState.isOpening) return;
-  viewerState.isOpening = true;
-  state.feedback = { tone: "neutral", text: "Opening local session folder…" };
-  render();
-  try {
-    const payload = await desktopBridge.rpc.request.openLocalSession(undefined);
-    openViewer(payload);
-    state.feedback = { tone: "neutral", text: "Local session loaded." };
+    if (!desktopBridge) return;
+    if (viewerState.isOpening) return;
+    viewerState.isOpening = true;
+    state.feedback = {tone: "neutral", text: "Opening local session folder…"};
     render();
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to open local session.") };
-    render();
-  } finally {
-    viewerState.isOpening = false;
-  }
+    try {
+        const payload = await desktopBridge.rpc.request.openLocalSession(undefined);
+        openViewer(payload);
+        state.feedback = {tone: "neutral", text: "Local session loaded."};
+        render();
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to open local session.")};
+        render();
+    } finally {
+        viewerState.isOpening = false;
+    }
 }
 
 async function handleExportSessionZip(sessionId: string): Promise<void> {
-  if (!desktopBridge) return;
-  state.feedback = { tone: "neutral", text: "Exporting session ZIP…" };
-  render();
-  try {
-    const { savedPath } = await desktopBridge.rpc.request.exportSessionZip({ sessionId });
-    state.feedback = { tone: "success", text: `ZIP exported → ${savedPath}` };
-  } catch (error) {
-    state.feedback = { tone: "error", text: formatErrorMessage(error, "Failed to export session ZIP.") };
-  }
-  render();
+    if (!desktopBridge) return;
+    state.feedback = {tone: "neutral", text: "Exporting session ZIP…"};
+    render();
+    try {
+        const {savedPath} = await desktopBridge.rpc.request.exportSessionZip({sessionId});
+        state.feedback = {tone: "success", text: `ZIP exported → ${savedPath}`};
+    } catch (error) {
+        state.feedback = {tone: "error", text: formatErrorMessage(error, "Failed to export session ZIP.")};
+    }
+    render();
 }
 
 render();

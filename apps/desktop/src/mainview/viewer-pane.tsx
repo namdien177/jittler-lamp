@@ -13,14 +13,6 @@ type TimelineRow = {
   tags: string[];
 };
 
-type ContextState = {
-  open: boolean;
-  x: number;
-  y: number;
-  canMerge: boolean;
-  canUnmerge: boolean;
-};
-
 const SUBTYPE_OPTIONS: Array<{ value: NetworkSubtype | "all"; label: string }> = [
   { value: "all", label: "All" },
   { value: "xhr", label: "XHR" },
@@ -43,7 +35,6 @@ export function ViewerPane(props: {
   autoFollow: boolean;
   focusVisible: boolean;
   networkDetail: TimelineItem | null;
-  contextMenu: ContextState;
   mergeDialog: { open: boolean; value: string; error: string | null };
   onSectionChange: (section: TimelineSection) => void;
   onSubtypeChange: (value: NetworkSubtype | "all") => void;
@@ -53,9 +44,6 @@ export function ViewerPane(props: {
   onFocus: () => void;
   onCloseDetail: () => void;
   onCopy: (value: string, label: string) => void;
-  onContextMerge: () => void;
-  onContextUnmerge: () => void;
-  onDismissContext: (event: React.MouseEvent<HTMLDivElement>) => void;
   onMergeValueChange: (value: string) => void;
   onMergeConfirm: () => void;
   onMergeCancel: () => void;
@@ -72,7 +60,7 @@ export function ViewerPane(props: {
 
   return (
     <>
-      <div className="viewer-right" onClick={props.onDismissContext}>
+      <div className="viewer-right">
         <div className="viewer-section-tabs">
           {(["actions", "console", "network"] as const).map((section) => (
             <button key={section} className="section-tab" type="button" data-active={section === props.activeSection ? "true" : "false"} onClick={() => props.onSectionChange(section)}>{section[0]?.toUpperCase()}{section.slice(1)}</button>
@@ -138,10 +126,6 @@ export function ViewerPane(props: {
             </div>
           </div> : null}
         </div>
-      </div>
-      <div className="viewer-context-menu" hidden={!props.contextMenu.open} style={{ left: `${props.contextMenu.x}px`, top: `${props.contextMenu.y}px` }} onClick={(event) => event.stopPropagation()}>
-        <button className="context-menu-item" type="button" hidden={!props.contextMenu.canMerge} onClick={props.onContextMerge}>Merge Actions…</button>
-        <button className="context-menu-item" type="button" hidden={!props.contextMenu.canUnmerge} onClick={props.onContextUnmerge}>Un-merge</button>
       </div>
       <div className="viewer-merge-dialog-backdrop" hidden={!props.mergeDialog.open} onClick={props.onMergeCancel}>
         <div className="viewer-merge-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>

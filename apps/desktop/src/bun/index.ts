@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { BrowserView, BrowserWindow, Utils } from "electrobun/bun";
+import { BrowserView, BrowserWindow, ContextMenu, Utils } from "electrobun/bun";
 
 import { loadResolvedCompanionConfig, saveCompanionConfig } from "../companion/config";
 import { deleteSession, getCompanionConfigState, getCompanionRuntimeState, refreshCompanionConfig, registerMediaPlayback, startCompanionServer } from "../companion/server";
@@ -156,10 +156,19 @@ const rpc = BrowserView.defineRPC<DesktopRPC>({
           annotations
         });
         return { ok: true as const, archive };
+      },
+      showContextMenu: async ({ menu }) => {
+        ContextMenu.showContextMenu(menu);
+        return { ok: true as const };
       }
     },
     messages: {}
   }
+});
+
+ContextMenu.on("context-menu-clicked", (event: unknown) => {
+  const { action, data } = (event as { data: { action: string; data?: unknown } }).data;
+  rpc.send.contextMenuClicked?.({ action, data });
 });
 
 void startCompanionServer().catch((error: unknown) => {
