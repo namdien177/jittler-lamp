@@ -19,6 +19,25 @@ export type RuntimeConfig = {
 	databaseUrl: string | undefined;
 	logLevel: Exclude<NonNullable<AppEnv["LOG_LEVEL"]>, "silent">;
 	enableSwagger: boolean;
+	clerkSecretKey: string | undefined;
+	clerkJwtKey: string | undefined;
+	clerkAudience: string | undefined;
+	clerkAuthorizedParties: string[] | undefined;
+};
+
+const parseAuthorizedParties = (
+	authorizedParties: string | undefined,
+): string[] | undefined => {
+	if (!authorizedParties) {
+		return undefined;
+	}
+
+	const parsed = authorizedParties
+		.split(",")
+		.map((value) => value.trim())
+		.filter(Boolean);
+
+	return parsed.length > 0 ? parsed : undefined;
 };
 
 export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
@@ -34,5 +53,11 @@ export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
 		databaseUrl: env.DATABASE_URL,
 		logLevel: resolvedLogLevel === "silent" ? "info" : resolvedLogLevel,
 		enableSwagger: defaults.enableSwagger,
+		clerkSecretKey: env.CLERK_SECRET_KEY,
+		clerkJwtKey: env.CLERK_JWT_KEY,
+		clerkAudience: env.CLERK_AUDIENCE,
+		clerkAuthorizedParties: parseAuthorizedParties(
+			env.CLERK_AUTHORIZED_PARTIES,
+		),
 	};
 };

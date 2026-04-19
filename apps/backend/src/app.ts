@@ -7,6 +7,7 @@ import { createDb } from "./db";
 import { errorNormalizer } from "./middleware/error-normalizer";
 import { requestContext } from "./middleware/request-context";
 import { healthRoutes } from "./routes/health";
+import { protectedRoutes } from "./routes/protected";
 import { createLogger } from "./utils/logger";
 
 export const createApp = (source = process.env) => {
@@ -29,7 +30,8 @@ export const createApp = (source = process.env) => {
 				"request received",
 			);
 		})
-		.use(healthRoutes);
+		.use(healthRoutes)
+		.use(protectedRoutes);
 
 	if (runtime.enableSwagger) {
 		app.use(

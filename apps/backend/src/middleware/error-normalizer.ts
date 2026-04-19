@@ -15,11 +15,13 @@ export const errorNormalizer = new Elysia({ name: "error-normalizer" }).onError(
 					: 500;
 
 		logger?.error({ err: error, code, status }, "request failed");
+		set.status = status;
 
 		return {
 			error: {
 				code,
 				message: error instanceof Error ? error.message : "Unexpected error",
+				status,
 				requestId,
 			},
 		};
