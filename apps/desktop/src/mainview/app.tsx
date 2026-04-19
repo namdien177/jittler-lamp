@@ -11,7 +11,7 @@ import { applyViewerPayload, createViewerState, resetViewerState, type ViewerSta
 import { getViewerSourceLabel, shouldClearViewerTempSession } from "./viewer-source";
 import { ViewerPane } from "./viewer-pane";
 import { createDesktopNotesAdapter, createDesktopPlaybackAdapter, createDesktopShareAdapter, createDesktopStorageAdapter } from "./adapters";
-import { readDesktopViewerImplementationFromEnvironment, reportDesktopViewerTelemetry, type ViewerImplementation } from "./viewer-rollout";
+import { reportDesktopViewerTelemetry } from "./viewer-rollout";
 
 type FeedbackTone = "neutral" | "success" | "error";
 
@@ -218,9 +218,8 @@ const viewerNotesTextarea = queryRequiredElement<HTMLTextAreaElement>(appRoot, "
 const viewerNotesSave = queryRequiredElement<HTMLButtonElement>(appRoot, "[data-role='viewer-notes-save']");
 const viewerReactRootElement = queryRequiredElement<HTMLDivElement>(appRoot, "[data-role='viewer-react-root']");
 const viewerReactRoot = createRoot(viewerReactRootElement);
-let selectedViewerImplementation: ViewerImplementation = readDesktopViewerImplementationFromEnvironment();
-let bootedImplementation: ViewerImplementation | null = null;
-reportDesktopViewerTelemetry({ implementation: selectedViewerImplementation, phase: "selected" });
+let hasReportedViewerBoot = false;
+reportDesktopViewerTelemetry({ implementation: "react", phase: "selected" });
 const playbackAdapter = desktopBridge
   ? createDesktopPlaybackAdapter({
     bridge: desktopBridge,
@@ -1208,35 +1207,15 @@ function renderReactViewerPane(): void {
   );
 }
 
-function renderLegacyViewerPane(): void {
-  renderReactViewerPane();
-}
-
 function renderViewerPane(): void {
   try {
-    if (selectedViewerImplementation === "react") {
-      renderReactViewerPane();
-      if (bootedImplementation !== "react") {
-        reportDesktopViewerTelemetry({ implementation: "react", phase: "booted" });
-        bootedImplementation = "react";
-      }
-    } else {
-      renderLegacyViewerPane();
-      if (bootedImplementation !== "legacy") {
-        reportDesktopViewerTelemetry({ implementation: "legacy", phase: "booted" });
-        bootedImplementation = "legacy";
-      }
+    renderReactViewerPane();
+    if (!hasReportedViewerBoot) {
+      reportDesktopViewerTelemetry({ implementation: "react", phase: "booted" });
+      hasReportedViewerBoot = true;
     }
   } catch (error) {
-    reportDesktopViewerTelemetry({ implementation: selectedViewerImplementation, phase: "boot_failed", error });
-    if (selectedViewerImplementation === "react") {
-      selectedViewerImplementation = "legacy";
-      renderLegacyViewerPane();
-      reportDesktopViewerTelemetry({ implementation: "legacy", phase: "fallback", error });
-      state.feedback = { tone: "error", text: "React viewer failed. Switched to legacy viewer for stability." };
-      render();
-      return;
-    }
+    reportDesktopViewerTelemetry({ implementation: "react", phase: "boot_failed", error });
     throw error;
   }
 }
