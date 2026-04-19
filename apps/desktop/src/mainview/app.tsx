@@ -889,7 +889,7 @@ async function handleImportZip(): Promise<void> {
   render();
 
   try {
-    const payload = await storageAdapter.importZipSession?.();
+    const payload = await storageAdapter?.importZipSession?.();
     if (!payload) throw new Error("ZIP import adapter is unavailable.");
     openViewer(payload);
     state.feedback = { tone: "neutral", text: "ZIP session loaded." };
@@ -910,7 +910,7 @@ async function handleViewSession(sessionId: string): Promise<void> {
   render();
 
   try {
-    const payload = await storageAdapter.loadLibrarySession?.(sessionId);
+    const payload = await storageAdapter?.loadLibrarySession?.(sessionId);
     if (!payload) throw new Error("Library session adapter is unavailable.");
     openViewer(payload);
     state.feedback = { tone: "neutral", text: "Session loaded." };
@@ -1365,7 +1365,7 @@ async function handleOpenLocalSession(): Promise<void> {
   state.feedback = { tone: "neutral", text: "Opening local session folder…" };
   render();
   try {
-    const payload = await storageAdapter.openLocalSession?.();
+    const payload = await storageAdapter?.openLocalSession?.();
     if (!payload) throw new Error("Local session adapter is unavailable.");
     openViewer(payload);
     state.feedback = { tone: "neutral", text: "Local session loaded." };
@@ -1383,7 +1383,7 @@ async function handleExportSessionZip(sessionId: string): Promise<void> {
   state.feedback = { tone: "neutral", text: "Exporting session ZIP…" };
   render();
   try {
-    const exportResult = await storageAdapter.exportSessionZip?.(sessionId);
+    const exportResult = await storageAdapter?.exportSessionZip?.(sessionId);
     if (!exportResult) throw new Error("ZIP export adapter is unavailable.");
     const { savedPath } = exportResult;
     state.feedback = { tone: "success", text: `ZIP exported → ${savedPath}` };

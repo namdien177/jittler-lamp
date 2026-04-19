@@ -23,7 +23,7 @@ export function createDesktopPlaybackAdapter(args: {
   bridge: DesktopBridge;
   viewerVideo: HTMLVideoElement;
   viewerVideoState: ViewerVideoState;
-  getViewerSource: () => string;
+  getViewerSource: () => ViewerPayload["source"] | "unknown";
   isViewerOpen: () => boolean;
 }): PlaybackAdapter {
   return {
@@ -36,8 +36,8 @@ export function createDesktopPlaybackAdapter(args: {
         desktopBridge: args.bridge,
         getViewerSource: args.getViewerSource,
         isViewerOpen: args.isViewerOpen,
-        onBridgeUnavailable,
-        onLoadFailure
+        onBridgeUnavailable: onBridgeUnavailable ?? (() => {}),
+        onLoadFailure: onLoadFailure ?? (() => {})
       });
     },
     releaseSource: () => {
