@@ -23,8 +23,8 @@ import {
   validateMergeDialog
 } from "@jittle-lamp/viewer-core";
 
-import { buildReviewedArchive, buildReviewedSessionZip } from "./archive-export";
-import { loadSessionZip } from "./loader";
+import { buildReviewedArchive } from "./archive-export";
+import { buildReviewedZipBlob, createWebNotesAdapter, createWebPlaybackAdapter, createWebShareAdapter, createWebStorageAdapter } from "./adapters";
 import { NetworkDetail } from "./network-detail";
 import { useWebFileAdapter } from "./web-adapter";
 
@@ -93,6 +93,13 @@ function App(): React.JSX.Element {
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const autoScrollingRef = useRef(false);
   const ACTION_HIGHLIGHT_DELTA_MS = 200;
+
+  const storageAdapter = useMemo(() => createWebStorageAdapter(), []);
+  const playbackAdapter = useMemo(() => createWebPlaybackAdapter(), []);
+  const notesAdapter = useMemo(() => createWebNotesAdapter(), []);
+  const shareAdapter = useMemo(() => createWebShareAdapter(), []);
+  void notesAdapter;
+  void shareAdapter;
 
   const setFeedback = (text: string, tone: FeedbackTone): void => {
     setState((prev) => ({ ...prev, feedback: text, feedbackTone: tone }));
@@ -234,9 +241,11 @@ function App(): React.JSX.Element {
     });
 
     try {
-      const loaded = await loadSessionZip(file);
+      const loaded = await storageAdapter.loadFromZipFile?.(file);
+      if (!loaded) throw new Error("Web ZIP storage adapter is unavailable.");
       setState((prev) => {
-        if (prev.videoUrl) URL.revokeObjectURL(prev.videoUrl);
+        if (prev.videoUrl) playbackAdapter.releaseSource?.({ videoPath: prev.videoUrl });
+        playbackAdapter.loadSource({ videoPath: loaded.videoUrl, mimeType: "video/webm" });
         return {
           ...prev,
           archive: loaded.archive,
@@ -270,7 +279,7 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     return () => {
-      if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);
+      if (state.videoUrl) playbackAdapter.releaseSource?.({ videoPath: state.videoUrl });
     };
   }, [state.videoUrl]);
 
@@ -376,12 +385,11 @@ function App(): React.JSX.Element {
       setFeedback("Nothing loaded to export.", "error");
       return;
     }
-    const zipBytes = buildReviewedSessionZip({
+    const blob = buildReviewedZipBlob({
       archive: state.archive,
       mergeGroups: state.mergeGroups,
       recordingBytes: state.recordingBytes
     });
-    const blob = new Blob([Uint8Array.from(zipBytes).buffer], { type: "application/zip" });
     const downloadUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = downloadUrl;
@@ -401,7 +409,7 @@ function App(): React.JSX.Element {
 
   const closeViewer = (): void => {
     setState((prev) => {
-      if (prev.videoUrl) URL.revokeObjectURL(prev.videoUrl);
+      if (prev.videoUrl) playbackAdapter.releaseSource?.({ videoPath: prev.videoUrl });
       const next = initialState();
       resetViewerCoreState(next);
       return next;

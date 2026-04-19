@@ -1,3 +1,5 @@
+export type { StorageAdapter, PlaybackAdapter, ShareAdapter, NotesAdapter, ViewerAdapters } from "./adapters";
+
 import {
   buildSectionTimeline,
   buildTimeline,
