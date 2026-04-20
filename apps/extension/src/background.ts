@@ -1192,6 +1192,16 @@ async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number; url: stri
         tabId: firstNonHttpTab.id,
         url: firstNonHttpTab.url
       });
+      const createdTab = await chrome.tabs.create({ url: "about:blank", active: true });
+
+      if (createdTab.id && createdTab.url && isRecordableStartupUrl(createdTab.url)) {
+        console.info("[jittle-lamp] Created a fresh recordable fallback tab.", {
+          tabId: createdTab.id,
+          url: createdTab.url
+        });
+        return createdTab as chrome.tabs.Tab & { id: number; url: string };
+      }
+
       throw new Error("jittle-lamp V1 only records active http(s) tabs.");
     }
 
@@ -1216,7 +1226,7 @@ async function ensureRecordableTab(
     throw new Error(`Recording startup could not find the selected tab (${stage}).`);
   }
 
-  if (!isHttpUrl(tab.url)) {
+  if (!isRecordableStartupUrl(tab.url)) {
     console.warn("[jittle-lamp] Recording startup blocked because tab became non-http(s).", {
       stage,
       tabId,
@@ -2068,6 +2078,10 @@ function isSessionBusy(draft: CaptureSessionDraft): boolean {
 
 function isHttpUrl(url: string): boolean {
   return url.startsWith("http://") || url.startsWith("https://");
+}
+
+function isRecordableStartupUrl(url: string): boolean {
+  return isHttpUrl(url) || url === "about:blank";
 }
 
 function stringifyConsoleArgs(args: CdpRemoteObject[] | undefined): string[] {
