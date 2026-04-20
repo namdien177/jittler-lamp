@@ -10,8 +10,6 @@ import { createDb } from "../src/db";
 import {
 	evidenceArtifacts,
 	evidences,
-	organizationMembers,
-	organizations,
 	provisioningEvents,
 } from "../src/db/schema";
 import {
@@ -28,6 +26,34 @@ const applyMigrations = async (databaseUrl: string) => {
 	}
 
 	await migrate(db, { migrationsFolder });
+};
+
+const sha256Hex = async (value: string): Promise<string> => {
+	const payload = new TextEncoder().encode(value);
+	const digest = await crypto.subtle.digest("SHA-256", payload);
+	return Array.from(new Uint8Array(digest))
+		.map((part) => part.toString(16).padStart(2, "0"))
+		.join("");
+};
+
+type AuthFixture = {
+	privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
+	jwtKey: string;
+};
+
+let authFixturePromise: Promise<AuthFixture> | null = null;
+const getAuthFixture = async (): Promise<AuthFixture> => {
+	if (!authFixturePromise) {
+		authFixturePromise = (async () => {
+			const { privateKey, publicKey } = await generateKeyPair("RS256");
+			return {
+				privateKey,
+				jwtKey: await exportSPKI(publicKey),
+			};
+		})();
+	}
+
+	return authFixturePromise!;
 };
 
 describe("env validation", () => {
@@ -109,8 +135,7 @@ describe("routes", () => {
 	});
 
 	it("injects auth context for authenticated requests", async () => {
-		const { privateKey, publicKey } = await generateKeyPair("RS256");
-		const jwtKey = await exportSPKI(publicKey);
+		const { privateKey, jwtKey } = await getAuthFixture();
 		const token = await new SignJWT({ org_id: "org_123", scope: "read write" })
 			.setProtectedHeader({ alg: "RS256" })
 			.setSubject("user_123")
@@ -159,9 +184,8 @@ describe("routes", () => {
 			rawPayload: { userId: "user_clerk_uploads_reject_orgid" },
 		});
 
-		const { privateKey, publicKey } = await generateKeyPair("RS256");
-		const jwtKey = await exportSPKI(publicKey);
-		const token = await new SignJWT({ org_id: provisioned.organizationId })
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({ scope: "read write" })
 			.setProtectedHeader({ alg: "RS256" })
 			.setSubject("user_clerk_uploads_reject_orgid")
 			.setAudience("test-audience")
@@ -226,28 +250,8 @@ describe("routes", () => {
 			rawPayload: { userId: "user_clerk_uploads_scope" },
 		});
 
-		const [teamOrganization] = await db
-			.insert(organizations)
-			.values({
-				name: "Team Uploads",
-				isPersonal: false,
-				personalOwnerUserId: null,
-			})
-			.returning({ id: organizations.id });
-
-		if (!teamOrganization) {
-			throw new Error("Team organization was not created");
-		}
-
-		await db.insert(organizationMembers).values({
-			organizationId: teamOrganization.id,
-			userId: provisioned.userId,
-			role: "member",
-		});
-
-		const { privateKey, publicKey } = await generateKeyPair("RS256");
-		const jwtKey = await exportSPKI(publicKey);
-		const token = await new SignJWT({ org_id: teamOrganization.id })
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({ scope: "read write" })
 			.setProtectedHeader({ alg: "RS256" })
 			.setSubject("user_clerk_uploads_scope")
 			.setAudience("test-audience")
@@ -277,8 +281,8 @@ describe("routes", () => {
 					artifact: {
 						kind: "recording",
 						mimeType: "video/webm",
-						bytes: 256,
-						checksum: "sha256:def",
+						bytes: 11,
+						checksum: `sha256:${await sha256Hex("hello world")}`,
 					},
 				}),
 			}),
@@ -290,14 +294,29 @@ describe("routes", () => {
 			evidenceId: string;
 			organizationId: string;
 		};
-		expect(startPayload.organizationId).toBe(teamOrganization.id);
+		expect(startPayload.organizationId).toBe(provisioned.organizationId);
 
 		const createdEvidence = await db.query.evidences.findFirst({
 			where: eq(evidences.id, startPayload.evidenceId),
 			columns: { orgId: true, createdBy: true },
 		});
-		expect(createdEvidence?.orgId).toBe(teamOrganization.id);
+		expect(createdEvidence?.orgId).toBe(provisioned.organizationId);
 		expect(createdEvidence?.createdBy).toBe(provisioned.userId);
+
+		const blobResponse = await app.handle(
+			new Request(
+				`http://localhost/evidences/uploads/${startPayload.uploadId}/blob`,
+				{
+					method: "PUT",
+					headers: {
+						"content-type": "video/webm",
+						authorization: `Bearer ${token}`,
+					},
+					body: "hello world",
+				},
+			),
+		);
+		expect(blobResponse.status).toBe(204);
 
 		const completeResponse = await app.handle(
 			new Request(
@@ -309,8 +328,8 @@ describe("routes", () => {
 						authorization: `Bearer ${token}`,
 					},
 					body: JSON.stringify({
-						bytes: 256,
-						checksum: "sha256:def",
+						bytes: 11,
+						checksum: `sha256:${await sha256Hex("hello world")}`,
 						mimeType: "video/webm",
 					}),
 				},
@@ -329,6 +348,92 @@ describe("routes", () => {
 			columns: { uploadStatus: true },
 		});
 		expect(storedArtifact?.uploadStatus).toBe("uploaded");
+	});
+
+	it("does not allow completion before blob upload exists", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const provisioned = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_uploads_missing_blob",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_uploads_missing_blob" },
+		});
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const checksum = `sha256:${await sha256Hex("hello world")}`;
+		const token = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_uploads_missing_blob")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const startResponse = await app.handle(
+			new Request("http://localhost/evidences/uploads/start", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({
+					title: "Missing blob upload",
+					sourceType: "browser",
+					artifact: {
+						kind: "recording",
+						mimeType: "video/webm",
+						bytes: 11,
+						checksum,
+					},
+				}),
+			}),
+		);
+		expect(startResponse.status).toBe(200);
+		const startPayload = (await startResponse.json()) as { uploadId: string };
+
+		const completeResponse = await app.handle(
+			new Request(
+				`http://localhost/evidences/uploads/${startPayload.uploadId}/complete`,
+				{
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${token}`,
+					},
+					body: JSON.stringify({
+						bytes: 11,
+						checksum,
+						mimeType: "video/webm",
+					}),
+				},
+			),
+		);
+
+		expect(completeResponse.status).toBe(409);
+		expect(await completeResponse.json()).toEqual({
+			error: {
+				code: "UPLOAD_BLOB_MISSING",
+				message: "Upload blob was not found; upload binary before completing",
+				status: 409,
+				requestId: null,
+			},
+		});
 	});
 
 	it("provisions one personal organization per user", async () => {
