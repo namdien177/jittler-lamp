@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
-import { createClient } from "@libsql/client";
+import { fileURLToPath } from "node:url";
+import { migrate } from "drizzle-orm/libsql/migrator";
 import { SignJWT, exportSPKI, generateKeyPair } from "jose";
 
 import { createApp } from "../src/app";
@@ -11,6 +11,17 @@ import {
 	ensureUserAndPersonalOrganization,
 	retryFailedProvisioning,
 } from "../src/services/user-provisioning";
+
+const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
+
+const applyMigrations = async (databaseUrl: string) => {
+	const db = createDb(databaseUrl);
+	if (!db) {
+		throw new Error("Database was not created");
+	}
+
+	await migrate(db, { migrationsFolder });
+};
 
 describe("env validation", () => {
 	it("requires APP_SECRET in production", () => {
@@ -126,18 +137,7 @@ describe("routes", () => {
 
 	it("provisions one personal organization per user", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
-		const client = createClient({ url: databaseUrl });
-		const migrationSql = readFileSync(
-			new URL("../drizzle/0000_initial_identity.sql", import.meta.url),
-			"utf8",
-		);
-
-		for (const statement of migrationSql
-			.split("--> statement-breakpoint")
-			.map((sql) => sql.trim())
-			.filter(Boolean)) {
-			await client.execute(statement);
-		}
+		await applyMigrations(databaseUrl);
 
 		const db = createDb(databaseUrl);
 		expect(db).not.toBeNull();
@@ -165,18 +165,7 @@ describe("routes", () => {
 
 	it("only retries failed provisioning for the same Clerk user", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
-		const client = createClient({ url: databaseUrl });
-		const migrationSql = readFileSync(
-			new URL("../drizzle/0000_initial_identity.sql", import.meta.url),
-			"utf8",
-		);
-
-		for (const statement of migrationSql
-			.split("--> statement-breakpoint")
-			.map((sql) => sql.trim())
-			.filter(Boolean)) {
-			await client.execute(statement);
-		}
+		await applyMigrations(databaseUrl);
 
 		const db = createDb(databaseUrl);
 		expect(db).not.toBeNull();
