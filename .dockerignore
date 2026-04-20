@@ -2,7 +2,6 @@
 !tsconfig.base.json
 !apps/
 !apps/backend/
-!apps/backend/**
 apps/backend/node_modules
 apps/backend/server
 apps/backend/dist
