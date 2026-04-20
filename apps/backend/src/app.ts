@@ -6,6 +6,7 @@ import { buildRuntimeConfig } from "./config/runtime";
 import { createDb } from "./db";
 import { errorNormalizer } from "./middleware/error-normalizer";
 import { requestContext } from "./middleware/request-context";
+import { clerkProvisioningReplayRoute, clerkRoutes } from "./routes/clerk";
 import { healthRoutes } from "./routes/health";
 import { protectedRoutes } from "./routes/protected";
 import { createLogger } from "./utils/logger";
@@ -14,7 +15,7 @@ export const createApp = (source = process.env) => {
 	const env = parseEnv(source);
 	const runtime = buildRuntimeConfig(env);
 	const logger = createLogger(runtime.logLevel);
-	const db = createDb(runtime.databaseUrl);
+	const db = createDb(runtime.databaseUrl, runtime.tursoAuthToken);
 
 	const app = new Elysia({ aot: false })
 		.decorate("logger", logger)
@@ -31,6 +32,8 @@ export const createApp = (source = process.env) => {
 			);
 		})
 		.use(healthRoutes)
+		.use(clerkRoutes)
+		.use(clerkProvisioningReplayRoute)
 		.use(protectedRoutes);
 
 	if (runtime.enableSwagger) {

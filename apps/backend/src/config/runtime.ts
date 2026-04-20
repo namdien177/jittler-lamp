@@ -17,6 +17,7 @@ export type RuntimeConfig = {
 	nodeEnv: NodeEnv;
 	secret: string | undefined;
 	databaseUrl: string | undefined;
+	tursoAuthToken: string | undefined;
 	logLevel: Exclude<NonNullable<AppEnv["LOG_LEVEL"]>, "silent">;
 	enableSwagger: boolean;
 	clerkSecretKey: string | undefined;
@@ -51,6 +52,7 @@ export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
 		nodeEnv: env.NODE_ENV,
 		secret: env.APP_SECRET,
 		databaseUrl: env.DATABASE_URL,
+		tursoAuthToken: env.TURSO_AUTH_TOKEN,
 		logLevel: resolvedLogLevel === "silent" ? "info" : resolvedLogLevel,
 		enableSwagger: defaults.enableSwagger,
 		clerkSecretKey: env.CLERK_SECRET_KEY,

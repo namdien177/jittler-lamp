@@ -1,8 +1,12 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { createClient } from "@libsql/client";
 import { SignJWT, exportSPKI, generateKeyPair } from "jose";
 
 import { createApp } from "../src/app";
 import { parseEnv } from "../src/config/env";
+import { createDb } from "../src/db";
+import { ensureUserAndPersonalOrganization } from "../src/services/user-provisioning";
 
 describe("env validation", () => {
 	it("requires APP_SECRET in production", () => {
@@ -114,5 +118,44 @@ describe("routes", () => {
 			roles: [],
 			scopes: ["read", "write"],
 		});
+	});
+
+	it("provisions one personal organization per user", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		const client = createClient({ url: databaseUrl });
+		const migrationSql = readFileSync(
+			new URL("../drizzle/0000_initial_identity.sql", import.meta.url),
+			"utf8",
+		);
+
+		for (const statement of migrationSql
+			.split("--> statement-breakpoint")
+			.map((sql) => sql.trim())
+			.filter(Boolean)) {
+			await client.execute(statement);
+		}
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const firstProvision = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_abc",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_abc" },
+		});
+		const secondProvision = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_abc",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_abc" },
+		});
+
+		expect(firstProvision.membershipRole).toBe("owner");
+		expect(firstProvision.eventId).toBeString();
+		expect(secondProvision.userId).toBe(firstProvision.userId);
+		expect(secondProvision.organizationId).toBe(firstProvision.organizationId);
+		expect(secondProvision.eventId).toBeNull();
 	});
 });
