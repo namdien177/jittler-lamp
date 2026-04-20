@@ -1137,7 +1137,7 @@ async function hasOffscreenDocument(): Promise<boolean> {
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number; url: string }> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const activeTab = tabs[0];
 
   if (!activeTab?.id || !activeTab.url) {
@@ -2042,7 +2042,13 @@ function toConsoleLevel(type: string | undefined): "debug" | "info" | "warn" | "
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes("Cannot access a chrome-extension:// URL of different extension")) {
+    return "jittle-lamp can only record regular web pages (http/https), not other extension pages.";
+  }
+
+  return message;
 }
 
 function isHandledRuntimeMessage(rawMessage: unknown): boolean {
