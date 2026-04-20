@@ -18,10 +18,12 @@ COPY --from=build /app/apps/backend/package.json ./package.json
 COPY --from=build /app/apps/backend/bun.lock ./bun.lock
 COPY --from=build /app/apps/backend/node_modules ./node_modules
 COPY --from=build /app/apps/backend/dist ./dist
+COPY --from=build /app/apps/backend/drizzle ./drizzle
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=3001
+    PORT=3001 \
+    RUN_DB_MIGRATIONS=true
 
 EXPOSE 3001
 

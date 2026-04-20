@@ -16,6 +16,7 @@ const envSchema = z
 		APP_VERSION: z.string().default("0.1.3"),
 		APP_SECRET: z.string().min(24).optional(),
 		DATABASE_URL: z.string().url().optional(),
+		RUN_DB_MIGRATIONS: z.string().optional(),
 		TURSO_AUTH_TOKEN: z.string().min(1).optional(),
 		LOG_LEVEL: z
 			.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])

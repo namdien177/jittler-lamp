@@ -17,6 +17,7 @@ export type RuntimeConfig = {
 	nodeEnv: NodeEnv;
 	secret: string | undefined;
 	databaseUrl: string | undefined;
+	runDbMigrations: boolean;
 	tursoAuthToken: string | undefined;
 	logLevel: Exclude<NonNullable<AppEnv["LOG_LEVEL"]>, "silent">;
 	enableSwagger: boolean;
@@ -41,6 +42,30 @@ const parseAuthorizedParties = (
 	return parsed.length > 0 ? parsed : undefined;
 };
 
+const parseBooleanFlag = (
+	value: string | undefined,
+	defaultValue = false,
+): boolean => {
+	if (value === undefined) {
+		return defaultValue;
+	}
+
+	switch (value.trim().toLowerCase()) {
+		case "1":
+		case "true":
+		case "yes":
+		case "on":
+			return true;
+		case "0":
+		case "false":
+		case "no":
+		case "off":
+			return false;
+		default:
+			return defaultValue;
+	}
+};
+
 export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
 	const defaults = defaultsByEnv[env.NODE_ENV];
 	const resolvedLogLevel = env.LOG_LEVEL ?? defaults.logLevel ?? "info";
@@ -52,6 +77,7 @@ export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
 		nodeEnv: env.NODE_ENV,
 		secret: env.APP_SECRET,
 		databaseUrl: env.DATABASE_URL,
+		runDbMigrations: parseBooleanFlag(env.RUN_DB_MIGRATIONS, false),
 		tursoAuthToken: env.TURSO_AUTH_TOKEN,
 		logLevel: resolvedLogLevel === "silent" ? "info" : resolvedLogLevel,
 		enableSwagger: defaults.enableSwagger,

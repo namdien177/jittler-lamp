@@ -52,5 +52,5 @@ export const createApp = (source = process.env) => {
 		);
 	}
 
-	return { app, runtime, logger };
+	return { app, runtime, logger, db };
 };
