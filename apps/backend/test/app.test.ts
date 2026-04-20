@@ -5,8 +5,8 @@ import { SignJWT, exportSPKI, generateKeyPair } from "jose";
 
 import { createApp } from "../src/app";
 import { parseEnv } from "../src/config/env";
-import { provisioningEvents } from "../src/db/schema";
 import { createDb } from "../src/db";
+import { provisioningEvents } from "../src/db/schema";
 import {
 	ensureUserAndPersonalOrganization,
 	retryFailedProvisioning,
@@ -205,6 +205,8 @@ describe("routes", () => {
 				failedEvent.id,
 				"user_clerk_different_authenticated_user",
 			),
-		).rejects.toThrow(`No failed provisioning event found for ${failedEvent.id}`);
+		).rejects.toThrow(
+			`No failed provisioning event found for ${failedEvent.id}`,
+		);
 	});
 });
