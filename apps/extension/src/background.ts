@@ -331,7 +331,9 @@ async function startRecordingSession(): Promise<void> {
 
   try {
     await ensureOffscreenDocument();
+    await ensureRecordableTab(tab.id, "before content bridge");
     await ensureContentBridge(tab.id, draft.sessionId);
+    await ensureRecordableTab(tab.id, "before debugger attach");
     await attachDebugger(tab.id);
 
     const streamId = await getTabMediaStreamId(tab.id);
@@ -1051,6 +1053,7 @@ function shouldAttemptDetachRecovery(tab: chrome.tabs.Tab): boolean {
 }
 
 async function ensureContentBridge(tabId: number, sessionId: string): Promise<void> {
+  console.debug("[jittle-lamp] Ensuring content bridge.", { tabId, sessionId });
   const probeResults = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => Boolean(window.__jittleLampBootstrapped__)
@@ -1191,6 +1194,30 @@ async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number; url: stri
     url: activeTab.url
   });
   return activeTab as chrome.tabs.Tab & { id: number; url: string };
+}
+
+async function ensureRecordableTab(
+  tabId: number,
+  stage: string
+): Promise<chrome.tabs.Tab & { id: number; url: string }> {
+  const tab = await getTabIfPresent(tabId);
+
+  if (!tab?.id || !tab.url) {
+    throw new Error(`Recording startup could not find the selected tab (${stage}).`);
+  }
+
+  if (!isHttpUrl(tab.url)) {
+    console.warn("[jittle-lamp] Recording startup blocked because tab became non-http(s).", {
+      stage,
+      tabId,
+      url: tab.url
+    });
+    throw new Error(
+      `Recording tab changed to a non-web page before startup completed (${stage}): ${tab.url}`
+    );
+  }
+
+  return tab as chrome.tabs.Tab & { id: number; url: string };
 }
 
 function getNetworkRequests(tabId: number): Map<string, NetworkRequestState> {
