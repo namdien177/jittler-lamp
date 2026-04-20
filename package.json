@@ -21,7 +21,9 @@
     "test": "bun test",
     "clean": "rm -rf apps/desktop/dist apps/desktop/artifacts apps/extension/dist apps/evidence-web/dist packages/shared/dist release-artifacts",
     "build:viewer-core": "bun run --cwd packages/viewer-core build",
-    "build:viewer-react": "bun run --cwd packages/viewer-react build"
+    "build:viewer-react": "bun run --cwd packages/viewer-react build",
+    "hooks:install": "bun run ./scripts/setup-git-hooks.js",
+    "prepare": "bun run hooks:install"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.325",

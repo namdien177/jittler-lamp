@@ -65,11 +65,13 @@ export const evidenceArtifacts = sqliteTable(
 		),
 		check(
 			"evidence_artifacts_kind_check",
-			sql`${table.kind} in ('recording', 'transcript', 'screenshot', 'network-log', 'attachment')`,
+			sql`${table.kind}
+            in ('recording', 'transcript', 'screenshot', 'network-log', 'attachment')`,
 		),
 		check(
 			"evidence_artifacts_upload_status_check",
-			sql`${table.uploadStatus} in ('pending', 'uploading', 'uploaded', 'failed')`,
+			sql`${table.uploadStatus}
+            in ('pending', 'uploading', 'uploaded', 'failed')`,
 		),
 	],
 );

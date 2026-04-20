@@ -2,6 +2,7 @@ import { verifyToken } from "@clerk/backend";
 import { Elysia } from "elysia";
 
 import type { RuntimeConfig } from "../config/runtime";
+import { resolveActiveOrganizationForClerkUser } from "../services/active-organization";
 import type { BackendDb } from "../services/user-provisioning";
 import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
 
@@ -11,6 +12,7 @@ export type AuthContext = {
 	isAuthenticated: boolean;
 	userId: string | null;
 	orgId: string | null;
+	activeOrgId: string | null;
 	roles: string[];
 	scopes: string[];
 };
@@ -27,6 +29,7 @@ const defaultAuthContext: AuthContext = {
 	isAuthenticated: false,
 	userId: null,
 	orgId: null,
+	activeOrgId: null,
 	roles: [],
 	scopes: [],
 };
@@ -38,6 +41,7 @@ const routePolicyMap: RoutePolicyRule[] = [
 	{ path: "/swagger", policy: "public", match: "prefix" },
 	{ path: "/protected", policy: "protected", match: "prefix" },
 	{ path: "/evidences", policy: "protected", match: "prefix" },
+	{ path: "/orgs", policy: "protected", match: "prefix" },
 ];
 
 const resolveRoutePolicy = (pathname: string): RoutePolicy => {
@@ -92,6 +96,7 @@ const claimsToAuthContext = (claims: Record<string, unknown>): AuthContext => {
 		isAuthenticated: true,
 		userId: typeof claims.sub === "string" ? claims.sub : null,
 		orgId: typeof claims.org_id === "string" ? claims.org_id : null,
+		activeOrgId: null,
 		roles,
 		scopes,
 	};
@@ -190,6 +195,15 @@ export const authContext = new Elysia({ name: "auth-context" })
 						scopes: resolvedAuthContext.scopes,
 					},
 				});
+				const activeOrganization = await resolveActiveOrganizationForClerkUser(
+					db as BackendDb,
+					resolvedAuthContext.userId,
+				);
+				resolvedAuthContext = {
+					...resolvedAuthContext,
+					activeOrgId: activeOrganization?.organizationId ?? null,
+				};
+				setRequestAuthContext(ctx.request, resolvedAuthContext);
 			}
 		} catch {
 			ctx.set.status = 500;
