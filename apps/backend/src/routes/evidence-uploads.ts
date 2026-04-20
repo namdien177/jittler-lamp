@@ -112,7 +112,7 @@ export const evidenceUploadRoutes = new Elysia({
 			const resolved = await resolveActiveOrganizationForClerkUser(
 				db,
 				authContext.userId,
-				authContext.orgId,
+				authContext.activeOrgId,
 			);
 			if (!resolved) {
 				set.status = 403;
@@ -235,7 +235,7 @@ export const evidenceUploadRoutes = new Elysia({
 			const resolved = await resolveActiveOrganizationForClerkUser(
 				db,
 				authContext.userId,
-				authContext.orgId,
+				authContext.activeOrgId,
 			);
 			if (!resolved) {
 				set.status = 403;
@@ -418,7 +418,7 @@ export const evidenceUploadRoutes = new Elysia({
 			const resolved = await resolveActiveOrganizationForClerkUser(
 				db,
 				authContext.userId,
-				authContext.orgId,
+				authContext.activeOrgId,
 			);
 			if (!resolved) {
 				set.status = 403;

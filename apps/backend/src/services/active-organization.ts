@@ -15,7 +15,7 @@ export const resolveActiveOrganizationForClerkUser = async (
 ): Promise<ResolvedActiveOrganization | null> => {
 	const localUser = await db.query.users.findFirst({
 		where: eq(users.clerkUserId, clerkUserId),
-		columns: { id: true },
+		columns: { id: true, activeOrgId: true },
 		with: {
 			organizationMemberships: {
 				columns: { organizationId: true },
@@ -48,11 +48,28 @@ export const resolveActiveOrganizationForClerkUser = async (
 		};
 	}
 
+	if (
+		localUser.activeOrgId &&
+		membershipByOrganizationId.has(localUser.activeOrgId)
+	) {
+		return {
+			localUserId: localUser.id,
+			organizationId: localUser.activeOrgId,
+		};
+	}
+
 	const personalMembership = localUser.organizationMemberships.find(
 		(membership) => membership.organization.isPersonal,
 	);
 
 	if (personalMembership) {
+		await db
+			.update(users)
+			.set({
+				activeOrgId: personalMembership.organizationId,
+				updatedAt: Date.now(),
+			})
+			.where(eq(users.id, localUser.id));
 		return {
 			localUserId: localUser.id,
 			organizationId: personalMembership.organizationId,
@@ -61,6 +78,13 @@ export const resolveActiveOrganizationForClerkUser = async (
 
 	const firstMembership = localUser.organizationMemberships[0];
 	if (firstMembership) {
+		await db
+			.update(users)
+			.set({
+				activeOrgId: firstMembership.organizationId,
+				updatedAt: Date.now(),
+			})
+			.where(eq(users.id, localUser.id));
 		return {
 			localUserId: localUser.id,
 			organizationId: firstMembership.organizationId,
@@ -86,8 +110,41 @@ export const resolveActiveOrganizationForClerkUser = async (
 			target: [organizationMembers.organizationId, organizationMembers.userId],
 		});
 
+	await db
+		.update(users)
+		.set({
+			activeOrgId: ownedPersonalOrganization.id,
+			updatedAt: Date.now(),
+		})
+		.where(eq(users.id, localUser.id));
+
 	return {
 		localUserId: localUser.id,
 		organizationId: ownedPersonalOrganization.id,
 	};
+};
+
+export const selectActiveOrganizationForClerkUser = async (
+	db: BackendDb,
+	clerkUserId: string,
+	organizationId: string,
+): Promise<ResolvedActiveOrganization | null> => {
+	const resolved = await resolveActiveOrganizationForClerkUser(
+		db,
+		clerkUserId,
+		organizationId,
+	);
+	if (!resolved) {
+		return null;
+	}
+
+	await db
+		.update(users)
+		.set({
+			activeOrgId: organizationId,
+			updatedAt: Date.now(),
+		})
+		.where(eq(users.id, resolved.localUserId));
+
+	return resolved;
 };

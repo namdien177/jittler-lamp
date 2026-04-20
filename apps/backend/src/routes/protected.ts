@@ -9,6 +9,7 @@ export const protectedRoutes = new Elysia({ name: "protected-routes" })
 		({ authContext }) => ({
 			userId: authContext.userId,
 			orgId: authContext.orgId,
+			activeOrgId: authContext.activeOrgId,
 			roles: authContext.roles,
 			scopes: authContext.scopes,
 		}),

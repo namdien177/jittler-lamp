@@ -198,6 +198,14 @@ export const processProvisioningEvent = async (
 					],
 				});
 
+			await tx
+				.update(users)
+				.set({
+					activeOrgId: sql`coalesce(${users.activeOrgId}, ${organizationId})`,
+					updatedAt: Date.now(),
+				})
+				.where(eq(users.id, localUser.id));
+
 			return {
 				userId: localUser.id,
 				clerkUserId: localUser.clerkUserId,

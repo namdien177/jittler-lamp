@@ -10,7 +10,10 @@ import { createDb } from "../src/db";
 import {
 	evidenceArtifacts,
 	evidences,
+	organizationMembers,
+	organizations,
 	provisioningEvents,
+	users,
 } from "../src/db/schema";
 import {
 	ensureUserAndPersonalOrganization,
@@ -159,12 +162,22 @@ describe("routes", () => {
 		);
 
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({
+		const payload = (await response.json()) as {
+			userId: string;
+			orgId: string;
+			activeOrgId: string | null;
+			roles: string[];
+			scopes: string[];
+		};
+		expect(payload).toMatchObject({
 			userId: "user_123",
 			orgId: "org_123",
 			roles: [],
 			scopes: ["read", "write"],
 		});
+		expect(
+			payload.activeOrgId === null || typeof payload.activeOrgId === "string",
+		).toBeTrue();
 	});
 
 	it("rejects client-provided orgId when starting uploads", async () => {
@@ -610,5 +623,120 @@ describe("routes", () => {
 		).rejects.toThrow(
 			`No failed provisioning event found for ${failedEvent.id}`,
 		);
+	});
+
+	it("selects active organization only when user is a member", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const provisioned = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_active_org",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_active_org" },
+		});
+
+		const [teamOrganization] = await db
+			.insert(organizations)
+			.values({ name: "Team Alpha", isPersonal: false })
+			.returning({ id: organizations.id });
+		if (!teamOrganization) {
+			throw new Error("Failed to create team organization");
+		}
+
+		await db.insert(organizationMembers).values({
+			organizationId: teamOrganization.id,
+			userId: provisioned.userId,
+			role: "member",
+		});
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_active_org")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const selectResponse = await app.handle(
+			new Request(
+				`http://localhost/orgs/${teamOrganization.id}/select-active`,
+				{
+					method: "POST",
+					headers: { authorization: `Bearer ${token}` },
+				},
+			),
+		);
+		expect(selectResponse.status).toBe(200);
+		expect(await selectResponse.json()).toEqual({
+			organizationId: teamOrganization.id,
+		});
+
+		const updatedUser = await db.query.users.findFirst({
+			where: eq(users.id, provisioned.userId),
+			columns: { activeOrgId: true },
+		});
+		expect(updatedUser?.activeOrgId).toBe(teamOrganization.id);
+
+		const outsiderSelectResponse = await app.handle(
+			new Request(
+				`http://localhost/orgs/${crypto.randomUUID()}/select-active`,
+				{
+					method: "POST",
+					headers: { authorization: `Bearer ${token}` },
+				},
+			),
+		);
+		expect(outsiderSelectResponse.status).toBe(403);
+		expect(await outsiderSelectResponse.json()).toEqual({
+			error: {
+				code: "ORG_MEMBERSHIP_REQUIRED",
+				message: "Selected organization must be a member organization",
+				status: 403,
+				requestId: null,
+			},
+		});
+
+		const startResponse = await app.handle(
+			new Request("http://localhost/evidences/uploads/start", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({
+					title: "Active org evidence",
+					sourceType: "browser",
+					artifact: {
+						kind: "recording",
+						mimeType: "video/webm",
+						bytes: 16,
+						checksum: `sha256:${await sha256Hex("active-org-payload")}`,
+					},
+				}),
+			}),
+		);
+		expect(startResponse.status).toBe(200);
+		const startPayload = (await startResponse.json()) as { evidenceId: string };
+		const evidence = await db.query.evidences.findFirst({
+			where: eq(evidences.id, startPayload.evidenceId),
+			columns: { orgId: true },
+		});
+		expect(evidence?.orgId).toBe(teamOrganization.id);
 	});
 });

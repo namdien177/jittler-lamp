@@ -16,6 +16,7 @@ export const users = sqliteTable(
 			.primaryKey()
 			.$defaultFn(() => createUuidV7()),
 		clerkUserId: text("clerk_user_id").notNull(),
+		activeOrgId: text("active_org_id"),
 		createdAt: integer("created_at")
 			.notNull()
 			.$defaultFn(() => Date.now()),
@@ -25,6 +26,7 @@ export const users = sqliteTable(
 	},
 	(table) => [
 		uniqueIndex("users_clerk_user_id_unique").on(table.clerkUserId),
+		index("users_active_org_id_idx").on(table.activeOrgId),
 		index("users_created_at_idx").on(table.createdAt),
 	],
 );
