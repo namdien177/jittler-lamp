@@ -163,13 +163,23 @@ export const processProvisioningEvent = async (
 				const [createdOrganization] = await tx
 					.insert(organizations)
 					.values(personalOrg)
+					.onConflictDoNothing()
 					.returning({ id: organizations.id });
 
-				if (!createdOrganization) {
-					throw new Error("Failed to create personal organization");
-				}
+				organizationId = createdOrganization?.id ?? null;
 
-				organizationId = createdOrganization.id;
+				if (!organizationId) {
+					const existingOrganization = await tx.query.organizations.findFirst({
+						where: eq(organizations.personalOwnerUserId, localUser.id),
+						columns: { id: true },
+					});
+
+					if (!existingOrganization) {
+						throw new Error("Failed to create personal organization");
+					}
+
+					organizationId = existingOrganization.id;
+				}
 			}
 
 			const membership = createOrganizationMembershipInputSchema.parse({
