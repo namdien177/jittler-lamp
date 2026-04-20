@@ -150,6 +150,18 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 					expiresAt: shareLinks.expiresAt,
 				});
 
+			if (!inserted) {
+				set.status = 500;
+				return {
+					error: {
+						code: "SHARE_LINK_CREATE_FAILED",
+						message: "Failed to create share link",
+						status: 500,
+						requestId: requestId ?? null,
+					},
+				};
+			}
+
 			return {
 				shareLink: {
 					id: inserted.id,
@@ -336,6 +348,18 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 				.set({ revokedAt, updatedAt: revokedAt })
 				.where(eq(shareLinks.id, params.id))
 				.returning({ id: shareLinks.id, revokedAt: shareLinks.revokedAt });
+
+			if (!updated) {
+				set.status = 500;
+				return {
+					error: {
+						code: "SHARE_LINK_REVOKE_FAILED",
+						message: "Failed to revoke share link",
+						status: 500,
+						requestId: requestId ?? null,
+					},
+				};
+			}
 
 			return {
 				shareLink: {
