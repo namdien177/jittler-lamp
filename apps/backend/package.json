@@ -12,6 +12,7 @@
     "start:js": "NODE_ENV=production bun ./dist/index.js",
     "start:bin": "./server",
     "lint": "bun x @biomejs/biome check src test",
+    "lint:fix": "bun x @biomejs/biome check --write src test",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json",
     "test": "bun test",
     "db:generate": "bun x drizzle-kit generate --config drizzle.config.ts",

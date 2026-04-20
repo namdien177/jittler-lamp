@@ -2,9 +2,9 @@ import { verifyToken } from "@clerk/backend";
 import { Elysia } from "elysia";
 
 import type { RuntimeConfig } from "../config/runtime";
+import { resolveActiveOrganizationForClerkUser } from "../services/active-organization";
 import type { BackendDb } from "../services/user-provisioning";
 import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
-import { resolveActiveOrganizationForClerkUser } from "../services/active-organization";
 
 export type RoutePolicy = "public" | "protected";
 
