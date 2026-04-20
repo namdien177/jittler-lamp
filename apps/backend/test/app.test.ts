@@ -53,7 +53,7 @@ const getAuthFixture = async (): Promise<AuthFixture> => {
 		})();
 	}
 
-	return authFixturePromise!;
+	return authFixturePromise;
 };
 
 describe("env validation", () => {
@@ -166,7 +166,6 @@ describe("routes", () => {
 			scopes: ["read", "write"],
 		});
 	});
-
 
 	it("rejects client-provided orgId when starting uploads", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;

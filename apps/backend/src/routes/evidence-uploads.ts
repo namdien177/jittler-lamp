@@ -50,7 +50,10 @@ const encodeSha256 = async (payload: ArrayBuffer): Promise<string> => {
 		.join("");
 };
 
-const checksumMatches = (expected: string, actualSha256Hex: string): boolean => {
+const checksumMatches = (
+	expected: string,
+	actualSha256Hex: string,
+): boolean => {
 	const normalizedExpected = expected.toLowerCase();
 	const normalizedActual = actualSha256Hex.toLowerCase();
 	return (
@@ -158,7 +161,10 @@ export const evidenceUploadRoutes = new Elysia({
 						uploadStatus: "uploading",
 						updatedAt: now,
 					})
-					.returning({ id: evidenceArtifacts.id, s3Key: evidenceArtifacts.s3Key });
+					.returning({
+						id: evidenceArtifacts.id,
+						s3Key: evidenceArtifacts.s3Key,
+					});
 
 				if (!artifact) {
 					throw new Error("Failed to create upload artifact");
@@ -273,7 +279,8 @@ export const evidenceUploadRoutes = new Elysia({
 				return {
 					error: {
 						code: "UPLOAD_CONTENT_TYPE_MISMATCH",
-						message: "Uploaded blob content-type did not match expected mimeType",
+						message:
+							"Uploaded blob content-type did not match expected mimeType",
 						status: 422,
 						requestId: requestId ?? null,
 					},
@@ -384,7 +391,8 @@ export const evidenceUploadRoutes = new Elysia({
 				return {
 					error: {
 						code: "UPLOAD_METADATA_MISMATCH",
-						message: "Uploaded artifact metadata did not match expected draft metadata",
+						message:
+							"Uploaded artifact metadata did not match expected draft metadata",
 						status: 422,
 						requestId: requestId ?? null,
 					},
@@ -397,7 +405,8 @@ export const evidenceUploadRoutes = new Elysia({
 				return {
 					error: {
 						code: "UPLOAD_BLOB_MISSING",
-						message: "Upload blob was not found; upload binary before completing",
+						message:
+							"Upload blob was not found; upload binary before completing",
 						status: 409,
 						requestId: requestId ?? null,
 					},

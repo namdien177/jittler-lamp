@@ -33,8 +33,8 @@ export const resolveActiveOrganizationForClerkUser = async (
 	}
 
 	const membershipByOrganizationId = new Set(
-		localUser.organizationMemberships.map((membership) =>
-			membership.organization.id,
+		localUser.organizationMemberships.map(
+			(membership) => membership.organization.id,
 		),
 	);
 
