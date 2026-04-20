@@ -1054,18 +1054,24 @@ function shouldAttemptDetachRecovery(tab: chrome.tabs.Tab): boolean {
 
 async function ensureContentBridge(tabId: number, sessionId: string): Promise<void> {
   console.debug("[jittle-lamp] Ensuring content bridge.", { tabId, sessionId });
-  const probeResults = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => Boolean(window.__jittleLampBootstrapped__)
-  });
-  const isBootstrapped = probeResults[0]?.result === true;
-
-  if (!isBootstrapped) {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content.js"]
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "jl/content-begin-capture",
+      sessionId
     });
+    return;
+  } catch (error: unknown) {
+    const message = rawErrorMessage(error);
+
+    if (!message.includes("Receiving end does not exist")) {
+      throw error;
+    }
   }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content.js"]
+  });
 
   await chrome.tabs.sendMessage(tabId, {
     type: "jl/content-begin-capture",
@@ -1101,9 +1107,13 @@ async function safeDetachDebugger(tabId: number): Promise<void> {
   try {
     await chrome.debugger.detach({ tabId });
   } catch (error: unknown) {
-    const message = errorMessage(error);
+    const message = rawErrorMessage(error);
 
-    if (!message.includes("Detached while handling command") && !message.includes("No target with given id")) {
+    if (
+      !message.includes("Detached while handling command") &&
+      !message.includes("No target with given id") &&
+      !message.includes("Debugger is not attached")
+    ) {
       console.warn(message);
     }
   }
@@ -2111,13 +2121,17 @@ function toConsoleLevel(type: string | undefined): "debug" | "info" | "warn" | "
 }
 
 function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = rawErrorMessage(error);
 
   if (message.includes("Cannot access a chrome-extension:// URL of different extension")) {
     return "jittle-lamp can only record regular web pages (http/https), not other extension pages.";
   }
 
   return message;
+}
+
+function rawErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isHandledRuntimeMessage(rawMessage: unknown): boolean {
