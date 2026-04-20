@@ -201,7 +201,10 @@ export const processProvisioningEvent = async (
 			await tx
 				.update(users)
 				.set({
-					activeOrgId: sql`coalesce(${users.activeOrgId}, ${organizationId})`,
+					activeOrgId: sql`coalesce(
+                    ${users.activeOrgId},
+                    ${organizationId}
+                    )`,
 					updatedAt: Date.now(),
 				})
 				.where(eq(users.id, localUser.id));
@@ -308,4 +311,5 @@ export const listProvisioningEvents = (db: BackendDb, clerkUserId: string) =>
 		})
 		.from(provisioningEvents)
 		.where(eq(provisioningEvents.clerkUserId, clerkUserId))
-		.orderBy(sql`${provisioningEvents.id} desc`);
+		.orderBy(sql`${provisioningEvents.id}
+        desc`);

@@ -3,8 +3,8 @@ import { Elysia } from "elysia";
 
 import type { RuntimeConfig } from "../config/runtime";
 import type { BackendDb } from "../services/user-provisioning";
-import { resolveActiveOrganizationForClerkUser } from "../services/active-organization";
 import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
+import { resolveActiveOrganizationForClerkUser } from "../services/active-organization";
 
 export type RoutePolicy = "public" | "protected";
 

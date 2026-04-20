@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { SignJWT, exportSPKI, generateKeyPair } from "jose";
+import { exportSPKI, generateKeyPair, SignJWT } from "jose";
 
 import { createApp } from "../src/app";
 import { parseEnv } from "../src/config/env";
