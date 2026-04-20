@@ -537,6 +537,10 @@ async function handleContentRuntimeMessage(
     return;
   }
 
+  if (!isSessionBusy(currentDraft)) {
+    return;
+  }
+
   switch (message.type) {
     case "jl/content-ready": {
       const nextDraft = appendDraftEvent(
