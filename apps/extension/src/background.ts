@@ -534,10 +534,20 @@ async function handleContentRuntimeMessage(
   const senderTabId = sender.tab?.id;
 
   if (typeof senderTabId === "number" && currentDraft.page.tabId !== senderTabId) {
+    console.debug("[jittle-lamp] Ignoring content runtime message from non-active tab.", {
+      senderTabId,
+      activeTabId: currentDraft.page.tabId,
+      type: message.type
+    });
     return;
   }
 
   if (!isSessionBusy(currentDraft)) {
+    console.debug("[jittle-lamp] Ignoring content runtime message for non-busy session.", {
+      phase: currentDraft.phase,
+      type: message.type,
+      sessionId: currentDraft.sessionId
+    });
     return;
   }
 
@@ -1144,21 +1154,42 @@ async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number; url: stri
   const candidateTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const fallbackTabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const activeTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url));
+  console.debug("[jittle-lamp] Active tab lookup candidates.", {
+    lastFocusedWindowTabs: candidateTabs.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
+    currentWindowTabs: fallbackTabs.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
+    selectedTab: activeTab ? { id: activeTab.id, url: activeTab.url, windowId: activeTab.windowId } : null
+  });
 
   if (!activeTab?.id || !activeTab.url) {
+    console.warn("[jittle-lamp] No active tab with URL found for recording startup.");
     throw new Error("Open an http(s) page before starting jittle-lamp.");
   }
 
   if (!isHttpUrl(activeTab.url)) {
     const httpTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url && isHttpUrl(tab.url)));
+    console.debug("[jittle-lamp] Selected tab is non-http(s); searching fallback.", {
+      selectedUrl: activeTab.url,
+      fallbackTab: httpTab ? { id: httpTab.id, url: httpTab.url, windowId: httpTab.windowId } : null
+    });
 
     if (httpTab?.id && httpTab.url) {
+      console.info("[jittle-lamp] Using fallback http(s) active tab for recording.", {
+        tabId: httpTab.id,
+        url: httpTab.url
+      });
       return httpTab as chrome.tabs.Tab & { id: number; url: string };
     }
 
+    console.warn("[jittle-lamp] Recording startup blocked because no active http(s) tab was found.", {
+      selectedUrl: activeTab.url
+    });
     throw new Error("jittle-lamp V1 only records active http(s) tabs.");
   }
 
+  console.info("[jittle-lamp] Using active tab for recording.", {
+    tabId: activeTab.id,
+    url: activeTab.url
+  });
   return activeTab as chrome.tabs.Tab & { id: number; url: string };
 }
 
