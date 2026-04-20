@@ -7,6 +7,7 @@ import { createDb } from "./db";
 import { errorNormalizer } from "./middleware/error-normalizer";
 import { requestContext } from "./middleware/request-context";
 import { clerkProvisioningReplayRoute, clerkRoutes } from "./routes/clerk";
+import { evidenceUploadRoutes } from "./routes/evidence-uploads";
 import { healthRoutes } from "./routes/health";
 import { protectedRoutes } from "./routes/protected";
 import { createLogger } from "./utils/logger";
@@ -34,6 +35,7 @@ export const createApp = (source = process.env) => {
 		.use(healthRoutes)
 		.use(clerkRoutes)
 		.use(clerkProvisioningReplayRoute)
+		.use(evidenceUploadRoutes)
 		.use(protectedRoutes);
 
 	if (runtime.enableSwagger) {

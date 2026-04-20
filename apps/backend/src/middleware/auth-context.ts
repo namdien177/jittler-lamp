@@ -37,6 +37,7 @@ const routePolicyMap: RoutePolicyRule[] = [
 	{ path: "/docs", policy: "public", match: "prefix" },
 	{ path: "/swagger", policy: "public", match: "prefix" },
 	{ path: "/protected", policy: "protected", match: "prefix" },
+	{ path: "/evidences", policy: "protected", match: "prefix" },
 ];
 
 const resolveRoutePolicy = (pathname: string): RoutePolicy => {
