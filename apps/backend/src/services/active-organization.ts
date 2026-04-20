@@ -38,10 +38,10 @@ export const resolveActiveOrganizationForClerkUser = async (
 		),
 	);
 
-	if (
-		requestedOrganizationId &&
-		membershipByOrganizationId.has(requestedOrganizationId)
-	) {
+	if (requestedOrganizationId) {
+		if (!membershipByOrganizationId.has(requestedOrganizationId)) {
+			return null;
+		}
 		return {
 			localUserId: localUser.id,
 			organizationId: requestedOrganizationId,

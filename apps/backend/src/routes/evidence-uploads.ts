@@ -313,14 +313,44 @@ export const evidenceUploadRoutes = new Elysia({
 				};
 			}
 
+			const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
+
+			const contentLengthHeader = request.headers.get("content-length");
+			const contentLength = contentLengthHeader
+				? Number.parseInt(contentLengthHeader, 10)
+				: null;
+			if (contentLength !== null && contentLength > MAX_UPLOAD_BYTES) {
+				set.status = 413;
+				return {
+					error: {
+						code: "UPLOAD_TOO_LARGE",
+						message: `Upload exceeds maximum allowed size of ${MAX_UPLOAD_BYTES} bytes`,
+						status: 413,
+						requestId: requestId ?? null,
+					},
+				};
+			}
+
 			const payload = await request.arrayBuffer();
+			if (payload.byteLength > MAX_UPLOAD_BYTES) {
+				set.status = 413;
+				return {
+					error: {
+						code: "UPLOAD_TOO_LARGE",
+						message: `Upload exceeds maximum allowed size of ${MAX_UPLOAD_BYTES} bytes`,
+						status: 413,
+						requestId: requestId ?? null,
+					},
+				};
+			}
+
 			const uploadedBlob: UploadedBlobMetadata = {
 				bytes: payload.byteLength,
 				checksum: await encodeSha256(payload),
 				mimeType: artifact.mimeType,
 			};
 
-			await db
+			const updated = await db
 				.update(evidenceArtifacts)
 				.set({
 					bytes: uploadedBlob.bytes,
@@ -329,7 +359,26 @@ export const evidenceUploadRoutes = new Elysia({
 					uploadStatus: "pending",
 					updatedAt: Date.now(),
 				})
-				.where(eq(evidenceArtifacts.id, artifact.id));
+				.where(
+					and(
+						eq(evidenceArtifacts.id, artifact.id),
+						eq(evidenceArtifacts.uploadStatus, "uploading"),
+					),
+				)
+				.returning({ id: evidenceArtifacts.id });
+
+			if (!updated[0]) {
+				set.status = 409;
+				return {
+					error: {
+						code: "UPLOAD_STATE_CONFLICT",
+						message:
+							"Upload state changed concurrently; check current status and retry",
+						status: 409,
+						requestId: requestId ?? null,
+					},
+				};
+			}
 
 			set.status = 204;
 			return;
