@@ -2,8 +2,8 @@ import { verifyToken } from "@clerk/backend";
 import { Elysia } from "elysia";
 
 import type { RuntimeConfig } from "../config/runtime";
-import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
 import type { BackendDb } from "../services/user-provisioning";
+import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
 
 export type RoutePolicy = "public" | "protected";
 

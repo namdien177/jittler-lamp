@@ -1,3 +1,15 @@
+export * from "./relations";
+export {
+	createEvidenceArtifactInputSchema,
+	evidenceArtifactKindSchema,
+	evidenceArtifacts,
+	evidenceArtifactUploadStatusSchema,
+} from "./tables/evidence-artifacts";
+export {
+	createEvidenceInputSchema,
+	evidenceScopeTypeSchema,
+	evidences,
+} from "./tables/evidences";
 export {
 	createOrganizationMembershipInputSchema,
 	organizationMembers,
@@ -13,6 +25,9 @@ export {
 	provisioningReplaySchema,
 	provisioningStatusSchema,
 } from "./tables/provisioning-events";
+export {
+	createShareLinkInputSchema,
+	shareLinkScopeTypeSchema,
+	shareLinks,
+} from "./tables/share-links";
 export { createUserInputSchema, users } from "./tables/users";
-
-export * from "./relations";

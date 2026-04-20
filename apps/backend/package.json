@@ -8,7 +8,9 @@
     "start": "bun run src/index.ts",
     "lint": "bun x @biomejs/biome check src test",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json",
-    "test": "bun test"
+    "test": "bun test",
+    "db:generate": "bun x drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "bun x drizzle-kit migrate --config drizzle.config.ts"
   },
   "dependencies": {
     "@clerk/backend": "^3.2.13",
@@ -24,6 +26,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "bun-types": "latest",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "drizzle-kit": "^0.31.4"
   }
 }

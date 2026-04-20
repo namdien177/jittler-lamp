@@ -1,11 +1,11 @@
 import { Elysia } from "elysia";
 
 import { authContext } from "../middleware/auth-context";
+import type { BackendDb } from "../services/user-provisioning";
 import {
 	ensureUserAndPersonalOrganization,
 	retryFailedProvisioning,
 } from "../services/user-provisioning";
-import type { BackendDb } from "../services/user-provisioning";
 
 export const clerkRoutes = new Elysia({ name: "clerk-routes" })
 	.use(authContext)
