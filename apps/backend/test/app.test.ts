@@ -177,7 +177,7 @@ describe("routes", () => {
 			throw new Error("Database was not created");
 		}
 
-		const provisioned = await ensureUserAndPersonalOrganization(db, {
+		await ensureUserAndPersonalOrganization(db, {
 			clerkUserId: "user_clerk_uploads_reject_orgid",
 			source: "clerk-callback",
 			rawPayload: { userId: "user_clerk_uploads_reject_orgid" },
@@ -359,7 +359,7 @@ describe("routes", () => {
 			throw new Error("Database was not created");
 		}
 
-		const provisioned = await ensureUserAndPersonalOrganization(db, {
+		await ensureUserAndPersonalOrganization(db, {
 			clerkUserId: "user_clerk_uploads_missing_blob",
 			source: "clerk-callback",
 			rawPayload: { userId: "user_clerk_uploads_missing_blob" },
@@ -430,6 +430,119 @@ describe("routes", () => {
 				code: "UPLOAD_BLOB_MISSING",
 				message: "Upload blob was not found; upload binary before completing",
 				status: 409,
+				requestId: null,
+			},
+		});
+	});
+
+	it("rejects blob upload and completion after upload session expires", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_uploads_expired",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_uploads_expired" },
+		});
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const checksum = `sha256:${await sha256Hex("hello world")}`;
+		const token = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_uploads_expired")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const startResponse = await app.handle(
+			new Request("http://localhost/evidences/uploads/start", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({
+					title: "Expired upload",
+					sourceType: "browser",
+					artifact: {
+						kind: "recording",
+						mimeType: "video/webm",
+						bytes: 11,
+						checksum,
+					},
+				}),
+			}),
+		);
+		expect(startResponse.status).toBe(200);
+		const startPayload = (await startResponse.json()) as { uploadId: string };
+
+		await db
+			.update(evidenceArtifacts)
+			.set({ createdAt: Date.now() - 10 * 60 * 1000, updatedAt: Date.now() })
+			.where(eq(evidenceArtifacts.id, startPayload.uploadId));
+
+		const blobResponse = await app.handle(
+			new Request(
+				`http://localhost/evidences/uploads/${startPayload.uploadId}/blob`,
+				{
+					method: "PUT",
+					headers: {
+						"content-type": "video/webm",
+						authorization: `Bearer ${token}`,
+					},
+					body: "hello world",
+				},
+			),
+		);
+		expect(blobResponse.status).toBe(410);
+		expect(await blobResponse.json()).toEqual({
+			error: {
+				code: "UPLOAD_SESSION_EXPIRED",
+				message: "Upload session has expired; start a new upload",
+				status: 410,
+				requestId: null,
+			},
+		});
+
+		const completeResponse = await app.handle(
+			new Request(
+				`http://localhost/evidences/uploads/${startPayload.uploadId}/complete`,
+				{
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${token}`,
+					},
+					body: JSON.stringify({
+						bytes: 11,
+						checksum,
+						mimeType: "video/webm",
+					}),
+				},
+			),
+		);
+		expect(completeResponse.status).toBe(410);
+		expect(await completeResponse.json()).toEqual({
+			error: {
+				code: "UPLOAD_SESSION_EXPIRED",
+				message: "Upload session has expired; start a new upload",
+				status: 410,
 				requestId: null,
 			},
 		});

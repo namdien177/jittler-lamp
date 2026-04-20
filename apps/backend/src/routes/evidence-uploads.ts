@@ -41,7 +41,7 @@ type UploadedBlobMetadata = {
 	mimeType: string;
 };
 
-const uploadedBlobStore = new Map<string, UploadedBlobMetadata>();
+const UPLOAD_SESSION_TTL_MS = 5 * 60 * 1000;
 
 const encodeSha256 = async (payload: ArrayBuffer): Promise<string> => {
 	const digest = await crypto.subtle.digest("SHA-256", payload);
@@ -183,7 +183,7 @@ export const evidenceUploadRoutes = new Elysia({
 				evidenceId: created.evidenceId,
 				organizationId: created.organizationId,
 				uploadSession: {
-					expiresAt: now + 5 * 60 * 1000,
+					expiresAt: now + UPLOAD_SESSION_TTL_MS,
 					uploadUrl: `${new URL(request.url).origin}/evidences/uploads/${created.uploadId}/blob`,
 					method: "PUT",
 					headers: {
@@ -253,6 +253,8 @@ export const evidenceUploadRoutes = new Elysia({
 				columns: {
 					id: true,
 					mimeType: true,
+					uploadStatus: true,
+					createdAt: true,
 				},
 				with: {
 					evidence: {
@@ -273,6 +275,30 @@ export const evidenceUploadRoutes = new Elysia({
 				};
 			}
 
+			if (Date.now() > artifact.createdAt + UPLOAD_SESSION_TTL_MS) {
+				set.status = 410;
+				return {
+					error: {
+						code: "UPLOAD_SESSION_EXPIRED",
+						message: "Upload session has expired; start a new upload",
+						status: 410,
+						requestId: requestId ?? null,
+					},
+				};
+			}
+
+			if (artifact.uploadStatus !== "uploading") {
+				set.status = 409;
+				return {
+					error: {
+						code: "UPLOAD_NOT_ACCEPTING_BLOB",
+						message: "Upload is not accepting blob writes in current state",
+						status: 409,
+						requestId: requestId ?? null,
+					},
+				};
+			}
+
 			const contentType = request.headers.get("content-type");
 			if (!contentType || contentType !== artifact.mimeType) {
 				set.status = 422;
@@ -288,13 +314,22 @@ export const evidenceUploadRoutes = new Elysia({
 			}
 
 			const payload = await request.arrayBuffer();
-			const bytes = payload.byteLength;
-			const checksum = await encodeSha256(payload);
-			uploadedBlobStore.set(artifact.id, {
-				bytes,
-				checksum,
+			const uploadedBlob: UploadedBlobMetadata = {
+				bytes: payload.byteLength,
+				checksum: await encodeSha256(payload),
 				mimeType: artifact.mimeType,
-			});
+			};
+
+			await db
+				.update(evidenceArtifacts)
+				.set({
+					bytes: uploadedBlob.bytes,
+					checksum: uploadedBlob.checksum,
+					mimeType: uploadedBlob.mimeType,
+					uploadStatus: "pending",
+					updatedAt: Date.now(),
+				})
+				.where(eq(evidenceArtifacts.id, artifact.id));
 
 			set.status = 204;
 			return;
@@ -362,6 +397,8 @@ export const evidenceUploadRoutes = new Elysia({
 					bytes: true,
 					checksum: true,
 					mimeType: true,
+					uploadStatus: true,
+					createdAt: true,
 				},
 				with: {
 					evidence: {
@@ -382,25 +419,19 @@ export const evidenceUploadRoutes = new Elysia({
 				};
 			}
 
-			if (
-				artifact.bytes !== Math.trunc(body.bytes) ||
-				artifact.checksum !== body.checksum ||
-				artifact.mimeType !== body.mimeType
-			) {
-				set.status = 422;
+			if (Date.now() > artifact.createdAt + UPLOAD_SESSION_TTL_MS) {
+				set.status = 410;
 				return {
 					error: {
-						code: "UPLOAD_METADATA_MISMATCH",
-						message:
-							"Uploaded artifact metadata did not match expected draft metadata",
-						status: 422,
+						code: "UPLOAD_SESSION_EXPIRED",
+						message: "Upload session has expired; start a new upload",
+						status: 410,
 						requestId: requestId ?? null,
 					},
 				};
 			}
 
-			const uploadedBlob = uploadedBlobStore.get(artifact.id);
-			if (!uploadedBlob) {
+			if (artifact.uploadStatus === "uploading") {
 				set.status = 409;
 				return {
 					error: {
@@ -413,10 +444,22 @@ export const evidenceUploadRoutes = new Elysia({
 				};
 			}
 
+			if (artifact.uploadStatus !== "pending") {
+				set.status = 409;
+				return {
+					error: {
+						code: "UPLOAD_NOT_COMPLETABLE",
+						message: "Upload is not in a completable state",
+						status: 409,
+						requestId: requestId ?? null,
+					},
+				};
+			}
+
 			if (
-				uploadedBlob.bytes !== Math.trunc(body.bytes) ||
-				uploadedBlob.mimeType !== body.mimeType ||
-				!checksumMatches(body.checksum, uploadedBlob.checksum)
+				artifact.bytes !== Math.trunc(body.bytes) ||
+				artifact.mimeType !== body.mimeType ||
+				!checksumMatches(body.checksum, artifact.checksum)
 			) {
 				set.status = 422;
 				return {
@@ -446,7 +489,6 @@ export const evidenceUploadRoutes = new Elysia({
 						),
 					);
 			});
-			uploadedBlobStore.delete(artifact.id);
 
 			return {
 				uploadId: artifact.id,

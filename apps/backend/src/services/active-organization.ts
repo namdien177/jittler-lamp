@@ -75,11 +75,16 @@ export const resolveActiveOrganizationForClerkUser = async (
 		return null;
 	}
 
-	await db.insert(organizationMembers).values({
-		organizationId: ownedPersonalOrganization.id,
-		userId: localUser.id,
-		role: "owner",
-	});
+	await db
+		.insert(organizationMembers)
+		.values({
+			organizationId: ownedPersonalOrganization.id,
+			userId: localUser.id,
+			role: "owner",
+		})
+		.onConflictDoNothing({
+			target: [organizationMembers.organizationId, organizationMembers.userId],
+		});
 
 	return {
 		localUserId: localUser.id,
