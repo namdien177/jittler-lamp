@@ -7,7 +7,7 @@ WORKDIR /app/apps/backend
 COPY tsconfig.base.json /app/tsconfig.base.json
 COPY apps/backend ./
 
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --production
 RUN bun run build:js
 
 FROM oven/bun:1.3.13-slim AS runtime
