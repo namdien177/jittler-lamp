@@ -18,7 +18,7 @@ export const createApp = (source = process.env) => {
 	const logger = createLogger(runtime.logLevel);
 	const db = createDb(runtime.databaseUrl, runtime.tursoAuthToken);
 
-	const app = new Elysia({ aot: false })
+	const app = new Elysia()
 		.decorate("logger", logger)
 		.state({ runtime, db })
 		.use(requestContext)
