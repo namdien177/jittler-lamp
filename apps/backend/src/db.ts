@@ -1,11 +1,16 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { createClient } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
 
-export const createDb = (databaseUrl?: string) => {
+import * as schema from "./db/schema";
+
+export const createDb = (databaseUrl?: string, authToken?: string) => {
 	if (!databaseUrl) {
 		return null;
 	}
 
-	const client = postgres(databaseUrl, { prepare: false });
-	return drizzle(client);
+	const client = createClient(
+		authToken ? { url: databaseUrl, authToken } : { url: databaseUrl },
+	);
+
+	return drizzle(client, { schema });
 };

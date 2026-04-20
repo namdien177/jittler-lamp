@@ -2,6 +2,8 @@ import { verifyToken } from "@clerk/backend";
 import { Elysia } from "elysia";
 
 import type { RuntimeConfig } from "../config/runtime";
+import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
+import type { BackendDb } from "../services/user-provisioning";
 
 export type RoutePolicy = "public" | "protected";
 
@@ -154,6 +156,7 @@ export const authContext = new Elysia({ name: "auth-context" })
 			};
 		}
 
+		let resolvedAuthContext = defaultAuthContext;
 		try {
 			const claims = (await verifyToken(token, {
 				secretKey: runtime.clerkSecretKey,
@@ -161,7 +164,8 @@ export const authContext = new Elysia({ name: "auth-context" })
 				audience: runtime.clerkAudience,
 				authorizedParties: runtime.clerkAuthorizedParties,
 			})) as Record<string, unknown>;
-			setRequestAuthContext(ctx.request, claimsToAuthContext(claims));
+			resolvedAuthContext = claimsToAuthContext(claims);
+			setRequestAuthContext(ctx.request, resolvedAuthContext);
 		} catch {
 			ctx.set.status = 401;
 			return unauthorized(
@@ -170,6 +174,32 @@ export const authContext = new Elysia({ name: "auth-context" })
 				"Invalid or expired auth token",
 				401,
 			);
+		}
+
+		try {
+			const db = (ctx.store as { db: unknown }).db;
+			if (db && resolvedAuthContext.userId) {
+				await ensureUserAndPersonalOrganization(db as BackendDb, {
+					clerkUserId: resolvedAuthContext.userId,
+					source: "auth-middleware",
+					rawPayload: {
+						userId: resolvedAuthContext.userId,
+						orgId: resolvedAuthContext.orgId,
+						roles: resolvedAuthContext.roles,
+						scopes: resolvedAuthContext.scopes,
+					},
+				});
+			}
+		} catch {
+			ctx.set.status = 500;
+			return {
+				error: {
+					code: "AUTH_PROVISIONING_FAILED",
+					message: "Failed to provision local user workspace",
+					status: 500,
+					requestId: requestId ?? null,
+				},
+			};
 		}
 
 		if (policy === "protected" && !getRequestAuthContext(ctx.request).userId) {
