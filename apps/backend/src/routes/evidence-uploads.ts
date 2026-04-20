@@ -42,6 +42,7 @@ type UploadedBlobMetadata = {
 };
 
 const UPLOAD_SESSION_TTL_MS = 5 * 60 * 1000;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
 const encodeSha256 = async (payload: ArrayBuffer): Promise<string> => {
 	const digest = await crypto.subtle.digest("SHA-256", payload);
@@ -312,8 +313,6 @@ export const evidenceUploadRoutes = new Elysia({
 					},
 				};
 			}
-
-			const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
 			const contentLengthHeader = request.headers.get("content-length");
 			const contentLength = contentLengthHeader
