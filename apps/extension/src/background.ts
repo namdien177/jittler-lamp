@@ -1164,39 +1164,39 @@ async function hasOffscreenDocument(): Promise<boolean> {
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number; url: string }> {
+  const httpCandidates = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+    url: ["http://*/*", "https://*/*"]
+  });
+  const httpFallbacks = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+    url: ["http://*/*", "https://*/*"]
+  });
   const candidateTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const fallbackTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const activeTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url));
+  const activeTab = [...httpCandidates, ...httpFallbacks].find((tab) => Boolean(tab?.id && tab.url));
   console.debug("[jittle-lamp] Active tab lookup candidates.", {
+    lastFocusedWindowHttpTabs: httpCandidates.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
+    currentWindowHttpTabs: httpFallbacks.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
     lastFocusedWindowTabs: candidateTabs.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
     currentWindowTabs: fallbackTabs.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
     selectedTab: activeTab ? { id: activeTab.id, url: activeTab.url, windowId: activeTab.windowId } : null
   });
 
   if (!activeTab?.id || !activeTab.url) {
-    console.warn("[jittle-lamp] No active tab with URL found for recording startup.");
-    throw new Error("Open an http(s) page before starting jittle-lamp.");
-  }
-
-  if (!isHttpUrl(activeTab.url)) {
-    const httpTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url && isHttpUrl(tab.url)));
-    console.debug("[jittle-lamp] Selected tab is non-http(s); searching fallback.", {
-      selectedUrl: activeTab.url,
-      fallbackTab: httpTab ? { id: httpTab.id, url: httpTab.url, windowId: httpTab.windowId } : null
-    });
-
-    if (httpTab?.id && httpTab.url) {
-      console.info("[jittle-lamp] Using fallback http(s) active tab for recording.", {
-        tabId: httpTab.id,
-        url: httpTab.url
+    const firstNonHttpTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url));
+    if (firstNonHttpTab?.url) {
+      console.warn("[jittle-lamp] Recording startup blocked because active tab is not http(s).", {
+        tabId: firstNonHttpTab.id,
+        url: firstNonHttpTab.url
       });
-      return httpTab as chrome.tabs.Tab & { id: number; url: string };
+      throw new Error("jittle-lamp V1 only records active http(s) tabs.");
     }
 
-    console.warn("[jittle-lamp] Recording startup blocked because no active http(s) tab was found.", {
-      selectedUrl: activeTab.url
-    });
-    throw new Error("jittle-lamp V1 only records active http(s) tabs.");
+    console.warn("[jittle-lamp] No active tab with URL found for recording startup.");
+    throw new Error("Open an http(s) page before starting jittle-lamp.");
   }
 
   console.info("[jittle-lamp] Using active tab for recording.", {
