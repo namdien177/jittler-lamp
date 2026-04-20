@@ -5,8 +5,12 @@ import { SignJWT, exportSPKI, generateKeyPair } from "jose";
 
 import { createApp } from "../src/app";
 import { parseEnv } from "../src/config/env";
+import { provisioningEvents } from "../src/db/schema";
 import { createDb } from "../src/db";
-import { ensureUserAndPersonalOrganization } from "../src/services/user-provisioning";
+import {
+	ensureUserAndPersonalOrganization,
+	retryFailedProvisioning,
+} from "../src/services/user-provisioning";
 
 describe("env validation", () => {
 	it("requires APP_SECRET in production", () => {
@@ -157,5 +161,50 @@ describe("routes", () => {
 		expect(secondProvision.userId).toBe(firstProvision.userId);
 		expect(secondProvision.organizationId).toBe(firstProvision.organizationId);
 		expect(secondProvision.eventId).toBeNull();
+	});
+
+	it("only retries failed provisioning for the same Clerk user", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		const client = createClient({ url: databaseUrl });
+		const migrationSql = readFileSync(
+			new URL("../drizzle/0000_initial_identity.sql", import.meta.url),
+			"utf8",
+		);
+
+		for (const statement of migrationSql
+			.split("--> statement-breakpoint")
+			.map((sql) => sql.trim())
+			.filter(Boolean)) {
+			await client.execute(statement);
+		}
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const [failedEvent] = await db
+			.insert(provisioningEvents)
+			.values({
+				clerkUserId: "user_clerk_owner",
+				source: "clerk-callback",
+				rawPayload: JSON.stringify({ userId: "user_clerk_owner" }),
+				status: "failed",
+				errorMessage: "simulated failure",
+			})
+			.returning({ id: provisioningEvents.id });
+
+		if (!failedEvent) {
+			throw new Error("Expected failed provisioning event to be created");
+		}
+
+		await expect(
+			retryFailedProvisioning(
+				db,
+				failedEvent.id,
+				"user_clerk_different_authenticated_user",
+			),
+		).rejects.toThrow(`No failed provisioning event found for ${failedEvent.id}`);
 	});
 });

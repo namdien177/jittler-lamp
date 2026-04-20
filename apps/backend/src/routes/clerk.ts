@@ -98,6 +98,7 @@ export const clerkProvisioningReplayRoute = new Elysia({
 				const provisioned = await retryFailedProvisioning(
 					state.db,
 					params.eventId,
+					authContext.userId,
 				);
 				return { ok: true, provisioned };
 			} catch (error) {

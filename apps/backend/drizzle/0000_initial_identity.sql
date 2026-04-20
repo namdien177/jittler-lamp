@@ -16,7 +16,7 @@ CREATE TABLE `organizations` (
 	`personal_owner_user_id` text,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`personal_owner_user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`personal_owner_user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT `organizations_personal_org_owner_required` CHECK ((`is_personal` = 0 and `personal_owner_user_id` is null) or (`is_personal` = 1 and `personal_owner_user_id` is not null))
 );
 --> statement-breakpoint

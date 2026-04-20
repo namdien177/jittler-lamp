@@ -25,7 +25,7 @@ export const organizations = sqliteTable(
 		personalOwnerUserId: text("personal_owner_user_id").references(
 			() => users.id,
 			{
-				onDelete: "set null",
+				onDelete: "cascade",
 			},
 		),
 		createdAt: integer("created_at")

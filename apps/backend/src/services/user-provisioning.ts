@@ -255,14 +255,19 @@ export const ensureUserAndPersonalOrganization = async (
 export const retryFailedProvisioning = async (
 	db: BackendDb,
 	eventId: string,
+	clerkUserId: string,
 ) => {
 	const result = await db
-		.select({ id: provisioningEvents.id, status: provisioningEvents.status })
+		.select({
+			id: provisioningEvents.id,
+			status: provisioningEvents.status,
+		})
 		.from(provisioningEvents)
 		.where(
 			and(
 				eq(provisioningEvents.id, eventId),
 				eq(provisioningEvents.status, "failed"),
+				eq(provisioningEvents.clerkUserId, clerkUserId),
 			),
 		);
 
