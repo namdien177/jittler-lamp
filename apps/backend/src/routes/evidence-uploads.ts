@@ -314,33 +314,28 @@ export const evidenceUploadRoutes = new Elysia({
 				};
 			}
 
+			const tooLargeResponse = {
+				error: {
+					code: "UPLOAD_TOO_LARGE",
+					message: `Upload exceeds maximum allowed size of ${MAX_UPLOAD_BYTES} bytes`,
+					status: 413,
+					requestId: requestId ?? null,
+				},
+			};
+
 			const contentLengthHeader = request.headers.get("content-length");
 			const contentLength = contentLengthHeader
 				? Number.parseInt(contentLengthHeader, 10)
 				: null;
 			if (contentLength !== null && contentLength > MAX_UPLOAD_BYTES) {
 				set.status = 413;
-				return {
-					error: {
-						code: "UPLOAD_TOO_LARGE",
-						message: `Upload exceeds maximum allowed size of ${MAX_UPLOAD_BYTES} bytes`,
-						status: 413,
-						requestId: requestId ?? null,
-					},
-				};
+				return tooLargeResponse;
 			}
 
 			const payload = await request.arrayBuffer();
 			if (payload.byteLength > MAX_UPLOAD_BYTES) {
 				set.status = 413;
-				return {
-					error: {
-						code: "UPLOAD_TOO_LARGE",
-						message: `Upload exceeds maximum allowed size of ${MAX_UPLOAD_BYTES} bytes`,
-						status: 413,
-						requestId: requestId ?? null,
-					},
-				};
+				return tooLargeResponse;
 			}
 
 			const uploadedBlob: UploadedBlobMetadata = {
