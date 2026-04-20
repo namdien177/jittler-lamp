@@ -24,6 +24,8 @@ CREATE INDEX `evidences_created_by_idx` ON `evidences` (`created_by`);
 --> statement-breakpoint
 CREATE INDEX `evidences_org_created_at_idx` ON `evidences` (`org_id`,`created_at`);
 --> statement-breakpoint
+CREATE UNIQUE INDEX `evidences_org_id_id_unique` ON `evidences` (`org_id`,`id`);
+--> statement-breakpoint
 CREATE INDEX `evidences_source_lookup_idx` ON `evidences` (`org_id`,`source_type`,`source_external_id`);
 --> statement-breakpoint
 CREATE INDEX `evidences_scope_lookup_idx` ON `evidences` (`scope_type`,`scope_id`);
@@ -66,7 +68,7 @@ CREATE TABLE `share_links` (
 	`created_by` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`evidence_id`) REFERENCES `evidences`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`org_id`,`evidence_id`) REFERENCES `evidences`(`org_id`,`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`org_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
 	CONSTRAINT `share_links_scope_type_check` CHECK (`scope_type` in ('organization', 'team', 'public'))

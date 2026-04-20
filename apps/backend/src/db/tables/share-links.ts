@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
 	check,
+	foreignKey,
 	index,
 	integer,
 	sqliteTable,
@@ -28,9 +29,7 @@ export const shareLinks = sqliteTable(
 			.primaryKey()
 			.$defaultFn(() => createUuidV7()),
 		tokenHash: text("token_hash").notNull(),
-		evidenceId: text("evidence_id")
-			.notNull()
-			.references(() => evidences.id, { onDelete: "cascade" }),
+		evidenceId: text("evidence_id").notNull(),
 		orgId: text("org_id")
 			.notNull()
 			.references(() => organizations.id, { onDelete: "cascade" }),
@@ -62,6 +61,10 @@ export const shareLinks = sqliteTable(
 			"share_links_scope_type_check",
 			sql`${table.scopeType} in ('organization', 'team', 'public')`,
 		),
+		foreignKey({
+			columns: [table.orgId, table.evidenceId],
+			foreignColumns: [evidences.orgId, evidences.id],
+		}).onDelete("cascade"),
 	],
 );
 

@@ -5,6 +5,7 @@ import {
 	integer,
 	sqliteTable,
 	text,
+	uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
@@ -50,6 +51,7 @@ export const evidences = sqliteTable(
 		index("evidences_org_id_idx").on(table.orgId),
 		index("evidences_created_by_idx").on(table.createdBy),
 		index("evidences_org_created_at_idx").on(table.orgId, table.createdAt),
+		uniqueIndex("evidences_org_id_id_unique").on(table.orgId, table.id),
 		index("evidences_source_lookup_idx").on(
 			table.orgId,
 			table.sourceType,
