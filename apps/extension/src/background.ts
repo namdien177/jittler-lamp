@@ -1137,14 +1137,21 @@ async function hasOffscreenDocument(): Promise<boolean> {
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number; url: string }> {
-  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  const activeTab = tabs[0];
+  const candidateTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const fallbackTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url));
 
   if (!activeTab?.id || !activeTab.url) {
     throw new Error("Open an http(s) page before starting jittle-lamp.");
   }
 
   if (!isHttpUrl(activeTab.url)) {
+    const httpTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url && isHttpUrl(tab.url)));
+
+    if (httpTab?.id && httpTab.url) {
+      return httpTab as chrome.tabs.Tab & { id: number; url: string };
+    }
+
     throw new Error("jittle-lamp V1 only records active http(s) tabs.");
   }
 
