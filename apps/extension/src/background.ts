@@ -331,7 +331,9 @@ async function startRecordingSession(): Promise<void> {
 
   try {
     await ensureOffscreenDocument();
+    await ensureRecordableTab(tab.id, "before content bridge");
     await ensureContentBridge(tab.id, draft.sessionId);
+    await ensureRecordableTab(tab.id, "before debugger attach");
     await attachDebugger(tab.id);
 
     const streamId = await getTabMediaStreamId(tab.id);
@@ -534,6 +536,20 @@ async function handleContentRuntimeMessage(
   const senderTabId = sender.tab?.id;
 
   if (typeof senderTabId === "number" && currentDraft.page.tabId !== senderTabId) {
+    console.debug("[jittle-lamp] Ignoring content runtime message from non-active tab.", {
+      senderTabId,
+      activeTabId: currentDraft.page.tabId,
+      type: message.type
+    });
+    return;
+  }
+
+  if (!isSessionBusy(currentDraft)) {
+    console.debug("[jittle-lamp] Ignoring content runtime message for non-busy session.", {
+      phase: currentDraft.phase,
+      type: message.type,
+      sessionId: currentDraft.sessionId
+    });
     return;
   }
 
@@ -1037,18 +1053,25 @@ function shouldAttemptDetachRecovery(tab: chrome.tabs.Tab): boolean {
 }
 
 async function ensureContentBridge(tabId: number, sessionId: string): Promise<void> {
-  const probeResults = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => Boolean(window.__jittleLampBootstrapped__)
-  });
-  const isBootstrapped = probeResults[0]?.result === true;
-
-  if (!isBootstrapped) {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content.js"]
+  console.debug("[jittle-lamp] Ensuring content bridge.", { tabId, sessionId });
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "jl/content-begin-capture",
+      sessionId
     });
+    return;
+  } catch (error: unknown) {
+    const message = rawErrorMessage(error);
+
+    if (!message.includes("Receiving end does not exist")) {
+      throw error;
+    }
   }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content.js"]
+  });
 
   await chrome.tabs.sendMessage(tabId, {
     type: "jl/content-begin-capture",
@@ -1084,9 +1107,13 @@ async function safeDetachDebugger(tabId: number): Promise<void> {
   try {
     await chrome.debugger.detach({ tabId });
   } catch (error: unknown) {
-    const message = errorMessage(error);
+    const message = rawErrorMessage(error);
 
-    if (!message.includes("Detached while handling command") && !message.includes("No target with given id")) {
+    if (
+      !message.includes("Detached while handling command") &&
+      !message.includes("No target with given id") &&
+      !message.includes("Debugger is not attached")
+    ) {
       console.warn(message);
     }
   }
@@ -1137,18 +1164,80 @@ async function hasOffscreenDocument(): Promise<boolean> {
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number; url: string }> {
-  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  const activeTab = tabs[0];
+  const httpCandidates = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+    url: ["http://*/*", "https://*/*"]
+  });
+  const httpFallbacks = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+    url: ["http://*/*", "https://*/*"]
+  });
+  const candidateTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const fallbackTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = [...httpCandidates, ...httpFallbacks].find((tab) => Boolean(tab?.id && tab.url));
+  console.debug("[jittle-lamp] Active tab lookup candidates.", {
+    lastFocusedWindowHttpTabs: httpCandidates.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
+    currentWindowHttpTabs: httpFallbacks.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
+    lastFocusedWindowTabs: candidateTabs.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
+    currentWindowTabs: fallbackTabs.map((tab) => ({ id: tab.id, url: tab.url, windowId: tab.windowId })),
+    selectedTab: activeTab ? { id: activeTab.id, url: activeTab.url, windowId: activeTab.windowId } : null
+  });
 
   if (!activeTab?.id || !activeTab.url) {
+    const firstNonHttpTab = [...candidateTabs, ...fallbackTabs].find((tab) => Boolean(tab?.id && tab.url));
+    if (firstNonHttpTab?.url) {
+      console.warn("[jittle-lamp] Recording startup blocked because active tab is not http(s).", {
+        tabId: firstNonHttpTab.id,
+        url: firstNonHttpTab.url
+      });
+      const createdTab = await chrome.tabs.create({ url: "about:blank", active: true });
+
+      if (createdTab.id && createdTab.url && isRecordableStartupUrl(createdTab.url)) {
+        console.info("[jittle-lamp] Created a fresh recordable fallback tab.", {
+          tabId: createdTab.id,
+          url: createdTab.url
+        });
+        return createdTab as chrome.tabs.Tab & { id: number; url: string };
+      }
+
+      throw new Error("jittle-lamp V1 only records active http(s) tabs.");
+    }
+
+    console.warn("[jittle-lamp] No active tab with URL found for recording startup.");
     throw new Error("Open an http(s) page before starting jittle-lamp.");
   }
 
-  if (!isHttpUrl(activeTab.url)) {
-    throw new Error("jittle-lamp V1 only records active http(s) tabs.");
+  console.info("[jittle-lamp] Using active tab for recording.", {
+    tabId: activeTab.id,
+    url: activeTab.url
+  });
+  return activeTab as chrome.tabs.Tab & { id: number; url: string };
+}
+
+async function ensureRecordableTab(
+  tabId: number,
+  stage: string
+): Promise<chrome.tabs.Tab & { id: number; url: string }> {
+  const tab = await getTabIfPresent(tabId);
+
+  if (!tab?.id || !tab.url) {
+    throw new Error(`Recording startup could not find the selected tab (${stage}).`);
   }
 
-  return activeTab as chrome.tabs.Tab & { id: number; url: string };
+  if (!isRecordableStartupUrl(tab.url)) {
+    console.warn("[jittle-lamp] Recording startup blocked because tab became non-http(s).", {
+      stage,
+      tabId,
+      url: tab.url
+    });
+    throw new Error(
+      `Recording tab changed to a non-web page before startup completed (${stage}): ${tab.url}`
+    );
+  }
+
+  return tab as chrome.tabs.Tab & { id: number; url: string };
 }
 
 function getNetworkRequests(tabId: number): Map<string, NetworkRequestState> {
@@ -1991,6 +2080,10 @@ function isHttpUrl(url: string): boolean {
   return url.startsWith("http://") || url.startsWith("https://");
 }
 
+function isRecordableStartupUrl(url: string): boolean {
+  return isHttpUrl(url) || url === "about:blank";
+}
+
 function stringifyConsoleArgs(args: CdpRemoteObject[] | undefined): string[] {
   return (args ?? []).map((arg) => stringifyRemoteObject(arg)).filter((value) => value.length > 0);
 }
@@ -2042,13 +2135,17 @@ function toConsoleLevel(type: string | undefined): "debug" | "info" | "warn" | "
 }
 
 function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = rawErrorMessage(error);
 
   if (message.includes("Cannot access a chrome-extension:// URL of different extension")) {
     return "jittle-lamp can only record regular web pages (http/https), not other extension pages.";
   }
 
   return message;
+}
+
+function rawErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isHandledRuntimeMessage(rawMessage: unknown): boolean {
