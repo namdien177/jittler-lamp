@@ -8,6 +8,7 @@ import { errorNormalizer } from "./middleware/error-normalizer";
 import { requestContext } from "./middleware/request-context";
 import { clerkProvisioningReplayRoute, clerkRoutes } from "./routes/clerk";
 import { evidenceUploadRoutes } from "./routes/evidence-uploads";
+import { evidenceRoutes } from "./routes/evidences";
 import { healthRoutes } from "./routes/health";
 import { organizationRoutes } from "./routes/orgs";
 import { protectedRoutes } from "./routes/protected";
@@ -38,6 +39,7 @@ export const createApp = (source = process.env) => {
 		.use(clerkRoutes)
 		.use(clerkProvisioningReplayRoute)
 		.use(evidenceUploadRoutes)
+		.use(evidenceRoutes)
 		.use(shareLinkRoutes)
 		.use(organizationRoutes)
 		.use(protectedRoutes);

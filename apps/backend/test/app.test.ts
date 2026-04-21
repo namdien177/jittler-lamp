@@ -964,4 +964,229 @@ describe("routes", () => {
 			},
 		});
 	});
+
+	it("blocks evidence moves from members who are not creators or owners", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const owner = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_move_owner",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_move_owner" },
+		});
+		const member = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_move_member",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_move_member" },
+		});
+
+		const [targetOrg] = await db
+			.insert(organizations)
+			.values({ name: "Move target org", isPersonal: false })
+			.returning({ id: organizations.id });
+		if (!targetOrg) {
+			throw new Error("Expected target organization to be created");
+		}
+
+		await db.insert(organizationMembers).values([
+			{
+				organizationId: owner.organizationId,
+				userId: member.userId,
+				role: "member",
+			},
+			{
+				organizationId: targetOrg.id,
+				userId: owner.userId,
+				role: "owner",
+			},
+			{
+				organizationId: targetOrg.id,
+				userId: member.userId,
+				role: "member",
+			},
+		]);
+
+		const [evidence] = await db
+			.insert(evidences)
+			.values({
+				orgId: owner.organizationId,
+				createdBy: owner.userId,
+				title: "Move protected evidence",
+				sourceType: "browser",
+				scopeType: "organization",
+				scopeId: owner.organizationId,
+			})
+			.returning({ id: evidences.id });
+		if (!evidence) {
+			throw new Error("Expected evidence to be created");
+		}
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const memberToken = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_move_member")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const response = await app.handle(
+			new Request(`http://localhost/evidences/${evidence.id}/move`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${memberToken}`,
+				},
+				body: JSON.stringify({ targetOrgId: targetOrg.id }),
+			}),
+		);
+
+		expect(response.status).toBe(403);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "EVIDENCE_MOVE_FORBIDDEN",
+				message: "Only permitted creators can move this evidence",
+				status: 403,
+				requestId: null,
+			},
+		});
+	});
+
+	it("moves evidence transactionally and invalidates share links", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const creator = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_move_creator",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_move_creator" },
+		});
+
+		const [targetOrg] = await db
+			.insert(organizations)
+			.values({ name: "Move destination", isPersonal: false })
+			.returning({ id: organizations.id });
+		if (!targetOrg) {
+			throw new Error("Expected target organization to be created");
+		}
+
+		await db.insert(organizationMembers).values({
+			organizationId: targetOrg.id,
+			userId: creator.userId,
+			role: "owner",
+		});
+
+		const [evidence] = await db
+			.insert(evidences)
+			.values({
+				orgId: creator.organizationId,
+				createdBy: creator.userId,
+				title: "Movable evidence",
+				sourceType: "browser",
+				scopeType: "organization",
+				scopeId: creator.organizationId,
+			})
+			.returning({ id: evidences.id });
+		if (!evidence) {
+			throw new Error("Expected evidence to be created");
+		}
+
+		await db.insert(shareLinks).values([
+			{
+				tokenHash: crypto.randomUUID().replaceAll("-", ""),
+				evidenceId: evidence.id,
+				orgId: creator.organizationId,
+				scopeType: "organization",
+				scopeId: creator.organizationId,
+				expiresAt: Date.now() + 60_000,
+				createdBy: creator.userId,
+			},
+			{
+				tokenHash: `${crypto.randomUUID().replaceAll("-", "")}abc`,
+				evidenceId: evidence.id,
+				orgId: creator.organizationId,
+				scopeType: "organization",
+				scopeId: creator.organizationId,
+				expiresAt: Date.now() + 60_000,
+				createdBy: creator.userId,
+			},
+		]);
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const creatorToken = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_move_creator")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const response = await app.handle(
+			new Request(`http://localhost/evidences/${evidence.id}/move`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${creatorToken}`,
+				},
+				body: JSON.stringify({ targetOrgId: targetOrg.id }),
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		const payload = (await response.json()) as {
+			evidence: { orgId: string };
+			move: {
+				invalidatedShareLinks: number;
+				fromOrgId: string;
+				toOrgId: string;
+			};
+		};
+		expect(payload.evidence.orgId).toBe(targetOrg.id);
+		expect(payload.move.fromOrgId).toBe(creator.organizationId);
+		expect(payload.move.toOrgId).toBe(targetOrg.id);
+		expect(payload.move.invalidatedShareLinks).toBe(2);
+
+		const movedEvidence = await db.query.evidences.findFirst({
+			where: eq(evidences.id, evidence.id),
+			columns: { orgId: true, scopeId: true },
+		});
+		expect(movedEvidence?.orgId).toBe(targetOrg.id);
+		expect(movedEvidence?.scopeId).toBe(targetOrg.id);
+
+		const remainingLinks = await db.query.shareLinks.findMany({
+			where: eq(shareLinks.evidenceId, evidence.id),
+			columns: { id: true },
+		});
+		expect(remainingLinks).toHaveLength(0);
+	});
 });
