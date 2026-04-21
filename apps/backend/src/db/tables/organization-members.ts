@@ -46,5 +46,6 @@ export const organizationMembers = sqliteTable(
 export const createOrganizationMembershipInputSchema = z.object({
 	organizationId: z.string().uuid(),
 	userId: z.string().uuid(),
+	teamId: z.string().uuid().nullable().optional(),
 	role: organizationRoleSchema,
 });

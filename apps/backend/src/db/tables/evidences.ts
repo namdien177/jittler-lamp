@@ -78,7 +78,7 @@ export const createEvidenceInputSchema = z.object({
 	sourceMetadata: z.string().optional(),
 	thumbnailBase64: z.string().max(20_000).optional(),
 	thumbnailMimeType: z.string().trim().min(1).optional(),
-	teamId: z.string().uuid().optional(),
+	teamId: z.string().uuid().nullable().optional(),
 	scopeType: evidenceScopeTypeSchema.default("organization"),
-	scopeId: z.string().uuid().optional(),
+	scopeId: z.string().uuid().nullable().optional(),
 });

@@ -11,9 +11,11 @@ type TeamPolicyContext = {
 	action: "view" | "share" | "move";
 };
 
-type TeamPolicyAdapter = (context: TeamPolicyContext) => Promise<boolean>;
-
-const defaultTeamPolicyAdapter: TeamPolicyAdapter = async () => true;
+type TeamPolicyAdapter = {
+	canViewEvidence?: (context: TeamPolicyContext) => Promise<boolean>;
+	canShareEvidence?: (context: TeamPolicyContext) => Promise<boolean>;
+	canMoveEvidence?: (context: TeamPolicyContext) => Promise<boolean>;
+};
 
 export type EvidencePolicyDeps = {
 	teamPolicyAdapter?: TeamPolicyAdapter;
@@ -30,6 +32,32 @@ export type EvidenceMoveContext = EvidenceAccessContext & {
 	targetOrganizationId: string;
 	isEvidenceCreator: boolean;
 	isSourceOrganizationCreator: boolean;
+};
+
+const authorizeTeamAction = async (
+	teamPolicyAdapter: TeamPolicyAdapter | undefined,
+	action: TeamPolicyContext["action"],
+	context: EvidenceAccessContext,
+): Promise<boolean> => {
+	if (!context.teamId) {
+		return true;
+	}
+
+	const teamContext: TeamPolicyContext = {
+		organizationId: context.organizationId,
+		teamId: context.teamId,
+		userId: context.userId,
+		action,
+	};
+
+	switch (action) {
+		case "view":
+			return (await teamPolicyAdapter?.canViewEvidence?.(teamContext)) ?? true;
+		case "share":
+			return (await teamPolicyAdapter?.canShareEvidence?.(teamContext)) ?? true;
+		case "move":
+			return (await teamPolicyAdapter?.canMoveEvidence?.(teamContext)) ?? true;
+	}
 };
 
 const hasOrgMembership = async (
@@ -65,7 +93,7 @@ const resolveSourceMembershipRole = async (
 };
 
 export const createEvidencePolicy = (deps: EvidencePolicyDeps = {}) => {
-	const teamPolicyAdapter = deps.teamPolicyAdapter ?? defaultTeamPolicyAdapter;
+	const teamPolicyAdapter = deps.teamPolicyAdapter;
 
 	return {
 		canViewEvidence: async (
@@ -81,16 +109,7 @@ export const createEvidencePolicy = (deps: EvidencePolicyDeps = {}) => {
 				return false;
 			}
 
-			if (!context.teamId) {
-				return true;
-			}
-
-			return teamPolicyAdapter({
-				organizationId: context.organizationId,
-				teamId: context.teamId,
-				userId: context.userId,
-				action: "view",
-			});
+			return authorizeTeamAction(teamPolicyAdapter, "view", context);
 		},
 		canShareEvidence: async (
 			db: BackendDb,
@@ -105,16 +124,7 @@ export const createEvidencePolicy = (deps: EvidencePolicyDeps = {}) => {
 				return false;
 			}
 
-			if (!context.teamId) {
-				return true;
-			}
-
-			return teamPolicyAdapter({
-				organizationId: context.organizationId,
-				teamId: context.teamId,
-				userId: context.userId,
-				action: "share",
-			});
+			return authorizeTeamAction(teamPolicyAdapter, "share", context);
 		},
 		canMoveEvidence: async (
 			db: BackendDb,
@@ -146,16 +156,7 @@ export const createEvidencePolicy = (deps: EvidencePolicyDeps = {}) => {
 				return false;
 			}
 
-			if (!context.teamId) {
-				return true;
-			}
-
-			return teamPolicyAdapter({
-				organizationId: context.organizationId,
-				teamId: context.teamId,
-				userId: context.userId,
-				action: "move",
-			});
+			return authorizeTeamAction(teamPolicyAdapter, "move", context);
 		},
 	};
 };
