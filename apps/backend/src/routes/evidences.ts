@@ -10,6 +10,7 @@ import {
 	users,
 } from "../db/schema";
 import { authContext } from "../middleware/auth-context";
+import { createEvidencePolicy } from "../services/evidence-policy";
 
 import type { BackendDb } from "../services/user-provisioning";
 
@@ -86,6 +87,7 @@ export const evidenceRoutes = new Elysia({ name: "evidence-routes" })
 				columns: {
 					id: true,
 					orgId: true,
+					teamId: true,
 					createdBy: true,
 					scopeType: true,
 					scopeId: true,
@@ -115,30 +117,32 @@ export const evidenceRoutes = new Elysia({ name: "evidence-routes" })
 				};
 			}
 
-			const [sourceMembership, targetMembership, sourceOrg] = await Promise.all(
-				[
-					db.query.organizationMembers.findFirst({
-						where: and(
-							eq(organizationMembers.organizationId, evidence.orgId),
-							eq(organizationMembers.userId, localUserId),
-						),
-						columns: { role: true },
-					}),
-					db.query.organizationMembers.findFirst({
-						where: and(
-							eq(organizationMembers.organizationId, body.targetOrgId),
-							eq(organizationMembers.userId, localUserId),
-						),
-						columns: { role: true },
-					}),
-					db.query.organizations.findFirst({
-						where: eq(organizations.id, evidence.orgId),
-						columns: { personalOwnerUserId: true },
-					}),
-				],
-			);
+			const evidencePolicy = createEvidencePolicy();
+			const sourceOrg = await db.query.organizations.findFirst({
+				where: eq(organizations.id, evidence.orgId),
+				columns: { personalOwnerUserId: true },
+			});
 
-			if (!targetMembership) {
+			const canMove = await evidencePolicy.canMoveEvidence(db, {
+				organizationId: evidence.orgId,
+				teamId: evidence.teamId,
+				userId: localUserId,
+				sourceOrganizationId: evidence.orgId,
+				targetOrganizationId: body.targetOrgId,
+				isEvidenceCreator: evidence.createdBy === localUserId,
+				isSourceOrganizationCreator:
+					sourceOrg?.personalOwnerUserId === localUserId,
+			});
+
+			const hasTargetMembership = await db.query.organizationMembers.findFirst({
+				where: and(
+					eq(organizationMembers.organizationId, body.targetOrgId),
+					eq(organizationMembers.userId, localUserId),
+				),
+				columns: { id: true },
+			});
+
+			if (!hasTargetMembership) {
 				set.status = 403;
 				return {
 					error: {
@@ -150,13 +154,6 @@ export const evidenceRoutes = new Elysia({ name: "evidence-routes" })
 					},
 				};
 			}
-
-			const isEvidenceCreator = evidence.createdBy === localUserId;
-			const isSourceOrgCreator = sourceOrg?.personalOwnerUserId === localUserId;
-			const isSourceOrgOwner = sourceMembership?.role === "owner";
-			const canMove =
-				Boolean(sourceMembership) &&
-				(isEvidenceCreator || isSourceOrgCreator || isSourceOrgOwner);
 
 			if (!canMove) {
 				set.status = 403;

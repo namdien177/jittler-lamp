@@ -12,6 +12,7 @@ export {
 } from "./tables/evidences";
 export {
 	createOrganizationMembershipInputSchema,
+	defaultOrganizationRoles,
 	organizationMembers,
 	organizationRoleSchema,
 } from "./tables/organization-members";

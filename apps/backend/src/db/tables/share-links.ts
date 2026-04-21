@@ -38,6 +38,7 @@ export const shareLinks = sqliteTable(
 			.notNull()
 			.default("organization"),
 		scopeId: text("scope_id"),
+		teamId: text("team_id"),
 		expiresAt: integer("expires_at").notNull(),
 		revokedAt: integer("revoked_at"),
 		createdBy: text("created_by")
@@ -56,6 +57,7 @@ export const shareLinks = sqliteTable(
 		index("share_links_evidence_id_idx").on(table.evidenceId),
 		index("share_links_lookup_idx").on(table.orgId, table.evidenceId),
 		index("share_links_scope_lookup_idx").on(table.scopeType, table.scopeId),
+		index("share_links_team_id_idx").on(table.teamId),
 		index("share_links_expires_at_idx").on(table.expiresAt),
 		check(
 			"share_links_scope_type_check",
@@ -74,6 +76,7 @@ export const createShareLinkInputSchema = z.object({
 	orgId: z.string().uuid(),
 	scopeType: shareLinkScopeTypeSchema.default("organization"),
 	scopeId: z.string().uuid().optional(),
+	teamId: z.string().uuid().optional(),
 	expiresAt: z.number().int(),
 	revokedAt: z.number().int().nullable().optional(),
 	createdBy: z.string().uuid(),

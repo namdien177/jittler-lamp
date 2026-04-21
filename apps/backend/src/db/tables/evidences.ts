@@ -35,6 +35,7 @@ export const evidences = sqliteTable(
 		sourceMetadata: text("source_metadata"),
 		thumbnailBase64: text("thumbnail_base64"),
 		thumbnailMimeType: text("thumbnail_mime_type"),
+		teamId: text("team_id"),
 		scopeType: text("scope_type")
 			.$type<EvidenceScopeType>()
 			.notNull()
@@ -58,6 +59,7 @@ export const evidences = sqliteTable(
 			table.sourceExternalId,
 		),
 		index("evidences_scope_lookup_idx").on(table.scopeType, table.scopeId),
+		index("evidences_team_id_idx").on(table.teamId),
 		index("evidences_updated_at_idx").on(table.updatedAt),
 		check(
 			"evidences_scope_type_check",
@@ -76,6 +78,7 @@ export const createEvidenceInputSchema = z.object({
 	sourceMetadata: z.string().optional(),
 	thumbnailBase64: z.string().max(20_000).optional(),
 	thumbnailMimeType: z.string().trim().min(1).optional(),
+	teamId: z.string().uuid().optional(),
 	scopeType: evidenceScopeTypeSchema.default("organization"),
 	scopeId: z.string().uuid().optional(),
 });
