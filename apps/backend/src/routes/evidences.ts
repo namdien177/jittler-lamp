@@ -31,6 +31,13 @@ export const evidenceRoutes = new Elysia({ name: "evidence-routes" })
 		async (ctx) => {
 			const { authContext, body, params, set, store } = ctx;
 			const requestId = (ctx as { requestId?: string }).requestId;
+			const requestLogger = (
+				ctx as {
+					logger?: {
+						info: (obj: Record<string, unknown>, message: string) => void;
+					};
+				}
+			).logger;
 			const db = (store as { db?: BackendDb }).db;
 
 			if (!db) {
@@ -190,12 +197,12 @@ export const evidenceRoutes = new Elysia({ name: "evidence-routes" })
 				};
 			});
 
-			ctx.logger.info(
+			requestLogger?.info(
 				{
 					event: "evidence.moved",
 					evidenceId: moved.evidenceId,
 					movedByUserId: localUserId,
-					fromOrgId: evidence.scopeId,
+					fromOrgId: evidence.orgId,
 					toOrgId: moved.orgId,
 					invalidatedShareLinks: moved.invalidatedShareLinks,
 					requestId: requestId ?? null,
@@ -211,7 +218,7 @@ export const evidenceRoutes = new Elysia({ name: "evidence-routes" })
 				move: {
 					movedAt: now,
 					movedBy: localUserId,
-					fromOrgId: evidence.scopeId,
+					fromOrgId: evidence.orgId,
 					toOrgId: moved.orgId,
 					invalidatedShareLinks: moved.invalidatedShareLinks,
 				},
