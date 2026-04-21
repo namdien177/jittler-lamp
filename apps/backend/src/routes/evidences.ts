@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { Elysia, t } from "elysia";
+import type { Logger } from "pino";
 
 import {
 	evidences,
@@ -16,6 +17,14 @@ const moveEvidenceBodySchema = t.Object({
 	targetOrgId: t.String({ minLength: 1 }),
 });
 
+type EvidenceMoveRouteContext = {
+	requestId?: string;
+	logger?: Pick<Logger, "info">;
+	store: {
+		db?: BackendDb;
+	};
+};
+
 const resolveLocalUserId = async (db: BackendDb, clerkUserId: string) => {
 	const user = await db.query.users.findFirst({
 		where: eq(users.clerkUserId, clerkUserId),
@@ -29,16 +38,11 @@ export const evidenceRoutes = new Elysia({ name: "evidence-routes" })
 	.post(
 		"/evidences/:id/move",
 		async (ctx) => {
-			const { authContext, body, params, set, store } = ctx;
-			const requestId = (ctx as { requestId?: string }).requestId;
-			const requestLogger = (
-				ctx as {
-					logger?: {
-						info: (obj: Record<string, unknown>, message: string) => void;
-					};
-				}
-			).logger;
-			const db = (store as { db?: BackendDb }).db;
+			const typedCtx = ctx as typeof ctx & EvidenceMoveRouteContext;
+			const { authContext, body, params, set } = typedCtx;
+			const requestId = typedCtx.requestId;
+			const requestLogger = typedCtx.logger;
+			const db = typedCtx.store.db;
 
 			if (!db) {
 				set.status = 500;
