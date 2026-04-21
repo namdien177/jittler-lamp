@@ -31,13 +31,13 @@ export function safeParseSessionArchiveJson(input: string | Uint8Array): ReturnT
   } catch (e) {
     return {
       success: false,
-      error: new ZodError<SessionArchive>([
+      error: new ZodError([
         {
           code: "custom",
           message: e instanceof Error ? e.message : "Invalid JSON",
           path: []
         }
-      ])
+      ]) as unknown as ZodError<SessionArchive>
     };
   }
   return sessionArchiveSchema.safeParse(raw);
