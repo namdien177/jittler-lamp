@@ -37,7 +37,7 @@ export function safeParseSessionArchiveJson(input: string | Uint8Array): ReturnT
           message: e instanceof Error ? e.message : "Invalid JSON",
           path: []
         }
-      ])
+      ]) as unknown as ZodError<SessionArchive>
     };
   }
   return sessionArchiveSchema.safeParse(raw);

@@ -13,6 +13,7 @@ import {
 	organizationMembers,
 	organizations,
 	provisioningEvents,
+	shareLinks,
 	users,
 } from "../src/db/schema";
 import {
@@ -738,5 +739,229 @@ describe("routes", () => {
 			columns: { orgId: true },
 		});
 		expect(evidence?.orgId).toBe(teamOrganization.id);
+	});
+
+	it("enforces internal-only share link resolution and revoke flow", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const owner = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_share_owner",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_share_owner" },
+		});
+		const outsider = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_share_outsider",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_share_outsider" },
+		});
+
+		const [evidence] = await db
+			.insert(evidences)
+			.values({
+				orgId: owner.organizationId,
+				createdBy: owner.userId,
+				title: "Shareable evidence",
+				sourceType: "browser",
+				scopeType: "organization",
+				scopeId: owner.organizationId,
+			})
+			.returning({ id: evidences.id });
+		if (!evidence) {
+			throw new Error("Expected evidence to be created");
+		}
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const signToken = (subject: string) =>
+			new SignJWT({ scope: "read write" })
+				.setProtectedHeader({ alg: "RS256" })
+				.setSubject(subject)
+				.setAudience("test-audience")
+				.setIssuedAt()
+				.setExpirationTime("5m")
+				.sign(privateKey);
+
+		const ownerToken = await signToken("user_clerk_share_owner");
+		const outsiderToken = await signToken("user_clerk_share_outsider");
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const createResponse = await app.handle(
+			new Request(`http://localhost/evidences/${evidence.id}/share-links`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${ownerToken}`,
+				},
+				body: JSON.stringify({ expiresInMs: 60_000 }),
+			}),
+		);
+		expect(createResponse.status).toBe(200);
+		const createdPayload = (await createResponse.json()) as {
+			shareLink: { id: string; token: string };
+		};
+
+		const unauthResolve = await app.handle(
+			new Request(
+				`http://localhost/share-links/${createdPayload.shareLink.token}/resolve`,
+			),
+		);
+		expect(unauthResolve.status).toBe(401);
+
+		const outsiderResolve = await app.handle(
+			new Request(
+				`http://localhost/share-links/${createdPayload.shareLink.token}/resolve`,
+				{
+					headers: { authorization: `Bearer ${outsiderToken}` },
+				},
+			),
+		);
+		expect(outsiderResolve.status).toBe(403);
+		expect(await outsiderResolve.json()).toEqual({
+			error: {
+				code: "SHARE_LINK_FORBIDDEN",
+				message: "You do not have access to this evidence share link",
+				status: 403,
+				requestId: null,
+			},
+		});
+
+		const ownerResolve = await app.handle(
+			new Request(
+				`http://localhost/share-links/${createdPayload.shareLink.token}/resolve`,
+				{
+					headers: { authorization: `Bearer ${ownerToken}` },
+				},
+			),
+		);
+		expect(ownerResolve.status).toBe(200);
+
+		const revokeResponse = await app.handle(
+			new Request(
+				`http://localhost/share-links/${createdPayload.shareLink.id}/revoke`,
+				{
+					method: "POST",
+					headers: { authorization: `Bearer ${ownerToken}` },
+				},
+			),
+		);
+		expect(revokeResponse.status).toBe(200);
+
+		const revokedResolve = await app.handle(
+			new Request(
+				`http://localhost/share-links/${createdPayload.shareLink.token}/resolve`,
+				{
+					headers: { authorization: `Bearer ${ownerToken}` },
+				},
+			),
+		);
+		expect(revokedResolve.status).toBe(404);
+
+		const persisted = await db.query.shareLinks.findFirst({
+			where: eq(shareLinks.id, createdPayload.shareLink.id),
+			columns: { revokedAt: true },
+		});
+		expect(persisted?.revokedAt).toBeNumber();
+		expect(outsider.organizationId).not.toBe(owner.organizationId);
+	});
+
+	it("treats expired links as non-resolvable", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const owner = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_share_expiry",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_share_expiry" },
+		});
+
+		const [evidence] = await db
+			.insert(evidences)
+			.values({
+				orgId: owner.organizationId,
+				createdBy: owner.userId,
+				title: "Expiring evidence",
+				sourceType: "browser",
+				scopeType: "organization",
+				scopeId: owner.organizationId,
+			})
+			.returning({ id: evidences.id });
+		if (!evidence) {
+			throw new Error("Expected evidence to be created");
+		}
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_share_expiry")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: "123456789012345678901234",
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const createResponse = await app.handle(
+			new Request(`http://localhost/evidences/${evidence.id}/share-links`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({ expiresInMs: 60_000 }),
+			}),
+		);
+		expect(createResponse.status).toBe(200);
+		const payload = (await createResponse.json()) as {
+			shareLink: { token: string };
+		};
+
+		const now = Date.now();
+		await db
+			.update(shareLinks)
+			.set({ expiresAt: now - 1, updatedAt: now })
+			.where(eq(shareLinks.evidenceId, evidence.id));
+
+		const resolveResponse = await app.handle(
+			new Request(
+				`http://localhost/share-links/${payload.shareLink.token}/resolve`,
+				{ headers: { authorization: `Bearer ${token}` } },
+			),
+		);
+		expect(resolveResponse.status).toBe(404);
+		expect(await resolveResponse.json()).toEqual({
+			error: {
+				code: "SHARE_LINK_NOT_FOUND",
+				message: "Share link is invalid, expired, or revoked",
+				status: 404,
+				requestId: null,
+			},
+		});
 	});
 });

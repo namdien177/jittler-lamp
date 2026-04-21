@@ -11,6 +11,7 @@ import { evidenceUploadRoutes } from "./routes/evidence-uploads";
 import { healthRoutes } from "./routes/health";
 import { organizationRoutes } from "./routes/orgs";
 import { protectedRoutes } from "./routes/protected";
+import { shareLinkRoutes } from "./routes/share-links";
 import { createLogger } from "./utils/logger";
 
 export const createApp = (source = process.env) => {
@@ -37,6 +38,7 @@ export const createApp = (source = process.env) => {
 		.use(clerkRoutes)
 		.use(clerkProvisioningReplayRoute)
 		.use(evidenceUploadRoutes)
+		.use(shareLinkRoutes)
 		.use(organizationRoutes)
 		.use(protectedRoutes);
 
