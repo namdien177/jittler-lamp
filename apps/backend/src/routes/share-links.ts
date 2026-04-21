@@ -1,13 +1,9 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
-import {
-	evidences,
-	organizationMembers,
-	shareLinks,
-	users,
-} from "../db/schema";
+import { evidences, shareLinks, users } from "../db/schema";
 import { authContext } from "../middleware/auth-context";
+import { createEvidencePolicy } from "../services/evidence-policy";
 
 import type { BackendDb } from "../services/user-provisioning";
 
@@ -36,21 +32,6 @@ const resolveLocalUserId = async (db: BackendDb, clerkUserId: string) => {
 		columns: { id: true },
 	});
 	return user?.id ?? null;
-};
-
-const checkOrgMembership = async (
-	db: BackendDb,
-	orgId: string,
-	userId: string,
-) => {
-	const membership = await db.query.organizationMembers.findFirst({
-		where: and(
-			eq(organizationMembers.organizationId, orgId),
-			eq(organizationMembers.userId, userId),
-		),
-		columns: { id: true },
-	});
-	return Boolean(membership);
 };
 
 const createForbiddenPayload = (requestId?: string) => ({
@@ -99,10 +80,11 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 				set.status = 403;
 				return createForbiddenPayload(requestId);
 			}
+			const evidencePolicy = createEvidencePolicy();
 
 			const evidence = await db.query.evidences.findFirst({
 				where: eq(evidences.id, params.id),
-				columns: { id: true, orgId: true },
+				columns: { id: true, orgId: true, teamId: true },
 			});
 			if (!evidence) {
 				set.status = 404;
@@ -116,11 +98,11 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 				};
 			}
 
-			const canAccess = await checkOrgMembership(
-				db,
-				evidence.orgId,
-				localUserId,
-			);
+			const canAccess = await evidencePolicy.canShareEvidence(db, {
+				organizationId: evidence.orgId,
+				teamId: evidence.teamId,
+				userId: localUserId,
+			});
 			if (!canAccess) {
 				set.status = 403;
 				return createForbiddenPayload(requestId);
@@ -137,6 +119,7 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 					tokenHash,
 					evidenceId: evidence.id,
 					orgId: evidence.orgId,
+					teamId: evidence.teamId,
 					scopeType: "organization",
 					scopeId: evidence.orgId,
 					expiresAt,
@@ -212,6 +195,7 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 			}
 
 			const tokenHash = await hashToken(params.token);
+			const evidencePolicy = createEvidencePolicy();
 			const shareLink = await db.query.shareLinks.findFirst({
 				where: and(
 					eq(shareLinks.tokenHash, tokenHash),
@@ -222,6 +206,7 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 					id: true,
 					evidenceId: true,
 					orgId: true,
+					teamId: true,
 					expiresAt: true,
 					revokedAt: true,
 				},
@@ -245,11 +230,11 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 				return createForbiddenPayload(requestId);
 			}
 
-			const canAccess = await checkOrgMembership(
-				db,
-				shareLink.orgId,
-				localUserId,
-			);
+			const canAccess = await evidencePolicy.canViewEvidence(db, {
+				organizationId: shareLink.orgId,
+				teamId: shareLink.teamId,
+				userId: localUserId,
+			});
 			if (!canAccess) {
 				set.status = 403;
 				return createForbiddenPayload(requestId);
@@ -303,7 +288,7 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 
 			const shareLink = await db.query.shareLinks.findFirst({
 				where: eq(shareLinks.id, params.id),
-				columns: { id: true, orgId: true, revokedAt: true },
+				columns: { id: true, orgId: true, teamId: true, revokedAt: true },
 			});
 			if (!shareLink) {
 				set.status = 404;
@@ -323,11 +308,12 @@ export const shareLinkRoutes = new Elysia({ name: "share-link-routes" })
 				return createForbiddenPayload(requestId);
 			}
 
-			const canAccess = await checkOrgMembership(
-				db,
-				shareLink.orgId,
-				localUserId,
-			);
+			const evidencePolicy = createEvidencePolicy();
+			const canAccess = await evidencePolicy.canShareEvidence(db, {
+				organizationId: shareLink.orgId,
+				teamId: shareLink.teamId,
+				userId: localUserId,
+			});
 			if (!canAccess) {
 				set.status = 403;
 				return createForbiddenPayload(requestId);

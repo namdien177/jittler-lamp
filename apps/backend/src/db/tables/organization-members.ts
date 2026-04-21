@@ -1,6 +1,4 @@
-import { sql } from "drizzle-orm";
 import {
-	check,
 	index,
 	integer,
 	sqliteTable,
@@ -13,7 +11,8 @@ import { createUuidV7 } from "../uuid";
 import { organizations } from "./organizations";
 import { users } from "./users";
 
-export const organizationRoleSchema = z.enum(["owner", "member"]);
+export const defaultOrganizationRoles = ["owner", "member"] as const;
+export const organizationRoleSchema = z.string().trim().min(1);
 export type OrganizationRole = z.infer<typeof organizationRoleSchema>;
 
 export const organizationMembers = sqliteTable(
@@ -28,6 +27,7 @@ export const organizationMembers = sqliteTable(
 		userId: text("user_id")
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
+		teamId: text("team_id"),
 		role: text("role").$type<OrganizationRole>().notNull().default("member"),
 		createdAt: integer("created_at")
 			.notNull()
@@ -39,10 +39,7 @@ export const organizationMembers = sqliteTable(
 			table.userId,
 		),
 		index("organization_members_user_id_idx").on(table.userId),
-		check(
-			"organization_members_role_check",
-			sql`${table.role} in ('owner', 'member')`,
-		),
+		index("organization_members_team_id_idx").on(table.teamId),
 	],
 );
 
