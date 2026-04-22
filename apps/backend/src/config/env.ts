@@ -21,6 +21,7 @@ const envSchema = z
 		LOG_LEVEL: z
 			.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
 			.optional(),
+		CLERK_PUBLISHABLE_KEY: z.string().min(1).optional(),
 		CLERK_SECRET_KEY: z.string().min(1).optional(),
 		CLERK_JWT_KEY: z.string().min(1).optional(),
 		CLERK_AUDIENCE: z.string().min(1).optional(),
@@ -33,6 +34,50 @@ const envSchema = z
 				path: ["APP_SECRET"],
 				message: "APP_SECRET is required in production",
 			});
+		}
+
+		if (env.DATABASE_URL?.startsWith("libsql://") && !env.TURSO_AUTH_TOKEN) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["TURSO_AUTH_TOKEN"],
+				message: "TURSO_AUTH_TOKEN is required for remote libSQL/Turso URLs",
+			});
+		}
+
+		const clerkConfigured = Boolean(
+			env.CLERK_PUBLISHABLE_KEY || env.CLERK_SECRET_KEY || env.CLERK_JWT_KEY,
+		);
+		if (!clerkConfigured) {
+			return;
+		}
+
+		if (!env.CLERK_SECRET_KEY && !env.CLERK_JWT_KEY) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["CLERK_SECRET_KEY"],
+				message:
+					"CLERK_SECRET_KEY or CLERK_JWT_KEY is required when Clerk auth is configured",
+			});
+		}
+
+		if (env.NODE_ENV === "staging" || env.NODE_ENV === "production") {
+			if (!env.CLERK_PUBLISHABLE_KEY) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["CLERK_PUBLISHABLE_KEY"],
+					message:
+						"CLERK_PUBLISHABLE_KEY is required in staging/production when Clerk auth is enabled",
+				});
+			}
+
+			if (!env.CLERK_AUTHORIZED_PARTIES) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["CLERK_AUTHORIZED_PARTIES"],
+					message:
+						"CLERK_AUTHORIZED_PARTIES is required in staging/production when Clerk auth is enabled",
+				});
+			}
 		}
 	});
 

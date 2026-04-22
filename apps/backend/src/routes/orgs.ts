@@ -1,68 +1,63 @@
 import { Elysia, t } from "elysia";
 
-import { authContext } from "../middleware/auth-context";
+import {
+	apiErrorSchema,
+	createApiError,
+	createDbUnavailableError,
+} from "../http/api-error";
+import type { ClerkAuthPlugin } from "../plugins/clerk-auth";
 import { selectActiveOrganizationForClerkUser } from "../services/active-organization";
-import type { BackendDb } from "../services/user-provisioning";
 
-export const organizationRoutes = new Elysia({ name: "organization-routes" })
-	.use(authContext)
-	.post(
-		"/orgs/:orgId/select-active",
-		async ({ authContext, params, set, store, ...ctx }) => {
-			const requestId = (ctx as { requestId?: string }).requestId;
-			if (!authContext.userId) {
-				set.status = 401;
-				return {
-					error: {
-						code: "AUTH_UNAUTHENTICATED",
-						message: "Authentication required",
-						status: 401,
-						requestId: requestId ?? null,
+const selectActiveOrganizationResponseSchema = t.Object({
+	organizationId: t.String({ minLength: 1 }),
+});
+
+export const createOrganizationRoutes = (auth: ClerkAuthPlugin) =>
+	new Elysia({ name: "organization-routes" })
+		.use(auth)
+		.guard({ auth: true }, (app) =>
+			app.post(
+				"/orgs/:orgId/select-active",
+				async ({ authContext, db, params, requestId, set }) => {
+					if (!db) {
+						set.status = 503;
+						return createDbUnavailableError(requestId);
+					}
+
+					const selected = await selectActiveOrganizationForClerkUser(
+						db,
+						authContext.userId,
+						params.orgId,
+					);
+					if (!selected) {
+						set.status = 403;
+						return createApiError(
+							requestId,
+							"ORG_MEMBERSHIP_REQUIRED",
+							"Selected organization must be a member organization",
+							403,
+						);
+					}
+
+					return {
+						organizationId: selected.organizationId,
+					};
+				},
+				{
+					params: t.Object({
+						orgId: t.String({ minLength: 1 }),
+					}),
+					detail: {
+						tags: ["orgs"],
+						summary: "Select active organization for authenticated user",
 					},
-				};
-			}
-
-			const db = (store as { db?: BackendDb }).db;
-			if (!db) {
-				set.status = 500;
-				return {
-					error: {
-						code: "DB_UNAVAILABLE",
-						message: "Database is unavailable",
-						status: 500,
-						requestId: requestId ?? null,
+					response: {
+						200: selectActiveOrganizationResponseSchema,
+						401: apiErrorSchema,
+						403: apiErrorSchema,
+						500: apiErrorSchema,
+						503: apiErrorSchema,
 					},
-				};
-			}
-
-			const selected = await selectActiveOrganizationForClerkUser(
-				db,
-				authContext.userId,
-				params.orgId,
-			);
-			if (!selected) {
-				set.status = 403;
-				return {
-					error: {
-						code: "ORG_MEMBERSHIP_REQUIRED",
-						message: "Selected organization must be a member organization",
-						status: 403,
-						requestId: requestId ?? null,
-					},
-				};
-			}
-
-			return {
-				organizationId: selected.organizationId,
-			};
-		},
-		{
-			params: t.Object({
-				orgId: t.String({ minLength: 1 }),
-			}),
-			detail: {
-				tags: ["orgs"],
-				summary: "Select active organization for authenticated user",
-			},
-		},
-	);
+				},
+			),
+		);

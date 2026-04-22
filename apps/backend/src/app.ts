@@ -1,62 +1,69 @@
-import { swagger } from "@elysiajs/swagger";
+import { openapi } from "@elysiajs/openapi";
 import { Elysia } from "elysia";
 
 import { parseEnv } from "./config/env";
 import { buildRuntimeConfig } from "./config/runtime";
 import { createDb } from "./db";
-import { errorNormalizer } from "./middleware/error-normalizer";
-import { requestContext } from "./middleware/request-context";
-import { clerkProvisioningReplayRoute, clerkRoutes } from "./routes/clerk";
-import { evidenceUploadRoutes } from "./routes/evidence-uploads";
-import { evidenceRoutes } from "./routes/evidences";
-import { healthRoutes } from "./routes/health";
-import { organizationRoutes } from "./routes/orgs";
-import { protectedRoutes } from "./routes/protected";
-import { shareLinkRoutes } from "./routes/share-links";
+import { createClerkAuthPlugin } from "./plugins/clerk-auth";
+import { createCorePlugin } from "./plugins/core";
+import { createClerkRoutes } from "./routes/clerk";
+import { createEvidenceUploadRoutes } from "./routes/evidence-uploads";
+import { createEvidenceRoutes } from "./routes/evidences";
+import { createHealthRoutes } from "./routes/health";
+import { createOrganizationRoutes } from "./routes/orgs";
+import { createProtectedRoutes } from "./routes/protected";
+import { createShareLinkRoutes } from "./routes/share-links";
 import { createLogger } from "./utils/logger";
 
-export const createApp = (source = process.env) => {
+export const createApp = (
+	source: Record<string, string | undefined> = process.env,
+) => {
 	const env = parseEnv(source);
 	const runtime = buildRuntimeConfig(env);
 	const logger = createLogger(runtime.logLevel);
 	const db = createDb(runtime.databaseUrl, runtime.tursoAuthToken);
 
-	const app = new Elysia()
-		.decorate("logger", logger)
-		.state({ runtime, db })
-		.use(requestContext)
-		.use(errorNormalizer)
-		.onRequest(({ request, logger: requestLogger }) => {
-			requestLogger.info(
-				{
-					method: request.method,
-					path: new URL(request.url).pathname,
-				},
-				"request received",
-			);
-		})
-		.use(healthRoutes)
-		.use(clerkRoutes)
-		.use(clerkProvisioningReplayRoute)
-		.use(evidenceUploadRoutes)
-		.use(evidenceRoutes)
-		.use(shareLinkRoutes)
-		.use(organizationRoutes)
-		.use(protectedRoutes);
+	const core = createCorePlugin({ runtime, db, logger });
+	const auth = createClerkAuthPlugin(core);
 
-	if (runtime.enableSwagger) {
+	const app = new Elysia().use(core);
+
+	if (runtime.enableOpenApi) {
 		app.use(
-			swagger({
+			openapi({
+				path: "/docs",
+				specPath: "/docs/json",
 				documentation: {
 					info: {
 						title: "Jittle Lamp Backend API",
 						version: runtime.version,
 					},
+					components: {
+						securitySchemes: {
+							clerkSession: {
+								type: "http",
+								scheme: "bearer",
+								bearerFormat: "JWT",
+								description:
+									"Clerk session token provided by Authorization header or session cookie",
+							},
+						},
+					},
 				},
-				path: "/docs",
 			}),
 		);
 	}
 
+	app
+		.use(createHealthRoutes(core))
+		.use(createClerkRoutes(auth))
+		.use(createEvidenceUploadRoutes(auth))
+		.use(createEvidenceRoutes(auth))
+		.use(createShareLinkRoutes(auth))
+		.use(createOrganizationRoutes(auth))
+		.use(createProtectedRoutes(auth));
+
 	return { app, runtime, logger, db };
 };
+
+export type App = ReturnType<typeof createApp>["app"];

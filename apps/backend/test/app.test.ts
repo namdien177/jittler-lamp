@@ -45,6 +45,8 @@ type AuthFixture = {
 	jwtKey: string;
 };
 
+const TEST_APP_SECRET = "123456789012345678901234";
+
 let authFixturePromise: Promise<AuthFixture> | null = null;
 const getAuthFixture = async (): Promise<AuthFixture> => {
 	if (!authFixturePromise) {
@@ -58,6 +60,38 @@ const getAuthFixture = async (): Promise<AuthFixture> => {
 	}
 
 	return authFixturePromise;
+};
+
+const createTestEnv = (
+	overrides: Record<string, string | undefined> = {},
+): Record<string, string | undefined> => ({
+	NODE_ENV: "development",
+	APP_VERSION: "9.9.9",
+	APP_SECRET: TEST_APP_SECRET,
+	...overrides,
+});
+
+const expectApiError = async (
+	response: Response,
+	expected: {
+		code: string;
+		message: string;
+		status: number;
+	},
+) => {
+	const payload = (await response.json()) as {
+		error: {
+			code: string;
+			message: string;
+			status: number;
+			requestId: unknown;
+		};
+	};
+
+	expect(payload.error.code).toBe(expected.code);
+	expect(payload.error.message).toBe(expected.message);
+	expect(payload.error.status).toBe(expected.status);
+	expect(payload.error.requestId).toBeString();
 };
 
 describe("env validation", () => {
@@ -82,15 +116,37 @@ describe("env validation", () => {
 			}),
 		).not.toThrow();
 	});
+
+	it("requires full Clerk request-auth config in staging", () => {
+		expect(() =>
+			parseEnv({
+				NODE_ENV: "staging",
+				PORT: "3001",
+				HOST: "127.0.0.1",
+				APP_VERSION: "1.0.0",
+				APP_SECRET: TEST_APP_SECRET,
+				CLERK_SECRET_KEY: "sk_test_example",
+			}),
+		).toThrow();
+	});
+
+	it("requires Turso auth token for remote libsql URLs", () => {
+		expect(() =>
+			parseEnv({
+				NODE_ENV: "development",
+				PORT: "3001",
+				HOST: "127.0.0.1",
+				APP_VERSION: "1.0.0",
+				APP_SECRET: TEST_APP_SECRET,
+				DATABASE_URL: "libsql://example.turso.io",
+			}),
+		).toThrow();
+	});
 });
 
 describe("routes", () => {
 	it("emits x-request-id header on 404 responses", async () => {
-		const { app } = createApp({
-			NODE_ENV: "development",
-			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
-		});
+		const { app } = createApp(createTestEnv());
 
 		const response = await app.handle(
 			new Request("http://localhost/does-not-exist"),
@@ -101,11 +157,7 @@ describe("routes", () => {
 	});
 
 	it("returns version payload", async () => {
-		const { app } = createApp({
-			NODE_ENV: "development",
-			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
-		});
+		const { app } = createApp(createTestEnv());
 
 		const response = await app.handle(new Request("http://localhost/version"));
 
@@ -116,25 +168,56 @@ describe("routes", () => {
 		});
 	});
 
+	it("serves OpenAPI JSON in development", async () => {
+		const { app } = createApp(createTestEnv());
+
+		const response = await app.handle(
+			new Request("http://localhost/docs/json"),
+		);
+
+		expect(response.status).toBe(200);
+		const payload = (await response.json()) as {
+			info: { version: string };
+			paths: Record<string, unknown>;
+		};
+		expect(payload.info.version).toBe("9.9.9");
+		expect(payload.paths["/protected/me"]).toBeDefined();
+	});
+
 	it("blocks protected routes without an auth token", async () => {
-		const { app } = createApp({
-			NODE_ENV: "development",
-			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
-		});
+		const { app } = createApp(createTestEnv());
 
 		const response = await app.handle(
 			new Request("http://localhost/protected/me"),
 		);
 
 		expect(response.status).toBe(401);
-		expect(await response.json()).toEqual({
-			error: {
-				code: "AUTH_UNAUTHENTICATED",
-				message: "Authentication required",
-				status: 401,
-				requestId: null,
-			},
+		await expectApiError(response, {
+			code: "AUTH_UNAUTHENTICATED",
+			message: "Authentication required",
+			status: 401,
+		});
+	});
+
+	it("rejects invalid auth tokens", async () => {
+		const { app } = createApp(
+			createTestEnv({
+				CLERK_JWT_KEY:
+					"-----BEGIN PUBLIC KEY-----\ninvalid\n-----END PUBLIC KEY-----",
+			}),
+		);
+
+		const response = await app.handle(
+			new Request("http://localhost/protected/me", {
+				headers: { authorization: "Bearer invalid-token" },
+			}),
+		);
+
+		expect(response.status).toBe(401);
+		await expectApiError(response, {
+			code: "AUTH_INVALID_TOKEN",
+			message: "Invalid or expired auth token",
+			status: 401,
 		});
 	});
 
@@ -148,13 +231,12 @@ describe("routes", () => {
 			.setExpirationTime("5m")
 			.sign(privateKey);
 
-		const { app } = createApp({
-			NODE_ENV: "development",
-			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
-			CLERK_JWT_KEY: jwtKey,
-			CLERK_AUDIENCE: "test-audience",
-		});
+		const { app } = createApp(
+			createTestEnv({
+				CLERK_JWT_KEY: jwtKey,
+				CLERK_AUDIENCE: "test-audience",
+			}),
+		);
 
 		const response = await app.handle(
 			new Request("http://localhost/protected/me", {
@@ -210,7 +292,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -237,13 +319,10 @@ describe("routes", () => {
 		);
 
 		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({
-			error: {
-				code: "EVIDENCE_UPLOAD_CLIENT_ORG_FORBIDDEN",
-				message: "Client-provided orgId is not allowed",
-				status: 400,
-				requestId: null,
-			},
+		await expectApiError(response, {
+			code: "EVIDENCE_UPLOAD_CLIENT_ORG_FORBIDDEN",
+			message: "Client-provided orgId is not allowed",
+			status: 400,
 		});
 	});
 
@@ -276,7 +355,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -393,7 +472,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -439,13 +518,10 @@ describe("routes", () => {
 		);
 
 		expect(completeResponse.status).toBe(409);
-		expect(await completeResponse.json()).toEqual({
-			error: {
-				code: "UPLOAD_BLOB_MISSING",
-				message: "Upload blob was not found; upload binary before completing",
-				status: 409,
-				requestId: null,
-			},
+		await expectApiError(completeResponse, {
+			code: "UPLOAD_BLOB_MISSING",
+			message: "Upload blob was not found; upload binary before completing",
+			status: 409,
 		});
 	});
 
@@ -479,7 +555,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -525,13 +601,10 @@ describe("routes", () => {
 			),
 		);
 		expect(blobResponse.status).toBe(410);
-		expect(await blobResponse.json()).toEqual({
-			error: {
-				code: "UPLOAD_SESSION_EXPIRED",
-				message: "Upload session has expired; start a new upload",
-				status: 410,
-				requestId: null,
-			},
+		await expectApiError(blobResponse, {
+			code: "UPLOAD_SESSION_EXPIRED",
+			message: "Upload session has expired; start a new upload",
+			status: 410,
 		});
 
 		const completeResponse = await app.handle(
@@ -552,13 +625,10 @@ describe("routes", () => {
 			),
 		);
 		expect(completeResponse.status).toBe(410);
-		expect(await completeResponse.json()).toEqual({
-			error: {
-				code: "UPLOAD_SESSION_EXPIRED",
-				message: "Upload session has expired; start a new upload",
-				status: 410,
-				requestId: null,
-			},
+		await expectApiError(completeResponse, {
+			code: "UPLOAD_SESSION_EXPIRED",
+			message: "Upload session has expired; start a new upload",
+			status: 410,
 		});
 	});
 
@@ -669,7 +739,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -704,13 +774,10 @@ describe("routes", () => {
 			),
 		);
 		expect(outsiderSelectResponse.status).toBe(403);
-		expect(await outsiderSelectResponse.json()).toEqual({
-			error: {
-				code: "ORG_MEMBERSHIP_REQUIRED",
-				message: "Selected organization must be a member organization",
-				status: 403,
-				requestId: null,
-			},
+		await expectApiError(outsiderSelectResponse, {
+			code: "ORG_MEMBERSHIP_REQUIRED",
+			message: "Selected organization must be a member organization",
+			status: 403,
 		});
 
 		const startResponse = await app.handle(
@@ -794,7 +861,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -830,13 +897,10 @@ describe("routes", () => {
 			),
 		);
 		expect(outsiderResolve.status).toBe(403);
-		expect(await outsiderResolve.json()).toEqual({
-			error: {
-				code: "SHARE_LINK_FORBIDDEN",
-				message: "You do not have access to this evidence share link",
-				status: 403,
-				requestId: null,
-			},
+		await expectApiError(outsiderResolve, {
+			code: "SHARE_LINK_FORBIDDEN",
+			message: "You do not have access to this evidence share link",
+			status: 403,
 		});
 
 		const ownerResolve = await app.handle(
@@ -922,7 +986,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -955,13 +1019,10 @@ describe("routes", () => {
 			),
 		);
 		expect(resolveResponse.status).toBe(404);
-		expect(await resolveResponse.json()).toEqual({
-			error: {
-				code: "SHARE_LINK_NOT_FOUND",
-				message: "Share link is invalid, expired, or revoked",
-				status: 404,
-				requestId: null,
-			},
+		await expectApiError(resolveResponse, {
+			code: "SHARE_LINK_NOT_FOUND",
+			message: "Share link is invalid, expired, or revoked",
+			status: 404,
 		});
 	});
 
@@ -1040,7 +1101,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});
@@ -1057,13 +1118,10 @@ describe("routes", () => {
 		);
 
 		expect(response.status).toBe(403);
-		expect(await response.json()).toEqual({
-			error: {
-				code: "EVIDENCE_MOVE_FORBIDDEN",
-				message: "Only permitted creators can move this evidence",
-				status: 403,
-				requestId: null,
-			},
+		await expectApiError(response, {
+			code: "EVIDENCE_MOVE_FORBIDDEN",
+			message: "Only permitted creators can move this evidence",
+			status: 403,
 		});
 	});
 
@@ -1146,7 +1204,7 @@ describe("routes", () => {
 			NODE_ENV: "development",
 			DATABASE_URL: databaseUrl,
 			APP_VERSION: "9.9.9",
-			APP_SECRET: "123456789012345678901234",
+			APP_SECRET: TEST_APP_SECRET,
 			CLERK_JWT_KEY: jwtKey,
 			CLERK_AUDIENCE: "test-audience",
 		});

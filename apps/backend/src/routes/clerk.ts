@@ -1,122 +1,120 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 
-import { authContext } from "../middleware/auth-context";
-import type { BackendDb } from "../services/user-provisioning";
+import {
+	apiErrorSchema,
+	createApiError,
+	createDbUnavailableError,
+} from "../http/api-error";
+import type { ClerkAuthPlugin } from "../plugins/clerk-auth";
 import {
 	ensureUserAndPersonalOrganization,
 	retryFailedProvisioning,
 } from "../services/user-provisioning";
 
-export const clerkRoutes = new Elysia({ name: "clerk-routes" })
-	.use(authContext)
-	.post(
-		"/clerk/callback",
-		async ({ authContext, store, set }) => {
-			const state = store as { db: BackendDb | null };
+const provisioningResultSchema = t.Object({
+	eventId: t.Union([t.String({ minLength: 1 }), t.Null()]),
+	userId: t.String({ minLength: 1 }),
+	clerkUserId: t.String({ minLength: 1 }),
+	organizationId: t.String({ minLength: 1 }),
+	membershipRole: t.Literal("owner"),
+});
 
-			if (!authContext.userId) {
-				set.status = 401;
-				return {
-					error: {
-						code: "AUTH_UNAUTHENTICATED",
-						message: "Authentication required",
-						status: 401,
-					},
-				};
-			}
+const provisioningResponseSchema = t.Object({
+	ok: t.Literal(true),
+	provisioned: provisioningResultSchema,
+});
 
-			if (!state.db) {
-				set.status = 503;
-				return {
-					error: {
-						code: "DB_NOT_CONFIGURED",
-						message:
+export const createClerkRoutes = (auth: ClerkAuthPlugin) =>
+	new Elysia({ name: "clerk-routes" }).use(auth).guard({ auth: true }, (app) =>
+		app
+			.post(
+				"/clerk/callback",
+				async ({ authContext, db, requestId, set }) => {
+					if (!db) {
+						set.status = 503;
+						return createApiError(
+							requestId,
+							"DB_NOT_CONFIGURED",
 							"DATABASE_URL is not configured. Cannot provision user workspace.",
-						status: 503,
-					},
-				};
-			}
+							503,
+						);
+					}
 
-			const provisioned = await ensureUserAndPersonalOrganization(state.db, {
-				clerkUserId: authContext.userId,
-				source: "clerk-callback",
-				rawPayload: {
-					userId: authContext.userId,
-					orgId: authContext.orgId,
-					roles: authContext.roles,
-					scopes: authContext.scopes,
+					const provisioned = await ensureUserAndPersonalOrganization(db, {
+						clerkUserId: authContext.userId,
+						source: "clerk-callback",
+						rawPayload: {
+							userId: authContext.userId,
+							orgId: authContext.orgId,
+							roles: authContext.roles,
+							scopes: authContext.scopes,
+						},
+					});
+
+					return {
+						ok: true,
+						provisioned,
+					};
 				},
-			});
-
-			return {
-				ok: true,
-				provisioned,
-			};
-		},
-		{
-			detail: {
-				tags: ["clerk"],
-				summary:
-					"Clerk callback hook for ensuring local user + personal organization",
-			},
-		},
-	);
-
-export const clerkProvisioningReplayRoute = new Elysia({
-	name: "clerk-provisioning-replay-route",
-})
-	.use(authContext)
-	.post(
-		"/clerk/callback/retry/:eventId",
-		async ({ authContext, params, store, set }) => {
-			const state = store as { db: BackendDb | null };
-
-			if (!authContext.userId) {
-				set.status = 401;
-				return {
-					error: {
-						code: "AUTH_UNAUTHENTICATED",
-						message: "Authentication required",
-						status: 401,
+				{
+					detail: {
+						tags: ["clerk"],
+						summary:
+							"Ensures the authenticated Clerk user has a local user and personal organization",
 					},
-				};
-			}
-
-			if (!state.db) {
-				set.status = 503;
-				return {
-					error: {
-						code: "DB_NOT_CONFIGURED",
-						message:
+					response: {
+						200: provisioningResponseSchema,
+						401: apiErrorSchema,
+						500: apiErrorSchema,
+						503: apiErrorSchema,
+					},
+				},
+			)
+			.post(
+				"/clerk/callback/retry/:eventId",
+				async ({ authContext, db, params, requestId, set }) => {
+					if (!db) {
+						set.status = 503;
+						return createDbUnavailableError(
+							requestId,
 							"DATABASE_URL is not configured. Cannot retry provisioning.",
-						status: 503,
-					},
-				};
-			}
+						);
+					}
 
-			try {
-				const provisioned = await retryFailedProvisioning(
-					state.db,
-					params.eventId,
-					authContext.userId,
-				);
-				return { ok: true, provisioned };
-			} catch (error) {
-				set.status = 400;
-				return {
-					error: {
-						code: "PROVISIONING_RETRY_FAILED",
-						message: error instanceof Error ? error.message : "Retry failed",
-						status: 400,
+					try {
+						const provisioned = await retryFailedProvisioning(
+							db,
+							params.eventId,
+							authContext.userId,
+						);
+
+						return { ok: true, provisioned };
+					} catch (error) {
+						set.status = 400;
+						return createApiError(
+							requestId,
+							"PROVISIONING_RETRY_FAILED",
+							error instanceof Error ? error.message : "Retry failed",
+							400,
+						);
+					}
+				},
+				{
+					params: t.Object({
+						eventId: t.String({ minLength: 1 }),
+					}),
+					detail: {
+						tags: ["clerk"],
+						summary:
+							"Replays a failed provisioning event for the authenticated Clerk user",
 					},
-				};
-			}
-		},
-		{
-			detail: {
-				tags: ["clerk"],
-				summary:
-					"Replay a failed provisioning event for a Clerk-authenticated user",
-			},
-		},
+					response: {
+						200: provisioningResponseSchema,
+						400: apiErrorSchema,
+						401: apiErrorSchema,
+						500: apiErrorSchema,
+						503: apiErrorSchema,
+					},
+				},
+			),
 	);

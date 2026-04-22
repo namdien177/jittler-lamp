@@ -2,12 +2,12 @@ import type { AppEnv, NodeEnv } from "./env";
 
 const defaultsByEnv: Record<
 	NodeEnv,
-	{ logLevel: AppEnv["LOG_LEVEL"]; enableSwagger: boolean }
+	{ logLevel: AppEnv["LOG_LEVEL"]; enableOpenApi: boolean }
 > = {
-	local: { logLevel: "debug", enableSwagger: true },
-	development: { logLevel: "debug", enableSwagger: true },
-	staging: { logLevel: "info", enableSwagger: false },
-	production: { logLevel: "info", enableSwagger: false },
+	local: { logLevel: "debug", enableOpenApi: true },
+	development: { logLevel: "debug", enableOpenApi: true },
+	staging: { logLevel: "info", enableOpenApi: false },
+	production: { logLevel: "info", enableOpenApi: false },
 };
 
 export type RuntimeConfig = {
@@ -20,7 +20,8 @@ export type RuntimeConfig = {
 	runDbMigrations: boolean;
 	tursoAuthToken: string | undefined;
 	logLevel: Exclude<NonNullable<AppEnv["LOG_LEVEL"]>, "silent">;
-	enableSwagger: boolean;
+	enableOpenApi: boolean;
+	clerkPublishableKey: string | undefined;
 	clerkSecretKey: string | undefined;
 	clerkJwtKey: string | undefined;
 	clerkAudience: string | undefined;
@@ -80,7 +81,8 @@ export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
 		runDbMigrations: parseBooleanFlag(env.RUN_DB_MIGRATIONS, false),
 		tursoAuthToken: env.TURSO_AUTH_TOKEN,
 		logLevel: resolvedLogLevel === "silent" ? "info" : resolvedLogLevel,
-		enableSwagger: defaults.enableSwagger,
+		enableOpenApi: defaults.enableOpenApi,
+		clerkPublishableKey: env.CLERK_PUBLISHABLE_KEY,
 		clerkSecretKey: env.CLERK_SECRET_KEY,
 		clerkJwtKey: env.CLERK_JWT_KEY,
 		clerkAudience: env.CLERK_AUDIENCE,
