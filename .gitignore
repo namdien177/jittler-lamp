@@ -8,3 +8,9 @@ coverage/
 *.tsbuildinfo
 release-artifacts/
 .idea
+**/.env
+**/.env.*
+*.pem
+*.key
+*.crt
+*.p12
