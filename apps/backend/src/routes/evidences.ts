@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import {
@@ -116,6 +116,7 @@ export const createEvidenceRoutes = (auth: ClerkAuthPlugin) =>
 							where: and(
 								eq(organizationMembers.organizationId, body.targetOrgId),
 								eq(organizationMembers.userId, authContext.localUserId),
+								isNull(organizationMembers.teamId),
 							),
 							columns: { id: true },
 						});

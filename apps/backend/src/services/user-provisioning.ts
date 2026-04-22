@@ -191,12 +191,7 @@ export const processProvisioningEvent = async (
 			await tx
 				.insert(organizationMembers)
 				.values(membership)
-				.onConflictDoNothing({
-					target: [
-						organizationMembers.organizationId,
-						organizationMembers.userId,
-					],
-				});
+				.onConflictDoNothing();
 
 			await tx
 				.update(users)

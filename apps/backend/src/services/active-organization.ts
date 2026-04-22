@@ -106,9 +106,7 @@ export const resolveActiveOrganizationForClerkUser = async (
 			userId: localUser.id,
 			role: "owner",
 		})
-		.onConflictDoNothing({
-			target: [organizationMembers.organizationId, organizationMembers.userId],
-		});
+		.onConflictDoNothing();
 
 	await db
 		.update(users)

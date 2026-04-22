@@ -1,20 +1,31 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { organizationMembers } from "../db/schema";
 
 import type { BackendDb } from "./user-provisioning";
 
-type TeamPolicyContext = {
+type TeamEvidenceAccessPolicyContext = {
 	organizationId: string;
-	teamId: string | null;
+	teamId: string;
 	userId: string;
-	action: "view" | "share" | "move";
 };
 
 type TeamPolicyAdapter = {
-	canViewEvidence?: (context: TeamPolicyContext) => Promise<boolean>;
-	canShareEvidence?: (context: TeamPolicyContext) => Promise<boolean>;
-	canMoveEvidence?: (context: TeamPolicyContext) => Promise<boolean>;
+	canViewEvidence: (
+		context: TeamEvidenceAccessPolicyContext,
+	) => Promise<boolean>;
+	canShareEvidence: (
+		context: TeamEvidenceAccessPolicyContext,
+	) => Promise<boolean>;
+	canMoveEvidence: (
+		context: EvidenceMoveContext & { teamId: string },
+	) => Promise<boolean>;
+};
+
+const defaultTeamPolicyAdapter: TeamPolicyAdapter = {
+	canViewEvidence: async () => true,
+	canShareEvidence: async () => true,
+	canMoveEvidence: async () => true,
 };
 
 export type EvidencePolicyDeps = {
@@ -35,29 +46,40 @@ export type EvidenceMoveContext = EvidenceAccessContext & {
 };
 
 const authorizeTeamAction = async (
-	teamPolicyAdapter: TeamPolicyAdapter | undefined,
-	action: TeamPolicyContext["action"],
+	teamPolicyAdapter: TeamPolicyAdapter,
+	action: "view" | "share",
 	context: EvidenceAccessContext,
 ): Promise<boolean> => {
 	if (!context.teamId) {
 		return true;
 	}
 
-	const teamContext: TeamPolicyContext = {
+	const teamContext: TeamEvidenceAccessPolicyContext = {
 		organizationId: context.organizationId,
 		teamId: context.teamId,
 		userId: context.userId,
-		action,
 	};
 
 	switch (action) {
 		case "view":
-			return (await teamPolicyAdapter?.canViewEvidence?.(teamContext)) ?? true;
+			return teamPolicyAdapter.canViewEvidence(teamContext);
 		case "share":
-			return (await teamPolicyAdapter?.canShareEvidence?.(teamContext)) ?? true;
-		case "move":
-			return (await teamPolicyAdapter?.canMoveEvidence?.(teamContext)) ?? true;
+			return teamPolicyAdapter.canShareEvidence(teamContext);
 	}
+};
+
+const authorizeTeamMoveAction = async (
+	teamPolicyAdapter: TeamPolicyAdapter,
+	context: EvidenceMoveContext,
+): Promise<boolean> => {
+	if (!context.teamId) {
+		return true;
+	}
+
+	return teamPolicyAdapter.canMoveEvidence({
+		...context,
+		teamId: context.teamId,
+	});
 };
 
 const hasOrgMembership = async (
@@ -69,6 +91,7 @@ const hasOrgMembership = async (
 		where: and(
 			eq(organizationMembers.organizationId, organizationId),
 			eq(organizationMembers.userId, userId),
+			isNull(organizationMembers.teamId),
 		),
 		columns: { id: true },
 	});
@@ -85,6 +108,7 @@ const resolveSourceMembershipRole = async (
 		where: and(
 			eq(organizationMembers.organizationId, organizationId),
 			eq(organizationMembers.userId, userId),
+			isNull(organizationMembers.teamId),
 		),
 		columns: { role: true },
 	});
@@ -93,7 +117,7 @@ const resolveSourceMembershipRole = async (
 };
 
 export const createEvidencePolicy = (deps: EvidencePolicyDeps = {}) => {
-	const teamPolicyAdapter = deps.teamPolicyAdapter;
+	const teamPolicyAdapter = deps.teamPolicyAdapter ?? defaultTeamPolicyAdapter;
 
 	return {
 		canViewEvidence: async (
@@ -156,7 +180,7 @@ export const createEvidencePolicy = (deps: EvidencePolicyDeps = {}) => {
 				return false;
 			}
 
-			return authorizeTeamAction(teamPolicyAdapter, "move", context);
+			return authorizeTeamMoveAction(teamPolicyAdapter, context);
 		},
 	};
 };
