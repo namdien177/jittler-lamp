@@ -808,6 +808,53 @@ describe("routes", () => {
 		expect(evidence?.orgId).toBe(teamOrganization.id);
 	});
 
+	it("returns persisted active org for already-provisioned users", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const provisioned = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_existing_active_org",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_existing_active_org" },
+		});
+
+		const [teamOrganization] = await db
+			.insert(organizations)
+			.values({ name: "Team Persisted Active Org", isPersonal: false })
+			.returning({ id: organizations.id });
+		if (!teamOrganization) {
+			throw new Error("Failed to create team organization");
+		}
+
+		await db.insert(organizationMembers).values({
+			organizationId: teamOrganization.id,
+			userId: provisioned.userId,
+			role: "member",
+		});
+
+		await db
+			.update(users)
+			.set({ activeOrgId: teamOrganization.id, updatedAt: Date.now() })
+			.where(eq(users.id, provisioned.userId));
+
+		const existing = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_existing_active_org",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_existing_active_org" },
+		});
+
+		expect(existing.eventId).toBeNull();
+		expect(existing.userId).toBe(provisioned.userId);
+		expect(existing.organizationId).toBe(provisioned.organizationId);
+		expect(existing.activeOrgId).toBe(teamOrganization.id);
+	});
+
 	it("filters evidence list/load to active org unless explicit member org query is provided", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
 		await applyMigrations(databaseUrl);
@@ -828,13 +875,23 @@ describe("routes", () => {
 			.insert(organizations)
 			.values({ name: "Team Beta", isPersonal: false })
 			.returning({ id: organizations.id });
-		if (!teamOrganization) {
-			throw new Error("Failed to create team organization");
+		const [teamOnlyOrganization] = await db
+			.insert(organizations)
+			.values({ name: "Team Gamma", isPersonal: false })
+			.returning({ id: organizations.id });
+		if (!teamOrganization || !teamOnlyOrganization) {
+			throw new Error("Failed to create team organizations");
 		}
 
 		await db.insert(organizationMembers).values({
 			organizationId: teamOrganization.id,
 			userId: provisioned.userId,
+			role: "member",
+		});
+		await db.insert(organizationMembers).values({
+			organizationId: teamOnlyOrganization.id,
+			userId: provisioned.userId,
+			teamId: crypto.randomUUID(),
 			role: "member",
 		});
 
@@ -937,6 +994,21 @@ describe("routes", () => {
 		expect(explicitTeamLoadPayload.evidence).toMatchObject({
 			id: teamEvidence.id,
 			orgId: teamOrganization.id,
+		});
+
+		const explicitTeamOnlyOrgList = await app.handle(
+			new Request(
+				`http://localhost/evidences?orgId=${encodeURIComponent(teamOnlyOrganization.id)}`,
+				{
+					headers: { authorization: `Bearer ${token}` },
+				},
+			),
+		);
+		expect(explicitTeamOnlyOrgList.status).toBe(403);
+		await expectApiError(explicitTeamOnlyOrgList, {
+			code: "ORG_MEMBERSHIP_REQUIRED",
+			message: "Selected organization must be a member organization",
+			status: 403,
 		});
 	});
 

@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import {
@@ -175,6 +175,7 @@ const resolveRequestedOrgId = async (args: {
 		where: and(
 			eq(organizationMembers.organizationId, args.requestedOrgId),
 			eq(organizationMembers.userId, workspace.localUserId),
+			isNull(organizationMembers.teamId),
 		),
 		columns: { id: true },
 	});

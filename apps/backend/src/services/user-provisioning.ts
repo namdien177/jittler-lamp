@@ -37,10 +37,10 @@ const findAlreadyProvisioned = async (db: BackendDb, clerkUserId: string) =>
 						columns: { id: true, isPersonal: true },
 					},
 				},
-				columns: { role: true, organizationId: true },
+				columns: { role: true, organizationId: true, teamId: true },
 			},
 		},
-		columns: { id: true, clerkUserId: true },
+		columns: { id: true, clerkUserId: true, activeOrgId: true },
 	});
 
 const writeProvisioningEvent = async (
@@ -258,12 +258,22 @@ export const ensureUserAndPersonalOrganization = async (
 		);
 
 		if (personalMembership) {
+			const persistedActiveOrgId = existing.activeOrgId;
+			const hasPersistedOrgScopeMembership =
+				persistedActiveOrgId !== null &&
+				existing.organizationMemberships.some(
+					(membership) =>
+						membership.organizationId === persistedActiveOrgId &&
+						membership.teamId === null,
+				);
 			return {
 				eventId: null,
 				userId: existing.id,
 				clerkUserId: existing.clerkUserId,
 				organizationId: personalMembership.organizationId,
-				activeOrgId: personalMembership.organizationId,
+				activeOrgId: hasPersistedOrgScopeMembership
+					? persistedActiveOrgId
+					: personalMembership.organizationId,
 				membershipRole: "owner" as const,
 			};
 		}
