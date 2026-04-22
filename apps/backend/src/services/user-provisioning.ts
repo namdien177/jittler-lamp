@@ -96,6 +96,7 @@ export const processProvisioningEvent = async (
 		const normalized = event.normalizedPayload
 			? (JSON.parse(event.normalizedPayload) as {
 					organizationId?: string;
+					activeOrgId?: string;
 					membershipRole?: "owner";
 				})
 			: {};
@@ -110,6 +111,7 @@ export const processProvisioningEvent = async (
 			userId: event.userId,
 			clerkUserId: event.clerkUserId,
 			organizationId: normalized.organizationId,
+			activeOrgId: normalized.activeOrgId ?? normalized.organizationId,
 			membershipRole: normalized.membershipRole ?? "owner",
 		};
 	}
@@ -208,6 +210,7 @@ export const processProvisioningEvent = async (
 				userId: localUser.id,
 				clerkUserId: localUser.clerkUserId,
 				organizationId,
+				activeOrgId: organizationId,
 				membershipRole: "owner" as const,
 			};
 		});
@@ -220,6 +223,7 @@ export const processProvisioningEvent = async (
 				normalizedPayload: JSON.stringify({
 					userId: result.userId,
 					organizationId: result.organizationId,
+					activeOrgId: result.activeOrgId,
 					membershipRole: result.membershipRole,
 				}),
 				processedAt: Date.now(),
@@ -259,6 +263,7 @@ export const ensureUserAndPersonalOrganization = async (
 				userId: existing.id,
 				clerkUserId: existing.clerkUserId,
 				organizationId: personalMembership.organizationId,
+				activeOrgId: personalMembership.organizationId,
 				membershipRole: "owner" as const,
 			};
 		}
