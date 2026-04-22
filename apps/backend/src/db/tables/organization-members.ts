@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	index,
 	integer,
@@ -34,10 +35,12 @@ export const organizationMembers = sqliteTable(
 			.$defaultFn(() => Date.now()),
 	},
 	(table) => [
-		uniqueIndex("organization_members_org_user_unique").on(
-			table.organizationId,
-			table.userId,
-		),
+		uniqueIndex("organization_members_org_user_org_scope_unique")
+			.on(table.organizationId, table.userId)
+			.where(sql`${table.teamId} is null`),
+		uniqueIndex("organization_members_org_user_team_unique")
+			.on(table.organizationId, table.userId, table.teamId)
+			.where(sql`${table.teamId} is not null`),
 		index("organization_members_user_id_idx").on(table.userId),
 		index("organization_members_team_id_idx").on(table.teamId),
 	],
@@ -46,5 +49,6 @@ export const organizationMembers = sqliteTable(
 export const createOrganizationMembershipInputSchema = z.object({
 	organizationId: z.string().uuid(),
 	userId: z.string().uuid(),
+	teamId: z.string().uuid().nullable().optional(),
 	role: organizationRoleSchema,
 });

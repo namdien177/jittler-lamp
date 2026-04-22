@@ -18,7 +18,9 @@ FROM `organization_members__old`;
 --> statement-breakpoint
 DROP TABLE `organization_members__old`;
 --> statement-breakpoint
-CREATE UNIQUE INDEX `organization_members_org_user_unique` ON `organization_members` (`organization_id`, `user_id`);
+CREATE UNIQUE INDEX `organization_members_org_user_org_scope_unique` ON `organization_members` (`organization_id`, `user_id`) WHERE `team_id` is null;
+--> statement-breakpoint
+CREATE UNIQUE INDEX `organization_members_org_user_team_unique` ON `organization_members` (`organization_id`, `user_id`, `team_id`) WHERE `team_id` is not null;
 --> statement-breakpoint
 CREATE INDEX `organization_members_user_id_idx` ON `organization_members` (`user_id`);
 --> statement-breakpoint
