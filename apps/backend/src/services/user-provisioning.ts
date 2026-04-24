@@ -195,7 +195,7 @@ export const processProvisioningEvent = async (
 				.values(membership)
 				.onConflictDoNothing();
 
-			await tx
+			const [updatedUser] = await tx
 				.update(users)
 				.set({
 					activeOrgId: sql`coalesce(
@@ -204,13 +204,20 @@ export const processProvisioningEvent = async (
                     )`,
 					updatedAt: Date.now(),
 				})
-				.where(eq(users.id, localUser.id));
+				.where(eq(users.id, localUser.id))
+				.returning({ activeOrgId: users.activeOrgId });
+
+			if (!updatedUser?.activeOrgId) {
+				throw new Error(
+					"Failed to resolve active organization after provisioning",
+				);
+			}
 
 			return {
 				userId: localUser.id,
 				clerkUserId: localUser.clerkUserId,
 				organizationId,
-				activeOrgId: organizationId,
+				activeOrgId: updatedUser.activeOrgId,
 				membershipRole: "owner" as const,
 			};
 		});
