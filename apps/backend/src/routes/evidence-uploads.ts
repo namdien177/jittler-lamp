@@ -163,17 +163,11 @@ const resolveRequestedOrgId = async (args: {
 		};
 	}
 
-	if (!args.requestedOrgId || args.requestedOrgId === workspace.activeOrgId) {
-		return {
-			ok: true,
-			orgId: workspace.activeOrgId,
-			localUserId: workspace.localUserId,
-		};
-	}
+	const resolvedOrgId = args.requestedOrgId ?? workspace.activeOrgId;
 
 	const membership = await args.db.query.organizationMembers.findFirst({
 		where: and(
-			eq(organizationMembers.organizationId, args.requestedOrgId),
+			eq(organizationMembers.organizationId, resolvedOrgId),
 			eq(organizationMembers.userId, workspace.localUserId),
 			isNull(organizationMembers.teamId),
 		),
@@ -194,7 +188,7 @@ const resolveRequestedOrgId = async (args: {
 
 	return {
 		ok: true,
-		orgId: args.requestedOrgId,
+		orgId: resolvedOrgId,
 		localUserId: workspace.localUserId,
 	};
 };

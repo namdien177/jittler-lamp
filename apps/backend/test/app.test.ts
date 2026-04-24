@@ -1010,6 +1010,23 @@ describe("routes", () => {
 			message: "Selected organization must be a member organization",
 			status: 403,
 		});
+
+		await db
+			.update(users)
+			.set({ activeOrgId: teamOnlyOrganization.id })
+			.where(eq(users.id, provisioned.userId));
+
+		const defaultTeamOnlyActiveOrgList = await app.handle(
+			new Request("http://localhost/evidences", {
+				headers: { authorization: `Bearer ${token}` },
+			}),
+		);
+		expect(defaultTeamOnlyActiveOrgList.status).toBe(403);
+		await expectApiError(defaultTeamOnlyActiveOrgList, {
+			code: "ORG_MEMBERSHIP_REQUIRED",
+			message: "Selected organization must be a member organization",
+			status: 403,
+		});
 	});
 
 	it("enforces internal-only share link resolution and revoke flow", async () => {
