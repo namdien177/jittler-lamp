@@ -187,8 +187,9 @@ describe("session contracts", () => {
         },
         target: {
           selector: "button > span",
-          selectorAlternates: ["#submit", "button[name=submit]"],
+          selectorAlternates: ['[data-testid="submit-label"]', "#submit", "button[name=submit]"],
           tagName: "span",
+          dataTestId: "submit-label",
           role: null,
           textPreview: "Submit",
           rect: { left: 20, top: 12, width: 100, height: 32 }
@@ -205,6 +206,7 @@ describe("session contracts", () => {
     }
 
     expect(action.payload.target?.rect?.width).toBe(100);
+    expect(action.payload.target?.dataTestId).toBe("submit-label");
     expect(action.payload.page?.scroll.y).toBe(120);
     expect(action.payload.modifiers?.shift).toBeTrue();
     expect(action.payload.pointerType).toBe("mouse");

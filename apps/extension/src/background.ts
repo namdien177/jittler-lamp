@@ -33,6 +33,7 @@ const pendingRecoveryTimeoutMs = 15_000;
 const pendingRecoveryAlarmPrefix = "jittle-lamp.pending-recovery.";
 
 const networkRequestsByTab = new Map<number, Map<string, NetworkRequestState>>();
+const webRequestFallbackTabIds = new Set<number>();
 const stoppingTabIds = new Set<number>();
 
 let draftMutationQueue = Promise.resolve();
@@ -68,6 +69,7 @@ type NetworkRequestState = {
   responseSetCookieHeaders?: string[];
   responseSetCookies?: NetworkSetCookie[];
   responseMimeType?: string;
+  requestBody?: NetworkBodyCapture;
   failureText?: string;
 };
 
@@ -248,6 +250,8 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   void queueDraftMutation(() => handleDebuggerDetach(source, reason));
 });
 
+registerWebRequestFallbackListeners();
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== "complete") {
     return;
@@ -334,7 +338,7 @@ async function startRecordingSession(): Promise<void> {
     await ensureRecordableTab(tab.id, "before content bridge");
     await ensureContentBridge(tab.id, draft.sessionId);
     await ensureRecordableTab(tab.id, "before debugger attach");
-    await attachDebugger(tab.id);
+    const debuggerAttached = await attachDebugger(tab.id);
 
     const streamId = await getTabMediaStreamId(tab.id);
 
@@ -353,10 +357,14 @@ async function startRecordingSession(): Promise<void> {
       transitionDraftPhase(
         draft,
         "recording",
-        "Started active-tab recording in the offscreen document."
+        debuggerAttached
+          ? "Started active-tab recording in the offscreen document."
+          : debuggerUnavailableDetail()
       )
     );
   } catch (error: unknown) {
+    webRequestFallbackTabIds.delete(tab.id);
+    networkRequestsByTab.delete(tab.id);
     await saveDraft(
       transitionDraftPhase(draft, "failed", `Failed to start recording: ${errorMessage(error)}`)
     );
@@ -427,6 +435,7 @@ async function stopRecordingSession(detail: string): Promise<void> {
     throw error;
   } finally {
     stoppingTabIds.delete(tabId);
+    webRequestFallbackTabIds.delete(tabId);
     networkRequestsByTab.delete(tabId);
     await closeOffscreenDocumentIfPresent();
   }
@@ -496,7 +505,7 @@ async function handleCompletedTabUpdate(tabId: number): Promise<void> {
 
   if (pendingRecovery) {
     try {
-      await attachDebugger(tabId);
+      const debuggerAttached = await attachDebugger(tabId);
       await ensureContentBridge(tabId, nextDraft.sessionId);
       clearPendingRecovery(tabId);
       await clearPendingRecoveryAlarm(tabId);
@@ -504,7 +513,9 @@ async function handleCompletedTabUpdate(tabId: number): Promise<void> {
         appendDraftEvent(nextDraft, {
           kind: "lifecycle",
           phase: "recording",
-          detail: "Resumed capture after same-tab navigation."
+          detail: debuggerAttached
+            ? "Resumed capture after same-tab navigation."
+            : debuggerUnavailableDetail()
         })
       );
       return;
@@ -555,25 +566,18 @@ async function handleContentRuntimeMessage(
 
   switch (message.type) {
     case "jl/content-ready": {
-      const nextDraft = appendDraftEvent(
-        updateDraftPage(
-          currentDraft,
-          currentDraft.page.tabId === undefined
-            ? {
-                title: message.page.title,
-                url: message.page.url
-              }
-            : {
-                tabId: currentDraft.page.tabId,
-                title: message.page.title,
-                url: message.page.url
-              }
-        ),
-        {
-          kind: "lifecycle",
-          phase: currentDraft.phase,
-          detail: `Content capture ready on ${message.page.url}`
-        }
+      const nextDraft = updateDraftPage(
+        currentDraft,
+        currentDraft.page.tabId === undefined
+          ? {
+              title: message.page.title,
+              url: message.page.url
+            }
+          : {
+              tabId: currentDraft.page.tabId,
+              title: message.page.title,
+              url: message.page.url
+            }
       );
 
       await saveDraft(nextDraft);
@@ -583,6 +587,297 @@ async function handleContentRuntimeMessage(
     case "jl/interaction":
       await saveDraft(appendDraftEvent(currentDraft, normalizeInteractionPayload(message.payload)));
       return;
+
+    case "jl/network":
+      if (!webRequestFallbackTabIds.has(currentDraft.page.tabId ?? -1)) {
+        return;
+      }
+
+      await saveDraft(appendDraftEvent(currentDraft, normalizeContentNetworkPayload(message.payload)));
+      return;
+  }
+}
+
+function registerWebRequestFallbackListeners(): void {
+  if (!("webRequest" in chrome) || !chrome.webRequest) {
+    return;
+  }
+
+  const filter: chrome.webRequest.RequestFilter = {
+    urls: ["http://*/*", "https://*/*"]
+  };
+
+  try {
+    chrome.webRequest.onBeforeRequest.addListener(
+      (details) => {
+        void queueDraftMutation(() => handleFallbackRequestStarted(details));
+      },
+      filter,
+      ["requestBody", "extraHeaders"]
+    );
+    chrome.webRequest.onBeforeSendHeaders.addListener(
+      (details) => {
+        void queueDraftMutation(() => handleFallbackRequestHeaders(details));
+      },
+      filter,
+      ["requestHeaders", "extraHeaders"]
+    );
+    chrome.webRequest.onHeadersReceived.addListener(
+      (details) => {
+        void queueDraftMutation(() => handleFallbackResponseHeaders(details));
+      },
+      filter,
+      ["responseHeaders", "extraHeaders"]
+    );
+    chrome.webRequest.onBeforeRedirect.addListener(
+      (details) => {
+        void queueDraftMutation(() => handleFallbackRequestCompleted(details));
+      },
+      filter,
+      ["responseHeaders", "extraHeaders"]
+    );
+    chrome.webRequest.onCompleted.addListener(
+      (details) => {
+        void queueDraftMutation(() => handleFallbackRequestCompleted(details));
+      },
+      filter,
+      ["responseHeaders", "extraHeaders"]
+    );
+    chrome.webRequest.onErrorOccurred.addListener(
+      (details) => {
+        void queueDraftMutation(() => handleFallbackRequestFailed(details));
+      },
+      filter
+    );
+  } catch (error: unknown) {
+    console.warn("[jittle-lamp] Unable to register webRequest fallback listeners.", errorMessage(error));
+  }
+}
+
+async function handleFallbackRequestStarted(details: chrome.webRequest.WebRequestBodyDetails): Promise<void> {
+  if (!(await shouldCaptureFallbackNetwork(details.tabId))) {
+    return;
+  }
+
+  if (details.type === "xmlhttprequest") {
+    return;
+  }
+
+  const requestState = createNetworkRequestState();
+  requestState.hasBaseRequest = true;
+  requestState.method = details.method;
+  requestState.url = details.url;
+  requestState.startedAtMs = details.timeStamp;
+  requestState.subtype = deriveWebRequestSubtype(details.type);
+  const requestBody = bodyCaptureFromWebRequestBody(details.requestBody);
+
+  if (requestBody) {
+    requestState.requestBody = requestBody;
+  }
+
+  getNetworkRequests(details.tabId).set(details.requestId, requestState);
+}
+
+async function handleFallbackRequestHeaders(details: chrome.webRequest.WebRequestHeadersDetails): Promise<void> {
+  if (!(await shouldCaptureFallbackNetwork(details.tabId))) {
+    return;
+  }
+
+  if (details.type === "xmlhttprequest") {
+    return;
+  }
+
+  const requestState = getOrCreateNetworkRequestState(details.tabId, details.requestId);
+  requestState.requestHeaders = headerEntriesFromWebRequestHeaders(details.requestHeaders);
+}
+
+async function handleFallbackResponseHeaders(details: chrome.webRequest.WebResponseHeadersDetails): Promise<void> {
+  if (!(await shouldCaptureFallbackNetwork(details.tabId))) {
+    return;
+  }
+
+  if (details.type === "xmlhttprequest") {
+    return;
+  }
+
+  applyWebRequestResponseMetadata(details);
+}
+
+async function handleFallbackRequestCompleted(details: chrome.webRequest.WebResponseHeadersDetails): Promise<void> {
+  if (!(await shouldCaptureFallbackNetwork(details.tabId))) {
+    return;
+  }
+
+  if (details.type === "xmlhttprequest") {
+    return;
+  }
+
+  const currentDraft = await readDraft();
+
+  if (!currentDraft || currentDraft.page.tabId !== details.tabId || currentDraft.phase !== "recording") {
+    return;
+  }
+
+  const requestState = applyWebRequestResponseMetadata(details);
+  getNetworkRequests(details.tabId).delete(details.requestId);
+
+  if (!requestState.hasBaseRequest || !isHttpUrl(requestState.url)) {
+    return;
+  }
+
+  await saveDraft(
+    appendDraftEvent(
+      currentDraft,
+      buildNetworkEventPayload({
+        requestState,
+        requestId: details.requestId,
+        durationMs: Math.max(0, Date.now() - requestState.startedAtMs),
+        ...(requestState.requestBody ? { requestBody: requestState.requestBody } : {})
+      })
+    )
+  );
+}
+
+async function handleFallbackRequestFailed(details: chrome.webRequest.WebResponseErrorDetails): Promise<void> {
+  if (!(await shouldCaptureFallbackNetwork(details.tabId))) {
+    return;
+  }
+
+  if (details.type === "xmlhttprequest") {
+    return;
+  }
+
+  const currentDraft = await readDraft();
+
+  if (!currentDraft || currentDraft.page.tabId !== details.tabId || currentDraft.phase !== "recording") {
+    return;
+  }
+
+  const requestState = getNetworkRequests(details.tabId).get(details.requestId);
+  getNetworkRequests(details.tabId).delete(details.requestId);
+
+  if (!requestState?.hasBaseRequest || !isHttpUrl(requestState.url)) {
+    return;
+  }
+
+  requestState.failureText = details.error || `Network request failed for ${requestState.url}`;
+
+  await saveDraft(
+    appendDraftEvent(
+      currentDraft,
+      buildNetworkEventPayload({
+        requestState,
+        requestId: details.requestId,
+        durationMs: Math.max(0, Date.now() - requestState.startedAtMs),
+        ...(requestState.requestBody ? { requestBody: requestState.requestBody } : {})
+      })
+    )
+  );
+}
+
+async function shouldCaptureFallbackNetwork(tabId: number): Promise<boolean> {
+  if (!webRequestFallbackTabIds.has(tabId)) {
+    return false;
+  }
+
+  const currentDraft = await readDraft();
+  return Boolean(currentDraft && currentDraft.page.tabId === tabId && currentDraft.phase === "recording");
+}
+
+function applyWebRequestResponseMetadata(details: chrome.webRequest.WebResponseHeadersDetails): NetworkRequestState {
+  const requestState = getOrCreateNetworkRequestState(details.tabId, details.requestId);
+
+  if (details.method) {
+    requestState.method = details.method;
+  }
+
+  requestState.url = details.url;
+  requestState.status = details.statusCode;
+  const statusText = statusTextFromStatusLine(details.statusLine);
+
+  if (statusText) {
+    requestState.statusText = statusText;
+  }
+  requestState.responseHeaders = headerEntriesFromWebRequestHeaders(details.responseHeaders);
+  requestState.responseSetCookieHeaders = setCookieHeadersFromEntries(requestState.responseHeaders);
+  requestState.responseSetCookies = requestState.responseSetCookieHeaders.map(parseSetCookieHeader);
+
+  if (!requestState.subtype) {
+    requestState.subtype = deriveWebRequestSubtype(details.type);
+  }
+
+  return requestState;
+}
+
+function bodyCaptureFromWebRequestBody(body: chrome.webRequest.WebRequestBody | null): NetworkBodyCapture | undefined {
+  if (!body) {
+    return undefined;
+  }
+
+  if (body.error) {
+    return {
+      disposition: "unavailable",
+      reason: body.error
+    };
+  }
+
+  if (body.formData && Object.keys(body.formData).length > 0) {
+    return createUtf8BodyCapture(JSON.stringify(body.formData), "application/x-www-form-urlencoded");
+  }
+
+  const rawBytes = body.raw?.flatMap((entry) => (entry.bytes ? [new Uint8Array(entry.bytes)] : [])) ?? [];
+
+  if (rawBytes.length === 0) {
+    return undefined;
+  }
+
+  const totalLength = rawBytes.reduce((sum, bytes) => sum + bytes.byteLength, 0);
+  const combined = new Uint8Array(totalLength);
+  let offset = 0;
+
+  for (const bytes of rawBytes) {
+    combined.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
+
+  return createUtf8BodyCapture(new TextDecoder().decode(combined));
+}
+
+function headerEntriesFromWebRequestHeaders(headers: chrome.webRequest.HttpHeader[] | undefined): NetworkHeaderEntry[] {
+  return (headers ?? []).flatMap((header) => {
+    if (typeof header.value === "string") {
+      return [{ name: header.name, value: header.value }];
+    }
+
+    if (header.binaryValue) {
+      return [{ name: header.name, value: `[${header.binaryValue.byteLength} bytes]` }];
+    }
+
+    return [];
+  });
+}
+
+function statusTextFromStatusLine(statusLine: string | undefined): string | undefined {
+  const match = statusLine?.match(/^HTTP\/\S+\s+\d{3}\s+(.+)$/i);
+  return match?.[1]?.trim() || undefined;
+}
+
+function deriveWebRequestSubtype(resourceType: chrome.webRequest.ResourceType | undefined): NetworkSubtype {
+  switch (resourceType) {
+    case "xmlhttprequest":
+      return "xhr";
+    case "main_frame":
+    case "sub_frame":
+      return "document";
+    case "stylesheet":
+    case "script":
+    case "image":
+    case "font":
+    case "media":
+    case "websocket":
+      return resourceType;
+    default:
+      return "other";
   }
 }
 
@@ -628,6 +923,13 @@ function normalizeInteractionPayload(message: Extract<ContentRuntimeMessage, { t
         ...(selector ? { selector } : {})
       };
   }
+}
+
+function normalizeContentNetworkPayload(message: Extract<ContentRuntimeMessage, { type: "jl/network" }>['payload']) {
+  return {
+    ...message,
+    url: sanitizeCapturedUrl(message.url)
+  };
 }
 
 async function handleDebuggerEvent(
@@ -1059,6 +1361,7 @@ async function ensureContentBridge(tabId: number, sessionId: string): Promise<vo
       type: "jl/content-begin-capture",
       sessionId
     });
+    await ensureNetworkProbe(tabId);
     return;
   } catch (error: unknown) {
     const message = rawErrorMessage(error);
@@ -1073,9 +1376,19 @@ async function ensureContentBridge(tabId: number, sessionId: string): Promise<vo
     files: ["content.js"]
   });
 
+  await ensureNetworkProbe(tabId);
+
   await chrome.tabs.sendMessage(tabId, {
     type: "jl/content-begin-capture",
     sessionId
+  });
+}
+
+async function ensureNetworkProbe(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    files: ["network-probe.js"]
   });
 }
 
@@ -1094,13 +1407,29 @@ async function signalContentCaptureEnded(tabId: number, sessionId: string): Prom
   }
 }
 
-async function attachDebugger(tabId: number): Promise<void> {
+async function attachDebugger(tabId: number): Promise<boolean> {
   const debuggee = { tabId };
 
-  await chrome.debugger.attach(debuggee, debuggerProtocolVersion);
-  await chrome.debugger.sendCommand(debuggee, "Network.enable");
-  await chrome.debugger.sendCommand(debuggee, "Runtime.enable");
-  await chrome.debugger.sendCommand(debuggee, "Page.enable");
+  try {
+    await chrome.debugger.attach(debuggee, debuggerProtocolVersion);
+    await chrome.debugger.sendCommand(debuggee, "Network.enable");
+    await chrome.debugger.sendCommand(debuggee, "Runtime.enable");
+    await chrome.debugger.sendCommand(debuggee, "Page.enable");
+    webRequestFallbackTabIds.delete(tabId);
+    return true;
+  } catch (error: unknown) {
+    if (!isCrossExtensionAccessError(error)) {
+      throw error;
+    }
+
+    console.warn("[jittle-lamp] Continuing without debugger capture.", {
+      tabId,
+      reason: rawErrorMessage(error)
+    });
+    await safeDetachDebugger(tabId);
+    webRequestFallbackTabIds.add(tabId);
+    return false;
+  }
 }
 
 async function safeDetachDebugger(tabId: number): Promise<void> {
@@ -2137,11 +2466,23 @@ function toConsoleLevel(type: string | undefined): "debug" | "info" | "warn" | "
 function errorMessage(error: unknown): string {
   const message = rawErrorMessage(error);
 
-  if (message.includes("Cannot access a chrome-extension:// URL of different extension")) {
+  if (isCrossExtensionAccessMessage(message)) {
     return "jittle-lamp can only record regular web pages (http/https), not other extension pages.";
   }
 
   return message;
+}
+
+function isCrossExtensionAccessError(error: unknown): boolean {
+  return isCrossExtensionAccessMessage(rawErrorMessage(error));
+}
+
+function isCrossExtensionAccessMessage(message: string): boolean {
+  return message.includes("Cannot access a chrome-extension:// URL of different extension");
+}
+
+function debuggerUnavailableDetail(): string {
+  return "Started active-tab recording. Edge blocked debugger access to an extension frame, so console capture and response-body capture are unavailable; network metadata will use the browser request observer.";
 }
 
 function rawErrorMessage(error: unknown): string {

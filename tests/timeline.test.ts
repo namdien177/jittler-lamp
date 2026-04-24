@@ -126,6 +126,32 @@ describe("buildTimeline", () => {
     expect(buildTimeline(makeArchive([makeError(T0, "TypeError: undefined")]))[0]!.label).toBe("TypeError: undefined");
   });
 
+  test("uses target text and role for user action labels", () => {
+    const items = buildTimeline(
+      makeArchive([
+        {
+          at: T0,
+          payload: {
+            kind: "interaction",
+            type: "click",
+            selector: '[data-testid="login-button"]',
+            target: {
+              selector: '[data-testid="login-button"]',
+              selectorAlternates: ['[data-testid="login-button"]', "#login"],
+              tagName: "button",
+              dataTestId: "login-button",
+              id: "login",
+              role: null,
+              textPreview: "Login"
+            }
+          }
+        }
+      ])
+    );
+
+    expect(items[0]!.label).toBe('Click "Login" button');
+  });
+
   test("events before anchor have negative offsetMs", () => {
     const items = buildTimeline(makeArchive([makeLifecycle(T1, "recording"), makeLifecycle(T0, "armed")]));
     const armedItem = items.find((i) => i.kind === "lifecycle" && "phase" in i.payload && i.payload.phase === "armed");
@@ -173,6 +199,21 @@ describe("buildSectionTimeline network search", () => {
     const items = buildSectionTimeline(archive, "network", "all", "/users\\/\\d+/i");
     expect(items).toHaveLength(1);
     expect(items[0]!.label).toContain("/users/123");
+  });
+});
+
+describe("buildSectionTimeline actions", () => {
+  test("keeps lifecycle bookkeeping out of the user actions section", () => {
+    const archive = makeArchive([
+      makeLifecycle(T0, "recording", "Content capture ready on https://example.com/page"),
+      makeInteraction(T1, "click", "#save"),
+      makeError(T2, "Uncaught error")
+    ]);
+
+    const items = buildSectionTimeline(archive, "actions");
+
+    expect(items.map((item) => item.kind)).toEqual(["interaction", "error"]);
+    expect(items.map((item) => item.label)).toEqual(["click #save", "Uncaught error"]);
   });
 });
 

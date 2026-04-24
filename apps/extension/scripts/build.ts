@@ -6,6 +6,7 @@ const result = await Bun.build({
   entrypoints: [
     new URL("../src/background.ts", import.meta.url).pathname,
     new URL("../src/content.ts", import.meta.url).pathname,
+    new URL("../src/network-probe.ts", import.meta.url).pathname,
     new URL("../src/offscreen.ts", import.meta.url).pathname,
     new URL("../src/popup.ts", import.meta.url).pathname
   ],

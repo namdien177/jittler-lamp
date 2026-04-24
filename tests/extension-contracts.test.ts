@@ -121,7 +121,7 @@ describe("extension contracts", () => {
     });
 
     expect(message.sessionId).toBe("jl_test1234");
-    if (!("payload" in message)) {
+    if (message.type !== "jl/interaction") {
       throw new Error("Expected an interaction message.");
     }
 
@@ -163,7 +163,7 @@ describe("extension contracts", () => {
       }
     });
 
-    if (!("payload" in message)) {
+    if (message.type !== "jl/interaction") {
       throw new Error("Expected an interaction message.");
     }
 
@@ -173,6 +173,53 @@ describe("extension contracts", () => {
     }
     expect(message.payload.key).toBe("Enter");
     expect(message.payload.target?.inputType).toBe("email");
+  });
+
+  test("parses content-captured API network responses with payloads", () => {
+    const message = contentRuntimeMessageSchema.parse({
+      type: "jl/network",
+      sessionId: "jl_test1234",
+      payload: {
+        kind: "network",
+        method: "POST",
+        url: "https://example.com/api/login",
+        subtype: "fetch",
+        status: 200,
+        statusText: "OK",
+        durationMs: 125,
+        requestId: "page-fetch-123",
+        request: {
+          headers: [{ name: "content-type", value: "application/json" }],
+          cookies: [],
+          body: {
+            disposition: "captured",
+            encoding: "utf8",
+            mimeType: "application/json",
+            value: "{\"username\":\"demo\"}",
+            byteLength: 19
+          }
+        },
+        response: {
+          headers: [{ name: "content-type", value: "application/json" }],
+          setCookieHeaders: [],
+          setCookies: [],
+          body: {
+            disposition: "captured",
+            encoding: "utf8",
+            mimeType: "application/json",
+            value: "{\"ok\":true}",
+            byteLength: 11
+          }
+        }
+      }
+    });
+
+    if (message.type !== "jl/network") {
+      throw new Error("Expected a network message.");
+    }
+
+    expect(message.payload.request.body?.value).toContain("demo");
+    expect(message.payload.response?.body?.value).toContain("true");
   });
 
   test("parses offscreen export requests with full session archives", () => {

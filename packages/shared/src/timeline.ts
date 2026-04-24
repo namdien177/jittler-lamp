@@ -91,6 +91,10 @@ export function buildSectionTimeline(
   networkSearchQuery = ""
 ): TimelineItem[] {
   let mixed = buildTimeline(archive).filter((item) => item.section === section);
+  if (section === "actions") {
+    mixed = mixed.filter((item) => item.kind === "interaction" || item.kind === "error");
+  }
+
   if (section === "network" && subtypeFilter !== "all") {
     mixed = mixed.filter((item) => item.subtype === subtypeFilter);
   }
@@ -225,10 +229,79 @@ function buildActionLabel(
     case "lifecycle":
       return `${payload.phase}: ${payload.detail}`;
     case "interaction":
-      return payload.selector !== undefined ? `${payload.type} ${payload.selector}` : payload.type;
+      return buildInteractionLabel(payload);
     case "error":
       return payload.message;
   }
+}
+
+function buildInteractionLabel(payload: SessionArchive["sections"]["actions"][number]["payload"]): string {
+  if (payload.kind !== "interaction") {
+    return "";
+  }
+
+  const targetText = payload.target?.textPreview ?? payload.valuePreview;
+  const targetType = describeInteractionTarget(payload);
+  const selector = payload.selector ?? payload.target?.selector;
+
+  switch (payload.type) {
+    case "click":
+      if (targetText) {
+        return `Click "${truncateLabelText(targetText)}" ${targetType}`;
+      }
+      return selector ? `click ${selector}` : "click";
+
+    case "input":
+      if (targetText) {
+        return `Input "${truncateLabelText(targetText)}" ${targetType}`;
+      }
+      return selector ? `input ${selector}` : "input";
+
+    case "submit":
+      if (targetText) {
+        return `Submit "${truncateLabelText(targetText)}" ${targetType}`;
+      }
+      return selector ? `submit ${selector}` : "submit";
+
+    case "keyboard":
+      if (targetText) {
+        return `Key ${payload.key} in "${truncateLabelText(targetText)}" ${targetType}`;
+      }
+      return selector ? `keyboard ${selector}` : "keyboard";
+
+    case "navigation":
+      return payload.title ? `Navigate to "${truncateLabelText(payload.title)}"` : `navigation ${payload.url}`;
+  }
+}
+
+function describeInteractionTarget(payload: Extract<SessionArchive["sections"]["actions"][number]["payload"], { kind: "interaction" }>): string {
+  const target = payload.target;
+  const tagName = target?.tagName?.toLowerCase();
+  const role = target?.role?.toLowerCase() ?? undefined;
+  const inputType = target?.inputType?.toLowerCase();
+
+  if (tagName === "button" || role === "button" || inputType === "button" || inputType === "submit") {
+    return "button";
+  }
+
+  if (tagName === "a" || role === "link" || target?.href) {
+    return "link";
+  }
+
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+    return "field";
+  }
+
+  if (role) {
+    return role;
+  }
+
+  return tagName ?? "element";
+}
+
+function truncateLabelText(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length > 64 ? `${normalized.slice(0, 61)}...` : normalized;
 }
 
 function matchesNetworkSearch(item: TimelineItem, query: string): boolean {

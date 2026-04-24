@@ -4,6 +4,7 @@ import {
   captureSessionDraftSchema,
   isoTimestampSchema,
   interactionEventSchema,
+  networkEventSchema,
   pageContextSchema,
   sessionArchiveSchema,
   sessionIdSchema
@@ -90,9 +91,16 @@ export const interactionMessageSchema = z.object({
   payload: interactionEventSchema
 });
 
+export const contentNetworkMessageSchema = z.object({
+  type: z.literal("jl/network"),
+  sessionId: sessionIdSchema,
+  payload: networkEventSchema
+});
+
 export const contentRuntimeMessageSchema = z.discriminatedUnion("type", [
   contentReadyMessageSchema,
-  interactionMessageSchema
+  interactionMessageSchema,
+  contentNetworkMessageSchema
 ]);
 
 export const offscreenStartRecordingRequestSchema = z.object({

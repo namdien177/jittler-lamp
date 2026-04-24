@@ -157,6 +157,7 @@ export const interactionTargetSchema = z.object({
   selector: z.string().min(1).optional(),
   selectorAlternates: z.array(z.string().min(1)).default([]),
   tagName: z.string().min(1).optional(),
+  dataTestId: z.string().min(1).optional(),
   id: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   role: z.string().min(1).nullable().optional(),

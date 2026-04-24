@@ -22,7 +22,8 @@ export const extensionManifest = {
     "downloads",
     "tabCapture",
     "debugger",
-    "offscreen"
+    "offscreen",
+    "webRequest"
   ],
   host_permissions: ["http://127.0.0.1/*"],
   optional_host_permissions: ["<all_urls>"]

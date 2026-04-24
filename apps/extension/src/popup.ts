@@ -96,38 +96,49 @@ function renderState(state: PopupState, error?: string): void {
 
   companionStatus.textContent =
     state.companion.status === "online" ? "Desktop companion online" : "Desktop companion offline";
-  companionRoute.textContent =
+  const companionRouteText =
     state.companion.status === "online"
       ? state.companion.outputDir ?? state.companion.origin
       : `${state.companion.origin} unavailable`;
+  companionRoute.textContent = companionRouteText;
+  companionRoute.title = companionRouteText;
   companionPill.textContent = state.companion.status;
   companionPill.dataset.status = state.companion.status;
 
-  titleValue.textContent = activeSession?.name ?? "No session yet";
-  urlValue.textContent = activeSession?.page.url ?? "Open an http(s) page to start recording.";
+  const titleText = activeSession?.name ?? "No session yet";
+  const urlText = activeSession?.page.url ?? "Open an http(s) page to start recording.";
+  titleValue.textContent = titleText;
+  titleValue.title = titleText;
+  urlValue.textContent = urlText;
+  urlValue.title = urlText;
   sessionValue.textContent = activeSession?.sessionId ?? "—";
   eventsValue.textContent = String(activeSession?.eventCount ?? 0);
-  artifactValue.textContent = (activeSession?.artifacts ?? [])
+  const artifactText = (activeSession?.artifacts ?? [])
     .map((artifact) => artifact.relativePath)
     .join("\n") || "—";
+  artifactValue.textContent = artifactText;
+  artifactValue.title = artifactText;
 
   if (error) {
-    messageValue.textContent = error;
+    setStatusMessage(error);
     messageValue.dataset.tone = "error";
   } else if (activeSession?.statusText) {
-    messageValue.textContent = activeSession.statusText;
+    setStatusMessage(activeSession.statusText);
     messageValue.dataset.tone = "neutral";
   } else if (activeSession?.phase === "recording") {
-    messageValue.textContent =
+    setStatusMessage(
       state.companion.status === "online"
         ? `Recording the active tab. Stop to save directly into ${state.companion.outputDir ?? "the desktop companion folder"}.`
-        : "Recording the active tab. Stop to download the session through Chromium.";
+        : "Recording the active tab. Stop to download the session through Chromium."
+    );
     messageValue.dataset.tone = "neutral";
   } else if (state.companion.status === "online") {
-    messageValue.textContent = `Desktop companion ready. New stopped sessions will save into ${state.companion.outputDir ?? state.companion.origin}.`;
+    setStatusMessage(
+      `Desktop companion ready. New stopped sessions will save into ${state.companion.outputDir ?? state.companion.origin}.`
+    );
     messageValue.dataset.tone = "neutral";
   } else {
-    messageValue.textContent = "Desktop companion offline. Stopped sessions will download through Chromium.";
+    setStatusMessage("Desktop companion offline. Stopped sessions will download through Chromium.");
     messageValue.dataset.tone = "neutral";
   }
 
@@ -138,6 +149,31 @@ function renderState(state: PopupState, error?: string): void {
 function setButtonsDisabled(disabled: boolean): void {
   startButton.disabled = disabled;
   stopButton.disabled = disabled;
+}
+
+function setStatusMessage(message: string): void {
+  messageValue.textContent = compactStatusUrls(message);
+  messageValue.title = message;
+}
+
+function compactStatusUrls(message: string): string {
+  return message.replace(/https?:\/\/[^\s)]+/g, (url) => compactUrl(url));
+}
+
+function compactUrl(input: string): string {
+  try {
+    const url = new URL(input);
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const lastPathPart = pathParts.at(-1);
+
+    if (!lastPathPart) {
+      return url.hostname;
+    }
+
+    return `${url.hostname}/.../${lastPathPart}`;
+  } catch {
+    return input;
+  }
 }
 
 function requireElement<ElementType extends Element>(selector: string): ElementType {
