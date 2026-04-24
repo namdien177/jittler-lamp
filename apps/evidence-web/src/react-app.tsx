@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter, useRoutes } from "react-router";
+import type { JittleRouteObject } from "@jittle-lamp/viewer-react";
 import {
   buildVisibleActionRows,
   buildSectionTimeline,
@@ -72,7 +74,7 @@ function initialState(): AppState {
   };
 }
 
-function App(): React.JSX.Element {
+function EvidenceViewerPage(): React.JSX.Element {
   const [state, setState] = useState<AppState>(() => initialState());
   const [contextMenu, setContextMenu] = useState<{
     open: boolean;
@@ -722,5 +724,21 @@ function MergeDialog(props: {
 export function bootstrap(): void {
   const root = document.getElementById("app");
   if (!root) throw new Error("Evidence web root element was not found.");
-  createRoot(root).render(<App />);
+  createRoot(root).render(
+    <BrowserRouter>
+      <EvidenceWebRoutes />
+    </BrowserRouter>
+  );
+}
+
+const evidenceWebRoutes: JittleRouteObject[] = [
+  {
+    path: "/",
+    element: <EvidenceViewerPage />
+  }
+];
+
+function EvidenceWebRoutes(): React.JSX.Element {
+  const element = useRoutes(evidenceWebRoutes);
+  return <>{element}</>;
 }

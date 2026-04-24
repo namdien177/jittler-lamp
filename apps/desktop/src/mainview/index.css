@@ -77,12 +77,53 @@ input {
   flex-shrink: 0;
 }
 
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 .app-name {
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--text);
+  flex-shrink: 0;
+}
+
+.page-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.page-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  padding: 4px 9px;
+  line-height: 1.4;
+  transition: color 100ms ease, background 100ms ease, border-color 100ms ease;
+}
+
+.page-tab:hover {
+  color: var(--text-muted);
+  background: var(--surface-raised);
+}
+
+.page-tab.active {
+  background: var(--surface-high);
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
 .top-bar-right {
@@ -340,6 +381,19 @@ input {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.desktop-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-page {
+  overflow-y: auto;
+  padding: var(--space-4);
+  background: var(--bg);
 }
 
 .sessions-scroll::-webkit-scrollbar {
@@ -622,6 +676,18 @@ input {
 
 .settings-drawer[data-open="true"] {
   transform: translateX(0);
+}
+
+.settings-page .settings-panel {
+  position: static;
+  width: min(760px, 100%);
+  min-height: 0;
+  transform: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  margin: 0 auto;
+  background: var(--surface);
+  z-index: auto;
 }
 
 .drawer-header {

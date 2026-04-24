@@ -20,10 +20,14 @@
   "dependencies": {
     "@jittle-lamp/shared": "workspace:*",
     "@jittle-lamp/viewer-core": "workspace:*",
-    "clsx": "2.1.1",
-    "react": "19.2.0"
+    "clsx": "2.1.1"
   },
   "peerDependencies": {
-    "react": "19.2.0"
+    "react": "19.2.0",
+    "react-router": "7.14.2"
+  },
+  "devDependencies": {
+    "react": "19.2.0",
+    "react-router": "7.14.2"
   }
 }

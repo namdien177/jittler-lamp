@@ -1,12 +1,35 @@
 /// <reference types="bun-types" />
 
+const workspaceRoot = new URL("../../../", import.meta.url);
 const distRoot = new URL("../dist/", import.meta.url);
+
+const reactEntrypoints = new Map([
+  ["react", new URL("node_modules/react/index.js", workspaceRoot).pathname],
+  ["react/jsx-runtime", new URL("node_modules/react/jsx-runtime.js", workspaceRoot).pathname],
+  ["react/jsx-dev-runtime", new URL("node_modules/react/jsx-dev-runtime.js", workspaceRoot).pathname]
+]);
+
+const dedupeReactPlugin = {
+  name: "dedupe-react",
+  setup(build: {
+    onResolve: (
+      options: { filter: RegExp },
+      callback: (args: { path: string }) => { path: string } | undefined
+    ) => void;
+  }) {
+    build.onResolve({ filter: /^react(?:\/jsx-runtime|\/jsx-dev-runtime)?$/ }, (args) => {
+      const path = reactEntrypoints.get(args.path);
+      return path ? { path } : undefined;
+    });
+  }
+};
 
 const build = await Bun.build({
   entrypoints: [new URL("../src/app.ts", import.meta.url).pathname],
   outdir: distRoot.pathname,
   target: "browser",
   format: "esm",
+  plugins: [dedupeReactPlugin],
   naming: "[name].js",
   minify: true
 });

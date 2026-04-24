@@ -22,3 +22,8 @@ export type {
   TimelinePaneController,
   ViewerShellController
 } from "./hooks";
+
+export type {
+  JittleRouteObject,
+  JittleRouterMode
+} from "./routing";

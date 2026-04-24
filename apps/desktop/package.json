@@ -15,9 +15,11 @@
   "dependencies": {
     "@jittle-lamp/shared": "workspace:*",
     "@jittle-lamp/viewer-core": "workspace:*",
+    "@jittle-lamp/viewer-react": "workspace:*",
     "electrobun": "1.16.0",
     "fflate": "0.8.2",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "react-router": "7.14.2"
   }
 }
