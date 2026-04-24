@@ -1,10 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import {
 	evidenceArtifactKindSchema,
 	evidenceArtifacts,
 	evidences,
+	organizationMembers,
 } from "../db/schema";
 import {
 	apiErrorSchema,
@@ -12,6 +13,7 @@ import {
 	createDbUnavailableError,
 } from "../http/api-error";
 import type { ClerkAuthPlugin } from "../plugins/clerk-auth";
+import type { BackendDb } from "../services/user-provisioning";
 
 const startUploadBodySchema = t.Object({
 	title: t.String({ minLength: 1 }),
@@ -63,6 +65,29 @@ const completeUploadResponseSchema = t.Object({
 	status: t.Literal("committed"),
 });
 
+const evidenceQuerySchema = t.Object({
+	orgId: t.Optional(t.String({ minLength: 1 })),
+});
+
+const evidenceSummarySchema = t.Object({
+	id: t.String({ minLength: 1 }),
+	orgId: t.String({ minLength: 1 }),
+	title: t.String({ minLength: 1 }),
+	sourceType: t.String({ minLength: 1 }),
+	createdBy: t.String({ minLength: 1 }),
+	createdAt: t.Number(),
+	updatedAt: t.Number(),
+});
+
+const listEvidencesResponseSchema = t.Object({
+	evidences: t.Array(evidenceSummarySchema),
+	orgId: t.String({ minLength: 1 }),
+});
+
+const loadEvidenceResponseSchema = t.Object({
+	evidence: evidenceSummarySchema,
+});
+
 type UploadedBlobMetadata = {
 	bytes: number;
 	checksum: string;
@@ -101,6 +126,72 @@ const resolveActiveWorkspace = (
 				localUserId,
 			}
 		: null;
+
+const resolveRequestedOrgId = async (args: {
+	authContext: {
+		activeOrgId: string | null;
+		localUserId: string | null;
+	};
+	db: BackendDb;
+	requestedOrgId: string | undefined;
+	requestId: string;
+	set: {
+		status?: number | string;
+	};
+}): Promise<
+	| {
+			ok: true;
+			orgId: string;
+			localUserId: string;
+	  }
+	| { ok: false; error: ReturnType<typeof createApiError> }
+> => {
+	const workspace = resolveActiveWorkspace(
+		args.authContext.activeOrgId,
+		args.authContext.localUserId,
+	);
+	if (!workspace) {
+		args.set.status = 403;
+		return {
+			ok: false,
+			error: createApiError(
+				args.requestId,
+				"ORG_CONTEXT_UNRESOLVED",
+				"No active organization found for current user",
+				403,
+			),
+		};
+	}
+
+	const resolvedOrgId = args.requestedOrgId ?? workspace.activeOrgId;
+
+	const membership = await args.db.query.organizationMembers.findFirst({
+		where: and(
+			eq(organizationMembers.organizationId, resolvedOrgId),
+			eq(organizationMembers.userId, workspace.localUserId),
+			isNull(organizationMembers.teamId),
+		),
+		columns: { id: true },
+	});
+	if (!membership) {
+		args.set.status = 403;
+		return {
+			ok: false,
+			error: createApiError(
+				args.requestId,
+				"ORG_MEMBERSHIP_REQUIRED",
+				"Selected organization must be a member organization",
+				403,
+			),
+		};
+	}
+
+	return {
+		ok: true,
+		orgId: resolvedOrgId,
+		localUserId: workspace.localUserId,
+	};
+};
 
 export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 	new Elysia({
@@ -220,6 +311,126 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 							400: apiErrorSchema,
 							401: apiErrorSchema,
 							403: apiErrorSchema,
+							500: apiErrorSchema,
+							503: apiErrorSchema,
+						},
+					},
+				)
+				.get(
+					"/evidences",
+					async ({ authContext, db, query, requestId, set }) => {
+						if (!db) {
+							set.status = 503;
+							return createDbUnavailableError(requestId);
+						}
+
+						const resolvedOrg = await resolveRequestedOrgId({
+							authContext,
+							db,
+							requestedOrgId: query.orgId,
+							requestId,
+							set,
+						});
+						if (!resolvedOrg.ok) {
+							return resolvedOrg.error;
+						}
+
+						const rows = await db.query.evidences.findMany({
+							where: eq(evidences.orgId, resolvedOrg.orgId),
+							columns: {
+								id: true,
+								orgId: true,
+								title: true,
+								sourceType: true,
+								createdBy: true,
+								createdAt: true,
+								updatedAt: true,
+							},
+							orderBy: desc(evidences.updatedAt),
+						});
+
+						return {
+							evidences: rows,
+							orgId: resolvedOrg.orgId,
+						};
+					},
+					{
+						query: evidenceQuerySchema,
+						detail: {
+							tags: ["evidences"],
+							summary:
+								"Lists evidence for active org by default; orgId query is allowed for member orgs",
+						},
+						response: {
+							200: listEvidencesResponseSchema,
+							401: apiErrorSchema,
+							403: apiErrorSchema,
+							500: apiErrorSchema,
+							503: apiErrorSchema,
+						},
+					},
+				)
+				.get(
+					"/evidences/:id",
+					async ({ authContext, db, params, query, requestId, set }) => {
+						if (!db) {
+							set.status = 503;
+							return createDbUnavailableError(requestId);
+						}
+
+						const resolvedOrg = await resolveRequestedOrgId({
+							authContext,
+							db,
+							requestedOrgId: query.orgId,
+							requestId,
+							set,
+						});
+						if (!resolvedOrg.ok) {
+							return resolvedOrg.error;
+						}
+
+						const evidence = await db.query.evidences.findFirst({
+							where: and(
+								eq(evidences.id, params.id),
+								eq(evidences.orgId, resolvedOrg.orgId),
+							),
+							columns: {
+								id: true,
+								orgId: true,
+								title: true,
+								sourceType: true,
+								createdBy: true,
+								createdAt: true,
+								updatedAt: true,
+							},
+						});
+						if (!evidence) {
+							set.status = 404;
+							return createApiError(
+								requestId,
+								"EVIDENCE_NOT_FOUND",
+								"Evidence not found",
+								404,
+							);
+						}
+
+						return { evidence };
+					},
+					{
+						params: t.Object({
+							id: t.String({ minLength: 1 }),
+						}),
+						query: evidenceQuerySchema,
+						detail: {
+							tags: ["evidences"],
+							summary:
+								"Loads evidence scoped to active org by default; orgId query is allowed for member orgs",
+						},
+						response: {
+							200: loadEvidenceResponseSchema,
+							401: apiErrorSchema,
+							403: apiErrorSchema,
+							404: apiErrorSchema,
 							500: apiErrorSchema,
 							503: apiErrorSchema,
 						},

@@ -37,10 +37,10 @@ const findAlreadyProvisioned = async (db: BackendDb, clerkUserId: string) =>
 						columns: { id: true, isPersonal: true },
 					},
 				},
-				columns: { role: true, organizationId: true },
+				columns: { role: true, organizationId: true, teamId: true },
 			},
 		},
-		columns: { id: true, clerkUserId: true },
+		columns: { id: true, clerkUserId: true, activeOrgId: true },
 	});
 
 const writeProvisioningEvent = async (
@@ -96,6 +96,7 @@ export const processProvisioningEvent = async (
 		const normalized = event.normalizedPayload
 			? (JSON.parse(event.normalizedPayload) as {
 					organizationId?: string;
+					activeOrgId?: string;
 					membershipRole?: "owner";
 				})
 			: {};
@@ -110,6 +111,7 @@ export const processProvisioningEvent = async (
 			userId: event.userId,
 			clerkUserId: event.clerkUserId,
 			organizationId: normalized.organizationId,
+			activeOrgId: normalized.activeOrgId ?? normalized.organizationId,
 			membershipRole: normalized.membershipRole ?? "owner",
 		};
 	}
@@ -193,7 +195,7 @@ export const processProvisioningEvent = async (
 				.values(membership)
 				.onConflictDoNothing();
 
-			await tx
+			const [updatedUser] = await tx
 				.update(users)
 				.set({
 					activeOrgId: sql`coalesce(
@@ -202,12 +204,20 @@ export const processProvisioningEvent = async (
                     )`,
 					updatedAt: Date.now(),
 				})
-				.where(eq(users.id, localUser.id));
+				.where(eq(users.id, localUser.id))
+				.returning({ activeOrgId: users.activeOrgId });
+
+			if (!updatedUser?.activeOrgId) {
+				throw new Error(
+					"Failed to resolve active organization after provisioning",
+				);
+			}
 
 			return {
 				userId: localUser.id,
 				clerkUserId: localUser.clerkUserId,
 				organizationId,
+				activeOrgId: updatedUser.activeOrgId,
 				membershipRole: "owner" as const,
 			};
 		});
@@ -220,6 +230,7 @@ export const processProvisioningEvent = async (
 				normalizedPayload: JSON.stringify({
 					userId: result.userId,
 					organizationId: result.organizationId,
+					activeOrgId: result.activeOrgId,
 					membershipRole: result.membershipRole,
 				}),
 				processedAt: Date.now(),
@@ -254,11 +265,22 @@ export const ensureUserAndPersonalOrganization = async (
 		);
 
 		if (personalMembership) {
+			const persistedActiveOrgId = existing.activeOrgId;
+			const hasPersistedOrgScopeMembership =
+				persistedActiveOrgId !== null &&
+				existing.organizationMemberships.some(
+					(membership) =>
+						membership.organizationId === persistedActiveOrgId &&
+						membership.teamId === null,
+				);
 			return {
 				eventId: null,
 				userId: existing.id,
 				clerkUserId: existing.clerkUserId,
 				organizationId: personalMembership.organizationId,
+				activeOrgId: hasPersistedOrgScopeMembership
+					? persistedActiveOrgId
+					: personalMembership.organizationId,
 				membershipRole: "owner" as const,
 			};
 		}

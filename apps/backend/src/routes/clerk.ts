@@ -16,6 +16,7 @@ const provisioningResultSchema = t.Object({
 	userId: t.String({ minLength: 1 }),
 	clerkUserId: t.String({ minLength: 1 }),
 	organizationId: t.String({ minLength: 1 }),
+	activeOrgId: t.String({ minLength: 1 }),
 	membershipRole: t.Literal("owner"),
 });
 
