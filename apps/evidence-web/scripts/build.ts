@@ -88,7 +88,7 @@ if (!build.success) {
 const previewOrigin = getWorkspaceEnvValue("JITTLE_LAMP_WEB_ORIGIN").replace(/\/+$/, "");
 const indexHtmlSource = await Bun.file(new URL("../src/index.html", import.meta.url)).text();
 const indexHtml = previewOrigin
-  ? indexHtmlSource.replaceAll("./img-prev.png", `${previewOrigin}/img-prev.png`)
+  ? indexHtmlSource.replaceAll("/img-prev.png", `${previewOrigin}/img-prev.png`)
   : indexHtmlSource;
 
 await Promise.all([
