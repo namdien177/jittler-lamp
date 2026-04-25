@@ -29,18 +29,40 @@ function getFirstWorkspaceEnvValue(names: string[]): string {
   return "";
 }
 
+const clerkPublishableKey = getWorkspaceEnvValue("CLERK_PUBLISHABLE_KEY");
+const apiOrigin = getWorkspaceEnvValue("JITTLE_LAMP_API_ORIGIN");
+const webOrigin = getWorkspaceEnvValue("JITTLE_LAMP_WEB_ORIGIN");
+const observabilityBasePath = getFirstWorkspaceEnvValue([
+  "REACT_APP_VERCEL_OBSERVABILITY_BASEPATH",
+  "VERCEL_OBSERVABILITY_BASEPATH"
+]);
+const observabilityClientConfig = getFirstWorkspaceEnvValue([
+  "REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG",
+  "VERCEL_OBSERVABILITY_CLIENT_CONFIG"
+]);
+
+if (buildEnv === "stable") {
+  const missing = [
+    ["CLERK_PUBLISHABLE_KEY", clerkPublishableKey],
+    ["JITTLE_LAMP_API_ORIGIN", apiOrigin]
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required stable desktop build environment: ${missing.join(", ")}. ` +
+        "Set these in the shell, the workspace .env for local packaging, or GitHub Actions variables/secrets for release builds."
+    );
+  }
+}
+
 const browserDefines = {
-  "process.env.CLERK_PUBLISHABLE_KEY": JSON.stringify(getWorkspaceEnvValue("CLERK_PUBLISHABLE_KEY")),
-  "process.env.JITTLE_LAMP_API_ORIGIN": JSON.stringify(getWorkspaceEnvValue("JITTLE_LAMP_API_ORIGIN")),
-  "process.env.JITTLE_LAMP_WEB_ORIGIN": JSON.stringify(getWorkspaceEnvValue("JITTLE_LAMP_WEB_ORIGIN")),
-  "process.env.REACT_APP_VERCEL_OBSERVABILITY_BASEPATH": JSON.stringify(getFirstWorkspaceEnvValue([
-    "REACT_APP_VERCEL_OBSERVABILITY_BASEPATH",
-    "VERCEL_OBSERVABILITY_BASEPATH"
-  ])),
-  "process.env.REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG": JSON.stringify(getFirstWorkspaceEnvValue([
-    "REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG",
-    "VERCEL_OBSERVABILITY_CLIENT_CONFIG"
-  ])),
+  "process.env.CLERK_PUBLISHABLE_KEY": JSON.stringify(clerkPublishableKey),
+  "process.env.JITTLE_LAMP_API_ORIGIN": JSON.stringify(apiOrigin),
+  "process.env.JITTLE_LAMP_WEB_ORIGIN": JSON.stringify(webOrigin),
+  "process.env.REACT_APP_VERCEL_OBSERVABILITY_BASEPATH": JSON.stringify(observabilityBasePath),
+  "process.env.REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG": JSON.stringify(observabilityClientConfig),
   "process.env.NODE_ENV": JSON.stringify(nodeEnv)
 };
 

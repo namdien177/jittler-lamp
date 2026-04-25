@@ -214,6 +214,14 @@ bun run --cwd apps/desktop package:ci
 
 Use `package:local` on a developer machine; it loads the workspace `.env` before invoking Electron Builder so local signing/notarization credentials are available. Use `package:ci` in CI/CD; it only uses the environment variables injected by the workflow.
 
+The desktop renderer receives auth/API configuration at build time. Release builds require these GitHub Actions variables or secrets to be available before the tag workflow runs:
+
+- `CLERK_PUBLISHABLE_KEY`
+- `JITTLE_LAMP_API_ORIGIN`
+- optional: `JITTLE_LAMP_WEB_ORIGIN`
+
+Setting these only in the backend/deployment host is not enough for the macOS desktop artifact, because the packaged app cannot read that server environment after it has been built.
+
 With the checked-in config, Electron Builder writes build output into:
 
 - `apps/desktop/artifacts/`
