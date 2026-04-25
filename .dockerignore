@@ -2,6 +2,8 @@
 !tsconfig.base.json
 !apps/
 !apps/backend/
+**/.env
+**/.env.*
 apps/backend/node_modules
 apps/backend/server
 apps/backend/dist

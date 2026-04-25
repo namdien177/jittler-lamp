@@ -1,30 +1,33 @@
 # jittle-lamp
 
-`jittle-lamp` is a local-first Jam.dev alternative built around a Chromium MV3 extension recorder, a macOS desktop companion/viewer, a small evidence web viewer, and a shared TypeScript package.
+`jittle-lamp` is a QA evidence manager for capturing, organizing, reviewing, and sharing product evidence across browser recordings, screenshots, logs, test cases, and shared review links.
+
+![Jittle Lamp product preview](apps/evidence-web/assets/img-prev.png)
 
 ## Workspace layout
 
-- `apps/extension` — Chromium MV3 extension recorder for active-tab capture orchestration and local export.
-- `apps/desktop` — Electron desktop companion and local session viewer for folders and ZIP imports.
-- `apps/evidence-web` — lightweight browser viewer for exported session bundles.
+- `apps/extension` — Chromium MV3 extension recorder for active-tab capture orchestration.
+- `apps/desktop` — Electron desktop companion for capture intake, review, uploads, and app updates.
+- `apps/evidence-web` — browser evidence viewer for shared review links and uploaded evidence.
+- `apps/backend` — Elysia API for identity, organization context, evidence upload, artifact storage, and share links.
 - `packages/shared` — strict TypeScript schemas and helpers shared by the extension and desktop app.
 - `docs` — scope, assumptions, and architecture notes for V1.
 - `tests` — repository-level smoke tests.
 
-## V1 scope
+## Product Scope
 
-V1 now implements a local-only recorder path with:
+The current product path centers on a connected evidence workflow:
 
 - strict TypeScript workspace configuration
 - Bun workspace scripts for build, typecheck, and test
 - MV3 popup/background/content/offscreen runtimes aligned to one active-tab session at a time
-- shared event/session/message schemas designed around `WebM + JSON` local artifacts
-- browser-download export into a per-session folder (`<sessionId>/recording.webm` and `<sessionId>/session.events.json`)
+- shared event/session/message schemas designed around reviewable `WebM + JSON` evidence artifacts
 - sanitized page URLs and interaction metadata without raw typed field values
 - richer debugger-backed network events including request/response headers, cookies, bodies, and best-effort omission/truncation metadata
-- optional local companion server that writes artifacts directly into a configured machine folder
-- a desktop viewer that can open local session folders, import ZIP bundles, save notes, and inspect the recorded timeline/network payloads
-- a browser-based evidence viewer build for the same bundle shape
+- desktop capture intake, session playback, timeline review, network detail inspection, tag editing, and note saving
+- authenticated upload to the backend with organization-aware evidence ownership
+- browser-based evidence review through share links
+- macOS release packaging with in-app update checks from the Settings screen
 
 See `docs/v1-scope.md` for more detail.
 
@@ -49,16 +52,16 @@ bun run release:check-version
 5. Open an `http://` or `https://` page, open the extension popup, and press **Start**.
 6. Interact with the page, then press **Stop**.
 
-By default Chromium prompts you to save the local artifacts:
+The extension captures the session artifacts:
 
 - `recording.webm`
 - `session.events.json`
 
-If the desktop companion server is running, the extension can write those artifacts directly into the configured output folder instead.
+When the desktop companion is running, the extension hands those artifacts to the app for review, organization, upload, and sharing.
 
 ### 2. Use the desktop companion and viewer
 
-The desktop app can act as both the optional localhost companion and the local session viewer.
+The desktop app acts as the companion, reviewer, uploader, and release-updated macOS client.
 
 - `bun run --cwd apps/desktop dev` starts the Electron app and local companion server on `http://127.0.0.1:48115`
 - `bun run --cwd apps/desktop set-output "/absolute/path"` updates the saved output folder
@@ -69,7 +72,9 @@ Inside the desktop app, the current UI supports:
 - **Open Local…** to inspect a session folder
 - **Import ZIP…** to open an exported ZIP bundle
 - **Choose folder…** / **Open folder** in Settings to manage the companion output route
+- **Check for update** in Settings to download and install a newer packaged desktop release
 - session playback, timeline review, network detail inspection, tag editing, and note saving
+- authenticated evidence upload and share-link review through the backend
 
 ### 3. Use the browser evidence viewer
 
@@ -79,7 +84,7 @@ Build the lightweight evidence viewer with:
 bun run --cwd apps/evidence-web build
 ```
 
-That emits a static viewer into `apps/evidence-web/dist` for opening exported session bundles in a browser-oriented UI.
+That emits a static viewer into `apps/evidence-web/dist` for browser-based evidence review.
 
 ## Release
 
@@ -218,8 +223,8 @@ In-app desktop updates use Electron Builder's GitHub provider. The macOS job pub
 - The release workflow only accepts stable tags that match `vX.Y.Z`.
 - The tag must point at the current `main` HEAD.
 - `bun run release:check-version` fails if any workspace package version drifts from the root release version.
-- The extension companion integration assumes the local companion server runs on `http://127.0.0.1:48115`.
-- The desktop companion output folder can be changed locally through the desktop UI or the CLI helper:
+- The extension companion integration assumes the desktop companion intake server runs on `http://127.0.0.1:48115`.
+- The desktop companion output folder can be changed through the desktop UI or the CLI helper:
 
 ```bash
 bun run --cwd apps/desktop set-output "/absolute/path"
@@ -227,24 +232,24 @@ bun run --cwd apps/desktop set-output "/absolute/path"
 
 For the desktop app specifically:
 
-- `bun run --cwd apps/desktop dev` builds and starts the Electron desktop app with the local companion server on `http://127.0.0.1:48115`.
+- `bun run --cwd apps/desktop dev` builds and starts the Electron desktop app with the companion intake server on `http://127.0.0.1:48115`.
 - `bun run --cwd apps/desktop set-output "/absolute/path"` changes the folder where the companion writes sessions.
 - `bun run --cwd apps/desktop package:local` attempts a local Electron Builder package build with workspace `.env` loaded.
 - `bun run --cwd apps/desktop package:ci` attempts a CI Electron Builder package build using only environment-provided secrets.
 - `bun run --cwd apps/desktop build` performs the repository's lightweight desktop shell build validation used by the workspace root.
 
-The companion only accepts artifact writes from `chrome-extension://` origins and rejects normal web origins. It does not currently pin a single extension ID. Output-folder changes happen locally through the desktop app or CLI, not over HTTP.
+The companion only accepts artifact writes from `chrome-extension://` origins and rejects normal web origins. It does not currently pin a single extension ID. Output-folder changes happen through the desktop app or CLI, not over HTTP.
 
 ## Extension workflow
 
 1. Run `bun run build` or `bun run --cwd apps/extension build`.
 2. Optional but recommended: run `bun run --cwd apps/desktop set-output "/absolute/path"` once.
-3. Start the local companion with `bun run --cwd apps/desktop dev` if you want artifacts written directly into that folder.
+3. Start the desktop companion with `bun run --cwd apps/desktop dev` so captured artifacts are handed to the app.
 4. Load `apps/extension/dist` as an unpacked extension in Chromium.
 5. Open an `http://` or `https://` tab and open the extension popup.
 6. Press **Start** and grant site access when prompted so capture can survive normal navigations.
 7. Interact with the page, then press **Stop**.
-8. If the companion server is running, artifacts are written to the configured folder. Otherwise Chromium prompts you to save the local session artifacts:
+8. If the companion server is running, artifacts are handed to the desktop app. Otherwise Chromium prompts you to save the session artifacts:
    - `recording.webm`
    - `session.events.json`
 
@@ -252,11 +257,11 @@ The companion only accepts artifact writes from `chrome-extension://` origins an
 
 - **popup**: start/stop/status UI
 - **background**: canonical session controller, storage checkpointing, and debugger bridge
-- **offscreen document**: `MediaRecorder`, chunk aggregation, and local downloads export
-- **desktop companion server**: optional localhost writer for a user-configurable artifact folder
+- **offscreen document**: `MediaRecorder`, chunk aggregation, and fallback browser download export
+- **desktop companion server**: localhost intake route used by the extension to hand artifacts to the app
 - **content script**: content-ready + interaction capture (`click`, `input`, `submit`, `navigation`)
 
-The exported JSON is the shared `SessionBundle` object rather than a bare event array. V1 intentionally avoids raw typed field values, strips query/hash fragments from captured page URLs, preserves network request URLs as captured by the browser, and keeps captured network credentials/cookies unmasked inside the local-only network payload path.
+The exported JSON is the shared `SessionBundle` object rather than a bare event array. The recorder intentionally avoids raw typed field values, strips query/hash fragments from captured page URLs, preserves network request URLs as captured by the browser, and keeps captured network credentials/cookies available for authorized evidence review.
 
 ### Expanded network capture
 

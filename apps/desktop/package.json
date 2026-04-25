@@ -1,7 +1,7 @@
 {
   "name": "@jittle-lamp/desktop",
   "version": "1.2.1",
-  "description": "Jittle Lamp desktop companion and local session viewer.",
+  "description": "Jittle Lamp desktop companion, evidence reviewer, uploader, and updater.",
   "private": true,
   "type": "module",
   "main": "dist/electron/main.js",

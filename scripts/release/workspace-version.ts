@@ -10,10 +10,13 @@ const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 
 export const versionPackageRelativePaths = [
   "package.json",
+  "apps/backend/package.json",
   "apps/desktop/package.json",
-  "apps/extension/package.json",
   "apps/evidence-web/package.json",
-  "packages/shared/package.json"
+  "apps/extension/package.json",
+  "packages/shared/package.json",
+  "packages/viewer-core/package.json",
+  "packages/viewer-react/package.json"
 ] as const;
 
 export function resolveRepoPath(...segments: string[]): string {
