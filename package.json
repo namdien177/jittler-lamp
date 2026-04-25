@@ -13,6 +13,7 @@
     "build:extension": "bun run --cwd apps/extension build",
     "build:desktop": "bun run --cwd apps/desktop build",
     "build:web": "bun run --cwd apps/evidence-web build",
+    "release": "bun run ./scripts/release/release.ts",
     "release:check-version": "bun run ./scripts/release/check-version-sync.ts",
     "release:set-version": "bun run ./scripts/release/set-version.ts",
     "release:package-extension": "bun run ./scripts/release/package-extension.ts",
