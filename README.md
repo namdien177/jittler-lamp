@@ -181,7 +181,7 @@ The current workflow always produces an **arm64** macOS artifact. It does not cl
 
 #### Unsigned releases
 
-If Apple signing credentials are not configured in GitHub Actions, the workflow still builds an unsigned DMG. Electron Builder may apply an ad-hoc signature so the app bundle is internally consistent, but that is **not** the same thing as Apple Developer ID signing and notarization.
+If Apple signing credentials are not configured in GitHub Actions, the workflow still builds an unsigned DMG. CI explicitly applies and verifies an ad-hoc signature so the app bundle is internally consistent, but that is **not** the same thing as Apple Developer ID signing and notarization.
 
 This means a no-cost Apple account is enough for local development, but it is not enough for a frictionless public macOS installer. Public distribution that opens normally on other Macs requires the paid Apple Developer Program so CI can sign with a Developer ID Application certificate and notarize the DMG/app.
 

@@ -14,7 +14,11 @@ const buildEnv = ["dev", "canary", "stable"].includes(requestedBuildEnv) ? reque
 
 if (mode === "local") {
   loadWorkspaceEnv();
-} else if (!hasCompleteSigningConfig()) {
+}
+
+const hasSigningConfig = hasCompleteSigningConfig();
+
+if (mode === "ci" && !hasSigningConfig) {
   disableSigning();
 }
 
@@ -22,7 +26,15 @@ process.env.JITTLE_LAMP_DESKTOP_BUILD_ENV = buildEnv;
 
 rmSync(artifactsRoot, { recursive: true, force: true });
 run("bun", ["run", "./scripts/build.ts", `--env=${buildEnv}`]);
-run("bun", ["x", "electron-builder", "--publish=never"]);
+
+const electronBuilderArgs = ["x", "electron-builder", "--publish=never"];
+
+if (mode === "ci" && !hasSigningConfig) {
+  console.info("No complete Apple signing config found; using macOS ad-hoc signing for CI package.");
+  electronBuilderArgs.push("-c.mac.identity=-");
+}
+
+run("bun", electronBuilderArgs);
 
 function hasCompleteSigningConfig(): boolean {
   const hasCertificate = Boolean(process.env.CSC_LINK && process.env.CSC_KEY_PASSWORD);

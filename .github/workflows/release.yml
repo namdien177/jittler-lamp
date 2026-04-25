@@ -162,6 +162,31 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: bun run --cwd apps/desktop package:ci
 
+      - name: Verify macOS app code signature
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apps=()
+          while IFS= read -r app; do
+            apps+=("$app")
+          done < <(find apps/desktop/artifacts -name "Jittle Lamp.app" -type d)
+          if [[ ${#apps[@]} -ne 1 ]]; then
+            echo "Expected exactly one packaged macOS app bundle, found ${#apps[@]}"
+            find apps/desktop/artifacts -maxdepth 3 -type d -name "*.app" -print
+            exit 1
+          fi
+
+          app_bundle="${apps[0]}"
+          codesign --verify --deep --strict --verbose=2 "$app_bundle"
+          signature_details="$(codesign -dv --verbose=4 "$app_bundle" 2>&1)"
+          echo "$signature_details"
+
+          if [[ "${{ steps.signing.outputs.signed }}" == "false" ]] && ! grep -q "Signature=adhoc" <<< "$signature_details"; then
+            echo "Expected unsigned release fallback to use an ad-hoc macOS signature."
+            exit 1
+          fi
+
       - name: Collect macOS release artifact
         env:
           JL_MACOS_SIGNED: ${{ steps.signing.outputs.signed }}
