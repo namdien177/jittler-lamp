@@ -1380,12 +1380,14 @@ describe("routes", () => {
 				},
 			),
 		);
-		expect(outsiderResolve.status).toBe(403);
-		await expectApiError(outsiderResolve, {
-			code: "SHARE_LINK_FORBIDDEN",
-			message: "You do not have access to this evidence share link",
-			status: 403,
-		});
+		expect(outsiderResolve.status).toBe(200);
+		const outsiderPayload = (await outsiderResolve.json()) as {
+			shareLink: { access: string };
+			organization: { id: string; name: string };
+		};
+		expect(outsiderPayload.shareLink.access).toBe("denied");
+		expect(outsiderPayload.organization.id).toBe(owner.organizationId);
+		expect(outsiderPayload.organization.name).toBeString();
 
 		const ownerResolve = await app.handle(
 			new Request(

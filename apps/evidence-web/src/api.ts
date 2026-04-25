@@ -40,9 +40,23 @@ export type ArtifactReadUrl = {
   renewAfterMs: number;
 };
 
+export type ResolveShareLinkResponse = {
+  shareLink: {
+    id: string;
+    evidenceId: string;
+    orgId: string;
+    expiresAt: number;
+    access: "granted" | "denied";
+  };
+  organization: {
+    id: string;
+    name: string;
+  };
+};
+
 export const api = {
   resolveShareLink: (getToken: FetchToken, token: string) =>
-    authedFetch<{ shareLink: { id: string; evidenceId: string; orgId: string; expiresAt: number } }>(
+    authedFetch<ResolveShareLinkResponse>(
       getToken,
       `/share-links/${encodeURIComponent(token)}/resolve`
     ),

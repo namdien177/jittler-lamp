@@ -2,7 +2,17 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
 import { BrowserRouter, useParams, useRoutes } from "react-router";
-import { ClerkProvider, useAuth } from "@clerk/clerk-react";
+import {
+  ClerkDegraded,
+  ClerkFailed,
+  ClerkLoaded,
+  ClerkLoading,
+  ClerkProvider,
+  SignIn,
+  SignedIn,
+  SignedOut,
+  useAuth
+} from "@clerk/clerk-react";
 import type { JittleRouteObject } from "@jittle-lamp/viewer-react";
 import {
   buildVisibleActionRows,
@@ -45,6 +55,7 @@ export type AppState = ReturnType<typeof createViewerCoreState> & {
   recordingBytes: Uint8Array | null;
   feedback: string | null;
   feedbackTone: FeedbackTone;
+  restrictedOrgName: string | null;
 };
 
 type SectionTimelineItem = ReturnType<typeof buildSectionTimeline>[number];
@@ -76,7 +87,8 @@ function initialState(): AppState {
     videoUrl: null,
     recordingBytes: null,
     feedback: null,
-    feedbackTone: "neutral"
+    feedbackTone: "neutral",
+    restrictedOrgName: null
   };
 }
 
@@ -140,10 +152,20 @@ function EvidenceViewerPage(props: {
     }
 
     let cancelled = false;
-    setState((prev) => ({ ...prev, phase: "loading", error: null }));
+    setState((prev) => ({ ...prev, phase: "loading", error: null, restrictedOrgName: null }));
     void (async () => {
       try {
         const resolved = await api.resolveShareLink(auth.getToken, shareToken);
+        if (cancelled) return;
+        if (resolved.shareLink.access === "denied") {
+          setState((prev) => ({
+            ...prev,
+            phase: "idle",
+            error: null,
+            restrictedOrgName: resolved.organization.name
+          }));
+          return;
+        }
         const artifactResult = await api.listEvidenceArtifacts(
           auth.getToken,
           resolved.shareLink.evidenceId,
@@ -554,7 +576,31 @@ function EvidenceViewerPage(props: {
     });
   };
 
+  if (state.restrictedOrgName) {
+    return <RestrictedShareScreen orgName={state.restrictedOrgName} />;
+  }
+
   if (state.phase !== "viewing" || !state.archive) {
+    if (shareToken && state.phase === "loading") {
+      return (
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel" aria-live="polite">
+            <h1>Loading shared evidence</h1>
+            <p>Validating the share link…</p>
+          </section>
+        </main>
+      );
+    }
+    if (shareToken && state.phase === "error") {
+      return (
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel" aria-live="polite">
+            <h1>Unable to load shared evidence</h1>
+            <p>{state.error ?? "Unknown error"}</p>
+          </section>
+        </main>
+      );
+    }
     return (
       <div className="drop-zone">
         <div
@@ -876,6 +922,68 @@ export function bootstrap(): void {
   );
 }
 
+function RestrictedShareScreen(props: { orgName: string | null }): React.JSX.Element {
+  const orgName = props.orgName ?? "the owner's organization";
+  return (
+    <main className="desktop-auth-page">
+      <section className="desktop-auth-panel" aria-live="polite">
+        <h1>Evidence is restricted</h1>
+        <p>
+          This evidence is only available to members of <strong>{orgName}</strong>. Ask an
+          owner of {orgName} to invite you, then reload this page.
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function SharedEvidenceAuthGate(): React.JSX.Element {
+  const currentUrl = window.location.href;
+  return (
+    <>
+      <ClerkFailed>
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel">
+            <h1>Unable to load sign-in</h1>
+            <p>Check the Clerk publishable key and network access.</p>
+          </section>
+        </main>
+      </ClerkFailed>
+      <ClerkDegraded>
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel">
+            <h1>Unable to load sign-in</h1>
+            <p>Check the Clerk publishable key and network access.</p>
+          </section>
+        </main>
+      </ClerkDegraded>
+      <ClerkLoading>
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel">
+            <h1>Loading sign-in</h1>
+          </section>
+        </main>
+      </ClerkLoading>
+      <ClerkLoaded>
+        <SignedOut>
+          <main className="desktop-auth-page">
+            <SignIn
+              routing="hash"
+              forceRedirectUrl={currentUrl}
+              fallbackRedirectUrl={currentUrl}
+              signUpForceRedirectUrl={currentUrl}
+              signUpFallbackRedirectUrl={currentUrl}
+            />
+          </main>
+        </SignedOut>
+        <SignedIn>
+          <SharedEvidenceViewerPage />
+        </SignedIn>
+      </ClerkLoaded>
+    </>
+  );
+}
+
 function SharedEvidenceViewerPage(): React.JSX.Element {
   const { shareToken } = useParams();
   const auth = useAuth();
@@ -890,7 +998,7 @@ const evidenceWebRoutes: JittleRouteObject[] = [
   {
     path: "/share/:shareToken",
     element: clerkPublishableKey ? (
-      <SharedEvidenceViewerPage />
+      <SharedEvidenceAuthGate />
     ) : (
       <div className="viewer-empty" role="alert">
         <h2>Clerk is not configured</h2>

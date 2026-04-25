@@ -211,6 +211,8 @@ With the checked-in config, Electron Builder writes build output into:
 
 The release workflow collects the install-oriented artifact from `apps/desktop/artifacts/`.
 
+In-app desktop updates use Electron Builder's GitHub provider. The macOS job publishes the DMG for first install plus the updater ZIP, blockmap, and `latest-mac.yml` metadata that the Settings screen uses when the user clicks **Check for update**. Updates are available only from packaged builds, not from `bun run --cwd apps/desktop dev`.
+
 ### 4. Release notes specific to this repo
 
 - The release workflow only accepts stable tags that match `vX.Y.Z`.

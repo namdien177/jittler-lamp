@@ -48,6 +48,16 @@ export type DesktopCompanionRuntimeSnapshot = Pick<CompanionRuntimeState, "lastE
   recentWrites: CompanionArtifactWrite[];
 };
 
+export type DesktopUpdateState = {
+  status: "idle" | "checking" | "not-available" | "available" | "downloading" | "downloaded" | "error" | "unsupported";
+  currentVersion: string;
+  availableVersion: string | null;
+  releaseDate: string | null;
+  progressPercent: number | null;
+  lastCheckedAt: string | null;
+  error: string | null;
+};
+
 export const desktopIpcRequestChannel = "jittle-lamp:desktop-request";
 export const desktopIpcMessageChannel = "jittle-lamp:desktop-message";
 
@@ -98,6 +108,20 @@ export type DesktopRequestMap = {
   getCompanionRuntime: {
     params: undefined;
     response: DesktopCompanionRuntimeSnapshot;
+  };
+  getDesktopUpdateState: {
+    params: undefined;
+    response: DesktopUpdateState;
+  };
+  checkForDesktopUpdate: {
+    params: undefined;
+    response: DesktopUpdateState;
+  };
+  installDesktopUpdate: {
+    params: undefined;
+    response: {
+      ok: true;
+    };
   };
   getSessionNotes: {
     params: {

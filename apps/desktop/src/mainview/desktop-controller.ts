@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { TimelineSection } from "@jittle-lamp/shared";
 
-import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, SessionRecord, ViewerPayload } from "../rpc";
+import type {
+  DesktopCompanionConfigSnapshot,
+  DesktopCompanionRuntimeSnapshot,
+  DesktopUpdateState,
+  SessionRecord,
+  ViewerPayload
+} from "../rpc";
 import { createDesktopBridge, type DesktopBridge } from "./desktop-bridge";
 import { createDesktopNotesAdapter, createDesktopStorageAdapter } from "./adapters";
 import {
@@ -39,6 +45,7 @@ export type ViewState = {
   bridgeError: string | null;
   config: DesktopCompanionConfigSnapshot | null;
   runtime: DesktopCompanionRuntimeSnapshot | null;
+  update: DesktopUpdateState | null;
   sessions: SessionRecord[];
   allTags: string[];
   dateFilter: DatePreset;
@@ -47,6 +54,8 @@ export type ViewState = {
   draftOutputDir: string;
   feedback: { text: string; tone: FeedbackTone };
   isChoosingFolder: boolean;
+  isCheckingForUpdate: boolean;
+  isInstallingUpdate: boolean;
   isLoading: boolean;
   isSaving: boolean;
 };
@@ -68,6 +77,8 @@ export type DesktopController = {
   setDraftOutputDir: (value: string) => void;
   openCurrentOutputFolder: () => void;
   openConfigFile: () => void;
+  checkForUpdate: () => void;
+  installUpdate: () => void;
   openLocalSession: () => void;
   importZip: () => void;
   viewSession: (sessionId: string) => void;
@@ -130,6 +141,7 @@ function initialViewState(): ViewState {
     bridgeError: null,
     config: null,
     runtime: null,
+    update: null,
     sessions: [],
     allTags: [],
     dateFilter: "all",
@@ -138,6 +150,8 @@ function initialViewState(): ViewState {
     draftOutputDir: "",
     feedback: { text: "Loading desktop companion status…", tone: "neutral" },
     isChoosingFolder: false,
+    isCheckingForUpdate: false,
+    isInstallingUpdate: false,
     isLoading: true,
     isSaving: false
   };
@@ -199,11 +213,12 @@ export function useDesktopController(): DesktopController {
 
   const reloadEverything = async (): Promise<void> => {
     if (!bridge) return;
-    const [config, runtime] = await Promise.all([
+    const [config, runtime, update] = await Promise.all([
       bridge.rpc.request.getCompanionConfig(undefined),
-      bridge.rpc.request.getCompanionRuntime(undefined)
+      bridge.rpc.request.getCompanionRuntime(undefined),
+      bridge.rpc.request.getDesktopUpdateState(undefined)
     ]);
-    patchState({ config, runtime, draftOutputDir: config.outputDir });
+    patchState({ config, runtime, update, draftOutputDir: config.outputDir });
     await reloadCatalog();
   };
 
@@ -313,9 +328,10 @@ export function useDesktopController(): DesktopController {
     let cancelled = false;
     void (async () => {
       try {
-        const [config, runtime, sessions, allTags] = await Promise.all([
+        const [config, runtime, update, sessions, allTags] = await Promise.all([
           bridge.rpc.request.getCompanionConfig(undefined),
           bridge.rpc.request.getCompanionRuntime(undefined),
+          bridge.rpc.request.getDesktopUpdateState(undefined),
           bridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => []),
           bridge.rpc.request.listAllTags(undefined).catch((): string[] => [])
         ]);
@@ -323,6 +339,7 @@ export function useDesktopController(): DesktopController {
         patchState({
           config,
           runtime,
+          update,
           sessions,
           allTags,
           draftOutputDir: config.outputDir,
@@ -356,14 +373,16 @@ export function useDesktopController(): DesktopController {
     const interval = setInterval(() => {
       void (async () => {
         try {
-          const [runtime, sessions, allTags] = await Promise.all([
+          const [runtime, update, sessions, allTags] = await Promise.all([
             bridge.rpc.request.getCompanionRuntime(undefined),
+            bridge.rpc.request.getDesktopUpdateState(undefined),
             bridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => stateRef.current.sessions),
             bridge.rpc.request.listAllTags(undefined).catch((): string[] => stateRef.current.allTags)
           ]);
           patchState((previous) => ({
             ...previous,
             runtime,
+            update,
             sessions,
             allTags
           }));
@@ -546,6 +565,46 @@ export function useDesktopController(): DesktopController {
       const current = stateRef.current;
       if (!bridge || !current.config) return;
       void bridge.rpc.request.openPath({ path: current.config.configFilePath });
+    },
+    checkForUpdate: () => {
+      void (async () => {
+        if (!bridge || stateRef.current.isCheckingForUpdate) return;
+        patchState({
+          isCheckingForUpdate: true,
+          feedback: { tone: "neutral", text: "Checking for a desktop update…" }
+        });
+        try {
+          const update = await bridge.rpc.request.checkForDesktopUpdate(undefined);
+          patchState({
+            update,
+            feedback: {
+              tone: update.status === "error" ? "error" : update.status === "downloaded" ? "success" : "neutral",
+              text: formatUpdateFeedback(update)
+            }
+          });
+        } catch (error) {
+          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Unable to check for updates.") } });
+        } finally {
+          patchState({ isCheckingForUpdate: false });
+        }
+      })();
+    },
+    installUpdate: () => {
+      void (async () => {
+        if (!bridge || stateRef.current.update?.status !== "downloaded") return;
+        patchState({
+          isInstallingUpdate: true,
+          feedback: { tone: "neutral", text: "Restarting to install the update…" }
+        });
+        try {
+          await bridge.rpc.request.installDesktopUpdate(undefined);
+        } catch (error) {
+          patchState({
+            isInstallingUpdate: false,
+            feedback: { tone: "error", text: formatErrorMessage(error, "Unable to install the update.") }
+          });
+        }
+      })();
     },
     openLocalSession: () => {
       void (async () => {
@@ -813,4 +872,34 @@ export function useDesktopController(): DesktopController {
     },
     reloadEverything
   };
+}
+
+function formatUpdateFeedback(update: DesktopUpdateState): string {
+  if (update.status === "downloaded") {
+    return `Version ${update.availableVersion ?? "the latest update"} is ready to install.`;
+  }
+
+  if (update.status === "downloading") {
+    return update.progressPercent === null
+      ? "Downloading the desktop update…"
+      : `Downloading the desktop update (${Math.round(update.progressPercent)}%).`;
+  }
+
+  if (update.status === "available") {
+    return `Version ${update.availableVersion ?? "a new update"} is available and will download automatically.`;
+  }
+
+  if (update.status === "not-available") {
+    return "You are already on the latest desktop version.";
+  }
+
+  if (update.status === "unsupported") {
+    return update.error ?? "Updates are only available in the packaged desktop app.";
+  }
+
+  if (update.status === "error") {
+    return update.error ?? "Unable to check for updates.";
+  }
+
+  return "Desktop updater is idle.";
 }

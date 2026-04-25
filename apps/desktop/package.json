@@ -22,6 +22,7 @@
     "@jittle-lamp/viewer-core": "workspace:*",
     "@jittle-lamp/viewer-react": "workspace:*",
     "@vercel/analytics": "^2.0.1",
+    "electron-updater": "6.8.3",
     "fflate": "0.8.2",
     "libsql": "0.5.29",
     "react": "19.2.0",
@@ -39,13 +40,23 @@
       "output": "artifacts"
     },
     "artifactName": "jittle-lamp-desktop-${version}-macos-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "namdien177",
+        "repo": "jittler-lamp"
+      }
+    ],
     "files": [
       "dist/**/*",
       "package.json"
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+      "target": [
+        "dmg",
+        "zip"
+      ]
     }
   }
 }

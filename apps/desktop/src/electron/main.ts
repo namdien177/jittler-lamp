@@ -18,6 +18,7 @@ import {
   type MenuItemConstructorOptions,
   type OpenDialogOptions
 } from "electron";
+import { autoUpdater, type UpdateInfo } from "electron-updater";
 
 import { loadResolvedCompanionConfig, saveCompanionConfig } from "../companion/config";
 import {
@@ -45,6 +46,7 @@ import {
   type ContextMenuItem,
   type DesktopCompanionConfigSnapshot,
   type DesktopCompanionRuntimeSnapshot,
+  type DesktopUpdateState,
   type DesktopRendererMessageMap,
   type DesktopRequestMap
 } from "../rpc";
@@ -74,6 +76,7 @@ const preloadPath = join(currentDir, "preload.js");
 const mainViewPath = join(currentDir, "..", "views", "mainview", "index.html");
 
 let mainWindow: BrowserWindow | null = null;
+let desktopUpdateState: DesktopUpdateState = createInitialDesktopUpdateState();
 
 const handlers: DesktopHandlerMap = {
   addSessionTag: async ({ sessionId, tag }) => {
@@ -172,6 +175,19 @@ const handlers: DesktopHandlerMap = {
   },
   getCompanionConfig: async () => toDesktopCompanionConfigSnapshot(await refreshCompanionConfig()),
   getCompanionRuntime: async () => toDesktopCompanionRuntimeSnapshot(await getCompanionRuntimeState()),
+  getDesktopUpdateState: () => desktopUpdateState,
+  checkForDesktopUpdate: async () => checkForDesktopUpdate(),
+  installDesktopUpdate: async () => {
+    if (desktopUpdateState.status !== "downloaded") {
+      throw new Error("No downloaded update is ready to install.");
+    }
+
+    queueMicrotask(() => {
+      autoUpdater.quitAndInstall(false, true);
+    });
+
+    return { ok: true as const };
+  },
   getSessionNotes: async ({ sessionId }) => {
     return { notes: getSessionNotes(sessionId) };
   },
@@ -269,6 +285,7 @@ const handlers: DesktopHandlerMap = {
 };
 
 app.setName("Jittle Lamp");
+configureAutoUpdater();
 registerIpcHandlers();
 
 void app.whenReady().then(async () => {
@@ -410,5 +427,123 @@ function toDesktopCompanionRuntimeSnapshot(
     outputDir: runtime.outputDir,
     lastError: runtime.lastError,
     recentWrites: runtime.recentWrites
+  };
+}
+
+function createInitialDesktopUpdateState(): DesktopUpdateState {
+  return {
+    status: "idle",
+    currentVersion: app.getVersion(),
+    availableVersion: null,
+    releaseDate: null,
+    progressPercent: null,
+    lastCheckedAt: null,
+    error: null
+  };
+}
+
+function patchDesktopUpdateState(update: Partial<DesktopUpdateState>): DesktopUpdateState {
+  desktopUpdateState = {
+    ...desktopUpdateState,
+    ...update,
+    currentVersion: app.getVersion()
+  };
+  return desktopUpdateState;
+}
+
+function configureAutoUpdater(): void {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    patchDesktopUpdateState({
+      status: "checking",
+      progressPercent: null,
+      error: null,
+      lastCheckedAt: new Date().toISOString()
+    });
+  });
+
+  autoUpdater.on("update-available", (info: UpdateInfo) => {
+    patchDesktopUpdateState(toDesktopUpdateAvailableState(info, "available"));
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    patchDesktopUpdateState({
+      status: "downloading",
+      progressPercent: Number.isFinite(progress.percent) ? progress.percent : null,
+      error: null
+    });
+  });
+
+  autoUpdater.on("update-downloaded", (info: UpdateInfo) => {
+    patchDesktopUpdateState(toDesktopUpdateAvailableState(info, "downloaded"));
+  });
+
+  autoUpdater.on("update-not-available", (info: UpdateInfo) => {
+    patchDesktopUpdateState({
+      status: "not-available",
+      availableVersion: info.version ?? null,
+      releaseDate: info.releaseDate ?? null,
+      progressPercent: null,
+      lastCheckedAt: new Date().toISOString(),
+      error: null
+    });
+  });
+
+  autoUpdater.on("error", (error: Error) => {
+    patchDesktopUpdateState({
+      status: "error",
+      progressPercent: null,
+      lastCheckedAt: new Date().toISOString(),
+      error: error.message
+    });
+  });
+}
+
+async function checkForDesktopUpdate(): Promise<DesktopUpdateState> {
+  if (!app.isPackaged) {
+    return patchDesktopUpdateState({
+      status: "unsupported",
+      progressPercent: null,
+      lastCheckedAt: new Date().toISOString(),
+      error: "Updates are only available in the packaged desktop app."
+    });
+  }
+
+  if (desktopUpdateState.status === "checking" || desktopUpdateState.status === "downloading") {
+    return desktopUpdateState;
+  }
+
+  try {
+    patchDesktopUpdateState({
+      status: "checking",
+      progressPercent: null,
+      lastCheckedAt: new Date().toISOString(),
+      error: null
+    });
+    await autoUpdater.checkForUpdates();
+    return desktopUpdateState;
+  } catch (error) {
+    return patchDesktopUpdateState({
+      status: "error",
+      progressPercent: null,
+      lastCheckedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+function toDesktopUpdateAvailableState(
+  info: UpdateInfo,
+  status: Extract<DesktopUpdateState["status"], "available" | "downloaded">
+): Partial<DesktopUpdateState> {
+  return {
+    status,
+    availableVersion: info.version ?? null,
+    releaseDate: info.releaseDate ?? null,
+    progressPercent: status === "downloaded" ? 100 : null,
+    lastCheckedAt: new Date().toISOString(),
+    error: null
   };
 }

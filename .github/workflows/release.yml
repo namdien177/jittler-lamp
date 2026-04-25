@@ -183,7 +183,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-desktop
-          path: release-artifacts/jittle-lamp-desktop-v${{ needs.validate-tag.outputs.version }}-macos-arm64-*.dmg
+          path: release-artifacts/*
           if-no-files-found: error
 
   publish-release:

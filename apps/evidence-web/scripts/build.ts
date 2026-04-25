@@ -85,14 +85,21 @@ if (!build.success) {
   process.exit(1);
 }
 
+const previewOrigin = getWorkspaceEnvValue("JITTLE_LAMP_WEB_ORIGIN").replace(/\/+$/, "");
+const indexHtmlSource = await Bun.file(new URL("../src/index.html", import.meta.url)).text();
+const indexHtml = previewOrigin
+  ? indexHtmlSource.replaceAll("./img-prev.png", `${previewOrigin}/img-prev.png`)
+  : indexHtmlSource;
+
 await Promise.all([
-  Bun.write(
-    new URL("index.html", distRoot),
-    Bun.file(new URL("../src/index.html", import.meta.url))
-  ),
+  Bun.write(new URL("index.html", distRoot), indexHtml),
   Bun.write(
     new URL("index.css", distRoot),
     Bun.file(new URL("../src/index.css", import.meta.url))
+  ),
+  Bun.write(
+    new URL("img-prev.png", distRoot),
+    Bun.file(new URL("../assets/img-prev.png", import.meta.url))
   )
 ]);
 

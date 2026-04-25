@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
-import { evidences, shareLinks } from "../db/schema";
+import { evidences, organizations, shareLinks } from "../db/schema";
 import {
 	apiErrorSchema,
 	createApiError,
@@ -44,6 +44,11 @@ const resolvedShareLinkResponseSchema = t.Object({
 		evidenceId: t.String({ minLength: 1 }),
 		orgId: t.String({ minLength: 1 }),
 		expiresAt: t.Number(),
+		access: t.Union([t.Literal("granted"), t.Literal("denied")]),
+	}),
+	organization: t.Object({
+		id: t.String({ minLength: 1 }),
+		name: t.String({ minLength: 1 }),
 	}),
 });
 
@@ -315,15 +320,25 @@ export const createShareLinkRoutes = (auth: ClerkAuthPlugin) =>
 							);
 						}
 
+						const organization = await db.query.organizations.findFirst({
+							where: eq(organizations.id, shareLink.orgId),
+							columns: { id: true, name: true },
+						});
+						if (!organization) {
+							set.status = 404;
+							return createApiError(
+								requestId,
+								"SHARE_LINK_NOT_FOUND",
+								"Share link is invalid, expired, or revoked",
+								404,
+							);
+						}
+
 						const canAccess = await evidencePolicy.canViewEvidence(db, {
 							organizationId: shareLink.orgId,
 							teamId: shareLink.teamId,
 							userId: authContext.localUserId,
 						});
-						if (!canAccess) {
-							set.status = 403;
-							return createForbiddenPayload(requestId);
-						}
 
 						return {
 							shareLink: {
@@ -331,6 +346,11 @@ export const createShareLinkRoutes = (auth: ClerkAuthPlugin) =>
 								evidenceId: shareLink.evidenceId,
 								orgId: shareLink.orgId,
 								expiresAt: shareLink.expiresAt,
+								access: canAccess ? ("granted" as const) : ("denied" as const),
+							},
+							organization: {
+								id: organization.id,
+								name: organization.name,
 							},
 						};
 					},

@@ -71,7 +71,7 @@ const [mainBuild, preloadBuild, viewBuild] = await Promise.all([
     outdir: electronRoot.pathname,
     target: "node",
     format: "esm",
-    external: ["electron", "libsql", "@libsql/*"],
+    external: ["electron", "electron-updater", "libsql", "@libsql/*"],
     minify: nodeEnv === "production",
     naming: "[name].js"
   }),

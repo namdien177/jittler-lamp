@@ -1,5 +1,6 @@
 import React from "react";
 
+import type { DesktopUpdateState } from "../../rpc";
 import type { DesktopController } from "../desktop-controller";
 import { formatRuntimeLabel, formatSourceLabel } from "../catalog-view";
 import { useToast } from "../ui/toast";
@@ -8,9 +9,13 @@ export function SettingsPage(props: { desktop: DesktopController }): React.JSX.E
   const { desktop } = props;
   const toast = useToast();
   const config = desktop.state.config;
+  const update = desktop.state.update;
   const isEnvOverrideActive = config?.envOverrideActive ?? false;
   const isDirty = Boolean(config && desktop.state.draftOutputDir !== config.outputDir);
   const hasBridgeError = desktop.state.bridgeError !== null;
+  const canInstallUpdate = update?.status === "downloaded";
+  const isUpdateBusy =
+    desktop.state.isCheckingForUpdate || update?.status === "checking" || update?.status === "downloading";
 
   return (
     <>
@@ -101,6 +106,47 @@ export function SettingsPage(props: { desktop: DesktopController }): React.JSX.E
       <section className="card">
         <div className="card-header">
           <div>
+            <h2 className="card-title">App updates</h2>
+            <p className="card-subtitle">Check GitHub Releases for a newer packaged desktop build.</p>
+          </div>
+        </div>
+        <div className="card-section column" style={{ gap: 12 }}>
+          <div className="detail-grid">
+            <Detail label="Current version" value={update?.currentVersion ?? "—"} />
+            <Detail label="Latest found" value={update?.availableVersion ?? "—"} />
+            <Detail label="Status" value={formatUpdateStatus(update)} />
+            <Detail label="Last checked" value={formatUpdateDate(update?.lastCheckedAt)} />
+          </div>
+          {update?.status === "downloading" && update.progressPercent !== null ? (
+            <div className="update-progress" aria-label="Update download progress">
+              <span style={{ width: `${Math.max(0, Math.min(100, update.progressPercent))}%` }} />
+            </div>
+          ) : null}
+          {update?.error ? <div className="auth-error">{update.error}</div> : null}
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="button primary sm"
+              type="button"
+              disabled={hasBridgeError || isUpdateBusy || desktop.state.isInstallingUpdate}
+              onClick={desktop.checkForUpdate}
+            >
+              {isUpdateBusy ? "Checking…" : "Check for update"}
+            </button>
+            <button
+              className="button secondary sm"
+              type="button"
+              disabled={hasBridgeError || !canInstallUpdate || desktop.state.isInstallingUpdate}
+              onClick={desktop.installUpdate}
+            >
+              {desktop.state.isInstallingUpdate ? "Restarting…" : "Restart and install"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="card-header">
+          <div>
             <h2 className="card-title">Route details</h2>
             <p className="card-subtitle">Where the active configuration originates from.</p>
           </div>
@@ -130,4 +176,26 @@ function Detail(props: { label: string; value: string }): React.JSX.Element {
       <span className="detail-value">{props.value}</span>
     </div>
   );
+}
+
+function formatUpdateStatus(update: DesktopUpdateState | null | undefined): string {
+  if (!update) return "—";
+
+  if (update.status === "downloading" && update.progressPercent !== null) {
+    return `Downloading ${Math.round(update.progressPercent)}%`;
+  }
+
+  return update.status
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatUpdateDate(value: string | null | undefined): string {
+  if (!value) return "—";
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
 }
