@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 
 import {
   getWorkspaceVersion,
@@ -8,26 +10,25 @@ import {
   versionPackageRelativePaths
 } from "./workspace-version";
 
+type ReleaseIncrement = "patch" | "minor" | "major";
+
 const rawVersion = process.argv[2];
 
-if (!rawVersion) {
-  console.error("Usage: bun run release <version>");
-  process.exit(1);
-}
-
-const nextVersion = normalizeReleaseVersion(rawVersion);
 const currentVersion = getWorkspaceVersion();
-const tagName = `v${nextVersion}`;
-
-if (nextVersion === currentVersion) {
-  fail(`Workspace is already at ${nextVersion}.`);
-}
 
 assertCleanWorkingTree();
 assertMainBranch();
 
 run("git", ["fetch", "origin", "main", "--tags"]);
 assertMainMatchesOrigin();
+
+const nextVersion = rawVersion ? normalizeReleaseVersion(rawVersion) : await promptForReleaseVersion();
+const tagName = `v${nextVersion}`;
+
+if (nextVersion === currentVersion) {
+  fail(`Workspace is already at ${nextVersion}.`);
+}
+
 assertTagDoesNotExist(tagName);
 
 run("bun", ["run", "release:set-version", nextVersion]);
@@ -50,6 +51,86 @@ run("git", ["tag", tagName]);
 run("git", ["push", "origin", tagName]);
 
 console.info(`Created and pushed ${tagName}. The release workflow will build and publish the GitHub release.`);
+
+async function promptForReleaseVersion(): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    fail("Usage: bun run release <version>");
+  }
+
+  const latestTagVersion = getLatestReleaseTagVersion();
+  const patchVersion = bumpVersion(latestTagVersion, "patch");
+  const minorVersion = bumpVersion(latestTagVersion, "minor");
+  const majorVersion = bumpVersion(latestTagVersion, "major");
+  const rl = createInterface({ input, output });
+
+  try {
+    console.info(`Latest release tag: v${latestTagVersion}`);
+    console.info("Select release version:");
+    console.info(`1. bump patch  -> v${patchVersion}`);
+    console.info(`2. bump minor  -> v${minorVersion}`);
+    console.info(`3. bump major  -> v${majorVersion}`);
+    console.info("4. custom");
+
+    while (true) {
+      const choice = (await rl.question("Choose 1, 2, 3, or 4: ")).trim();
+      if (choice === "1") return patchVersion;
+      if (choice === "2") return minorVersion;
+      if (choice === "3") return majorVersion;
+      if (choice === "4") {
+        const customVersion = (await rl.question("Enter release version: ")).trim();
+        try {
+          return normalizeReleaseVersion(customVersion);
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : String(error));
+        }
+      } else {
+        console.error("Expected 1, 2, 3, or 4.");
+      }
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+function getLatestReleaseTagVersion(): string {
+  const tags = capture("git", ["tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"])
+    .split("\n")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .map((tag) => {
+      try {
+        return normalizeReleaseVersion(tag);
+      } catch {
+        return null;
+      }
+    })
+    .filter((version): version is string => version !== null);
+
+  if (tags.length === 0) {
+    fail("No release tags found. Use bun run release <version> for the first release.");
+  }
+
+  return tags.sort(compareVersions).at(-1) ?? fail("No release tags found.");
+}
+
+function bumpVersion(version: string, increment: ReleaseIncrement): string {
+  const [major = 0, minor = 0, patch = 0] = version.split(".").map((value) => Number.parseInt(value, 10));
+  if (increment === "major") return `${major + 1}.0.0`;
+  if (increment === "minor") return `${major}.${minor + 1}.0`;
+  return `${major}.${minor}.${patch + 1}`;
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split(".").map((value) => Number.parseInt(value, 10));
+  const rightParts = right.split(".").map((value) => Number.parseInt(value, 10));
+
+  for (let index = 0; index < 3; index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+
+  return 0;
+}
 
 function assertCleanWorkingTree(): void {
   const status = capture("git", ["status", "--porcelain"]);

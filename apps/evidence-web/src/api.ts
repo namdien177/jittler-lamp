@@ -30,6 +30,26 @@ export type AcceptInvitationResponse = {
   invitationId: string;
 };
 
+export type ApiOrganization = {
+  id: string;
+  name: string;
+  role: string;
+  isPersonal: boolean;
+  isActive: boolean;
+};
+
+export type ApiAccountProfile = {
+  userId: string;
+  activeOrgId: string | null;
+  user: {
+    id: string;
+    displayName: string;
+    email: string | null;
+    imageUrl: string | null;
+  };
+  organizations: ApiOrganization[];
+};
+
 export type EvidenceArtifact = {
   id: string;
   evidenceId: string;
@@ -87,5 +107,15 @@ export const api = {
     authedFetch<AcceptInvitationResponse>(getToken, "/orgs/invitations/accept", {
       method: "POST",
       body: JSON.stringify({ token })
-    })
+    }),
+
+  fetchAccountProfile: (getToken: FetchToken) =>
+    authedFetch<ApiAccountProfile>(getToken, "/protected/me"),
+
+  selectActiveOrganization: (getToken: FetchToken, orgId: string) =>
+    authedFetch<{ organizationId: string }>(
+      getToken,
+      `/orgs/${encodeURIComponent(orgId)}/select-active`,
+      { method: "POST" }
+    )
 };
