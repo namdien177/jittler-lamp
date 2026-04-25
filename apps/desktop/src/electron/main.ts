@@ -18,7 +18,8 @@ import {
   type MenuItemConstructorOptions,
   type OpenDialogOptions
 } from "electron";
-import { autoUpdater, type UpdateInfo } from "electron-updater";
+import electronUpdater from "electron-updater";
+import type { UpdateInfo } from "electron-updater";
 
 import { loadResolvedCompanionConfig, saveCompanionConfig } from "../companion/config";
 import {
@@ -76,6 +77,7 @@ const preloadPath = join(currentDir, "preload.js");
 const mainViewPath = join(currentDir, "..", "views", "mainview", "index.html");
 
 let mainWindow: BrowserWindow | null = null;
+const { autoUpdater } = electronUpdater;
 let desktopUpdateState: DesktopUpdateState = createInitialDesktopUpdateState();
 
 const handlers: DesktopHandlerMap = {
