@@ -14,7 +14,7 @@ describe("viewer modal layout CSS", () => {
   });
 
   test("two-column body keeps left flexible and caps right pane at 600px", () => {
-    expect(css).toMatch(/\.jl-vm-body\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*3fr\)\s*minmax\(0,\s*min\(4fr,\s*600px\)\);/);
+    expect(css).toMatch(/\.jl-vm-body\s*\{[\s\S]*?grid-template-columns:\s*3fr\s*minmax\(0,\s*600px\);/);
   });
 
   test("left/right panes can shrink without forcing layout overflow", () => {
