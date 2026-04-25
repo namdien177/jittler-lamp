@@ -1,25 +1,50 @@
 {
   "name": "@jittle-lamp/desktop",
   "version": "0.1.3",
+  "description": "Jittle Lamp desktop companion and local session viewer.",
   "private": true,
   "type": "module",
+  "main": "dist/electron/main.js",
   "scripts": {
-    "dev": "bun run ./src/server.ts",
+    "dev": "JITTLE_LAMP_DESKTOP_BUILD_ENV=dev bun run build && electron .",
     "build": "bun run ./scripts/build.ts",
-    "package": "electrobun build",
-    "package:stable": "electrobun build --env=stable",
-    "package:canary": "electrobun build --env=canary",
+    "package": "bun run package:local",
+    "package:local": "bun run ./scripts/package.ts --mode=local --env=stable",
+    "package:ci": "bun run ./scripts/package.ts --mode=ci --env=stable",
+    "package:stable": "bun run package:local",
+    "package:canary": "bun run ./scripts/package.ts --mode=local --env=canary",
     "set-output": "bun run ./src/configure-output.ts",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.3",
     "@jittle-lamp/shared": "workspace:*",
     "@jittle-lamp/viewer-core": "workspace:*",
     "@jittle-lamp/viewer-react": "workspace:*",
-    "electrobun": "1.16.0",
     "fflate": "0.8.2",
+    "libsql": "0.5.29",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-router": "7.14.2"
+  },
+  "devDependencies": {
+    "electron": "41.3.0",
+    "electron-builder": "26.8.1"
+  },
+  "build": {
+    "appId": "dev.jittlelamp.desktop",
+    "productName": "Jittle Lamp",
+    "directories": {
+      "output": "artifacts"
+    },
+    "artifactName": "jittle-lamp-desktop-${version}-macos-${arch}.${ext}",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg"
+    }
   }
 }

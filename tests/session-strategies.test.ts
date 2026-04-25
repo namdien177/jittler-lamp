@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { canonicalArchiveBundles, canonicalZipBundles } from "./fixtures/canonical-fixtures";
 
 import { createWebSessionStrategies } from "../apps/evidence-web/src/session-strategy";
-import { createDesktopSessionStrategies } from "../apps/desktop/src/bun/session-strategy";
+import { createDesktopSessionStrategies } from "../apps/desktop/src/session/session-strategy";
 
 const SESSION_ID = canonicalArchiveBundles.small.sessionId;
 

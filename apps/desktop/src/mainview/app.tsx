@@ -1,5 +1,16 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  ClerkDegraded,
+  ClerkFailed,
+  ClerkLoaded,
+  ClerkLoading,
+  ClerkProvider,
+  SignIn,
+  SignedIn,
+  SignedOut,
+  UserButton
+} from "@clerk/clerk-react";
 import { findActiveIndex, formatOffset, type TimelineSection } from "@jittle-lamp/shared";
 import {
   createMergeGroup,
@@ -15,10 +26,10 @@ import {
   validateMergeDialog
 } from "@jittle-lamp/viewer-core";
 import {
-  HashRouter,
+  MemoryRouter,
+  Navigate,
   NavLink,
   Outlet,
-  useLocation,
   useNavigate
 } from "react-router";
 import { useRoutes } from "react-router";
@@ -125,6 +136,9 @@ type DesktopController = {
 };
 
 const runtimePollIntervalMs = 2_000;
+const signInPath = "/sign-in";
+const homePath = "/";
+const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY?.trim() ?? "";
 const mediaEventNames = [
   "loadstart",
   "loadedmetadata",
@@ -180,16 +194,144 @@ function cloneViewerState(state: ViewerState): ViewerState {
   };
 }
 
-function DesktopAppLayout(): React.JSX.Element {
+type ClerkNavigationMetadata = {
+  windowNavigate: (to: URL | string) => void;
+};
+
+function shouldUseWindowNavigation(to: string): boolean {
+  return /^[a-z][a-z\d+.-]*:/i.test(to) || to.startsWith("//");
+}
+
+function AuthStatusPage(props: { title: string; detail?: string }): React.JSX.Element {
+  return (
+    <main className="auth-page">
+      <div className="auth-status" role="status">
+        <span className="auth-status-title">{props.title}</span>
+        {props.detail ? <span className="auth-status-detail">{props.detail}</span> : null}
+      </div>
+    </main>
+  );
+}
+
+function MissingClerkConfigPage(): React.JSX.Element {
+  return (
+    <AuthStatusPage
+      title="Clerk is not configured"
+      detail="Set CLERK_PUBLISHABLE_KEY before starting the desktop app."
+    />
+  );
+}
+
+function ClerkLoadErrorPage(): React.JSX.Element {
+  return (
+    <AuthStatusPage
+      title="Unable to load sign-in"
+      detail="Check the Clerk publishable key and network access."
+    />
+  );
+}
+
+function DesktopClerkProvider(props: { children: React.ReactNode }): React.JSX.Element {
   const navigate = useNavigate();
-  const location = useLocation();
-  const controller = useDesktopController(navigate, location.pathname);
+
+  const createRouter = (replace: boolean) => (
+    to: string,
+    metadata?: ClerkNavigationMetadata
+  ) => {
+    if (shouldUseWindowNavigation(to)) {
+      if (metadata) {
+        metadata.windowNavigate(to);
+      } else {
+        window.location.href = to;
+      }
+      return;
+    }
+
+    navigate(to, { replace });
+  };
+
+  const routerPush = useMemo(() => createRouter(false), [navigate]);
+  const routerReplace = useMemo(() => createRouter(true), [navigate]);
+
+  return (
+    <ClerkProvider
+      publishableKey={clerkPublishableKey}
+      signInUrl={signInPath}
+      afterSignOutUrl={signInPath}
+      routerPush={routerPush}
+      routerReplace={routerReplace}
+    >
+      {props.children}
+    </ClerkProvider>
+  );
+}
+
+function SignInPage(): React.JSX.Element {
+  return (
+    <>
+      <ClerkFailed>
+        <ClerkLoadErrorPage />
+      </ClerkFailed>
+      <ClerkDegraded>
+        <ClerkLoadErrorPage />
+      </ClerkDegraded>
+      <ClerkLoading>
+        <AuthStatusPage title="Checking session..." />
+      </ClerkLoading>
+      <ClerkLoaded>
+        <SignedIn>
+          <Navigate to={homePath} replace />
+        </SignedIn>
+        <SignedOut>
+          <main className="auth-page">
+            <SignIn
+              routing="hash"
+              oauthFlow="popup"
+              forceRedirectUrl={homePath}
+              fallbackRedirectUrl={homePath}
+              signUpForceRedirectUrl={homePath}
+              signUpFallbackRedirectUrl={homePath}
+              signInUrl={signInPath}
+            />
+          </main>
+        </SignedOut>
+      </ClerkLoaded>
+    </>
+  );
+}
+
+function RequireAuth(props: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <>
+      <ClerkFailed>
+        <ClerkLoadErrorPage />
+      </ClerkFailed>
+      <ClerkDegraded>
+        <ClerkLoadErrorPage />
+      </ClerkDegraded>
+      <ClerkLoading>
+        <AuthStatusPage title="Checking session..." />
+      </ClerkLoading>
+      <ClerkLoaded>
+        <SignedIn>{props.children}</SignedIn>
+        <SignedOut>
+          <Navigate to={signInPath} replace />
+        </SignedOut>
+      </ClerkLoaded>
+    </>
+  );
+}
+
+function DesktopAppLayout(): React.JSX.Element {
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const controller = useDesktopController(isSettingsOpen, setIsSettingsOpen);
 
   return (
     <DesktopContext.Provider value={controller}>
       <div className="app-shell">
         <DesktopTopBar />
         <Outlet />
+        {isSettingsOpen ? <SettingsDialog /> : null}
         <DesktopViewerOverlay />
       </div>
     </DesktopContext.Provider>
@@ -205,11 +347,12 @@ function DesktopTopBar(): React.JSX.Element {
       <div className="top-bar-left">
         <span className="app-name">Jittle Lamp</span>
         <nav className="page-tabs" aria-label="Desktop pages">
-          <NavLink className="page-tab" to="/" end>
+          <NavLink
+            className={({ isActive }) => (isActive ? "page-tab active" : "page-tab")}
+            to="/"
+            end
+          >
             Library
-          </NavLink>
-          <NavLink className="page-tab" to="/settings">
-            Settings
           </NavLink>
         </nav>
       </div>
@@ -422,7 +565,7 @@ function SessionCard(props: { session: SessionRecord }): React.JSX.Element {
   );
 }
 
-function SettingsPage(): React.JSX.Element {
+function SettingsDialog(): React.JSX.Element {
   const desktop = useDesktop();
   const config = desktop.state.config;
   const isEnvOverrideActive = config?.envOverrideActive ?? false;
@@ -430,10 +573,16 @@ function SettingsPage(): React.JSX.Element {
   const hasBridgeError = desktop.state.bridgeError !== null;
 
   return (
-    <main className="desktop-page settings-page">
-      <div className="settings-drawer settings-panel" data-open="true">
+    <div
+      className="drawer-overlay"
+      data-open="true"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) desktop.closeSettings();
+      }}
+    >
+      <div className="settings-drawer" data-open="true" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
         <div className="drawer-header">
-          <span className="drawer-title">Settings</span>
+          <span className="drawer-title" id="settings-dialog-title">Settings</span>
           <button className="drawer-close" type="button" aria-label="Back to library" onClick={desktop.closeSettings}>
             ✕
           </button>
@@ -493,8 +642,11 @@ function SettingsPage(): React.JSX.Element {
             </div>
           </div>
         </div>
+        <div className="drawer-auth-footer" aria-label="Account menu">
+          <UserButton showName signInUrl={signInPath} />
+        </div>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -622,7 +774,10 @@ function DesktopViewerOverlay(): React.JSX.Element {
   );
 }
 
-function useDesktopController(navigate: ReturnType<typeof useNavigate>, pathname: string): DesktopController {
+function useDesktopController(
+  isSettingsOpen: boolean,
+  setIsSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>
+): DesktopController {
   const bridge = useMemo(() => createDesktopBridge(), []);
   const [state, setState] = useState<ViewState>(() => initialViewState());
   const [viewerState, setViewerState] = useState<ViewerState>(() => createViewerState());
@@ -761,7 +916,7 @@ function useDesktopController(navigate: ReturnType<typeof useNavigate>, pathname
   useEffect(() => {
     if (!bridge) {
       patchState({
-        bridgeError: "Electrobun view RPC did not initialize in this renderer.",
+        bridgeError: "Electron preload bridge did not initialize in this renderer.",
         feedback: { tone: "error", text: "Desktop runtime unavailable." },
         isLoading: false
       });
@@ -933,8 +1088,8 @@ function useDesktopController(navigate: ReturnType<typeof useNavigate>, pathname
           updateViewer((next) => closeMergeDialogState(next));
         } else if (viewerStateRef.current.open) {
           closeViewer();
-        } else if (pathname === "/settings") {
-          navigate("/");
+        } else if (isSettingsOpen) {
+          setIsSettingsOpen(false);
         } else if (stateRef.current.editingTagSessionId !== null) {
           patchState({ editingTagSessionId: null, tagInputValue: "" });
         }
@@ -949,7 +1104,7 @@ function useDesktopController(navigate: ReturnType<typeof useNavigate>, pathname
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [bridge, navigate, pathname]);
+  }, [bridge, isSettingsOpen, setIsSettingsOpen]);
 
   return {
     bridge,
@@ -961,8 +1116,8 @@ function useDesktopController(navigate: ReturnType<typeof useNavigate>, pathname
     setDateFilter: (preset) => patchState({ dateFilter: preset }),
     setTagFilter: (tag) => patchState({ tagFilter: tag }),
     setTagFilterDraft: () => undefined,
-    openSettings: () => navigate("/settings"),
-    closeSettings: () => navigate("/"),
+    openSettings: () => setIsSettingsOpen(true),
+    closeSettings: () => setIsSettingsOpen(false),
     chooseFolder: () => {
       void (async () => {
         const current = stateRef.current;
@@ -1431,11 +1586,19 @@ function buildTimelineRows(viewerState: ViewerState): TimelineRow[] {
 
 const desktopRoutes: JittleRouteObject[] = [
   {
+    path: `${signInPath}/*`,
+    element: <SignInPage />
+  },
+  {
     path: "/",
-    element: <DesktopAppLayout />,
+    element: (
+      <RequireAuth>
+        <DesktopAppLayout />
+      </RequireAuth>
+    ),
     children: [
       { index: true, element: <LibraryPage /> },
-      { path: "settings", element: <SettingsPage /> }
+      { path: "*", element: <Navigate to={homePath} replace /> }
     ]
   }
 ];
@@ -1449,7 +1612,13 @@ const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("Desktop main view root element was not found.");
 
 createRoot(root).render(
-  <HashRouter>
-    <DesktopRoutes />
-  </HashRouter>
+  <MemoryRouter>
+    {clerkPublishableKey ? (
+      <DesktopClerkProvider>
+        <DesktopRoutes />
+      </DesktopClerkProvider>
+    ) : (
+      <MissingClerkConfigPage />
+    )}
+  </MemoryRouter>
 );

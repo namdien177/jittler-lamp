@@ -7,7 +7,7 @@ import { strToU8, zipSync } from "fflate";
 import { buildSectionTimeline, createSessionArchive, createSessionDraft, type ActionMergeGroup } from "@jittle-lamp/shared";
 import { createMergeGroup, getContiguousMergeableSelection } from "@jittle-lamp/viewer-core";
 
-import { importZipBundle, buildSessionZip } from "../apps/desktop/src/bun/zip-import";
+import { importZipBundle, buildSessionZip } from "../apps/desktop/src/session/zip-import";
 import { saveLibrarySessionReviewState, _testOverrideDb } from "../apps/desktop/src/companion/sessions-db";
 import { loadSessionZip } from "../apps/evidence-web/src/loader";
 import { buildReviewedSessionZip } from "../apps/evidence-web/src/archive-export";

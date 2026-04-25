@@ -1,8 +1,29 @@
-const projectRoot = new URL("..", import.meta.url);
+import { existsSync, readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
+
 const workspaceRoot = new URL("../../../", import.meta.url);
 const distRoot = new URL("../dist/", import.meta.url);
+const electronRoot = new URL("./electron/", distRoot);
 const viewsRoot = new URL("./views/mainview/", distRoot);
-const bunRoot = new URL("./bun/", distRoot);
+const cliBuildEnv = process.argv.find((arg) => arg.startsWith("--env="))?.split("=")[1];
+const requestedBuildEnv = process.env.JITTLE_LAMP_DESKTOP_BUILD_ENV ?? process.env.ELECTRON_BUILD_ENV ?? cliBuildEnv ?? "dev";
+const buildEnv = ["dev", "canary", "stable"].includes(requestedBuildEnv) ? requestedBuildEnv : "dev";
+const nodeEnv = buildEnv === "dev" ? "development" : "production";
+
+function getWorkspaceEnvValue(name: string): string {
+  const currentValue = process.env[name];
+  if (currentValue) return currentValue;
+
+  const envFile = new URL(".env", workspaceRoot);
+  if (!existsSync(envFile)) return "";
+
+  return parseEnv(readFileSync(envFile, "utf8"))[name] ?? "";
+}
+
+const browserDefines = {
+  "process.env.CLERK_PUBLISHABLE_KEY": JSON.stringify(getWorkspaceEnvValue("CLERK_PUBLISHABLE_KEY")),
+  "process.env.NODE_ENV": JSON.stringify(nodeEnv)
+};
 
 const reactEntrypoints = new Map([
   ["react", new URL("node_modules/react/index.js", workspaceRoot).pathname],
@@ -25,13 +46,23 @@ const dedupeReactPlugin = {
   }
 };
 
-const [bunBuild, viewBuild] = await Promise.all([
+const [mainBuild, preloadBuild, viewBuild] = await Promise.all([
   Bun.build({
-    entrypoints: [new URL("../src/bun/index.ts", import.meta.url).pathname],
-    outdir: bunRoot.pathname,
-    target: "bun",
+    entrypoints: [new URL("../src/electron/main.ts", import.meta.url).pathname],
+    outdir: electronRoot.pathname,
+    target: "node",
     format: "esm",
-    external: ["electrobun", "electrobun/bun"],
+    external: ["electron", "libsql", "@libsql/*"],
+    minify: nodeEnv === "production",
+    naming: "[name].js"
+  }),
+  Bun.build({
+    entrypoints: [new URL("../src/electron/preload.ts", import.meta.url).pathname],
+    outdir: electronRoot.pathname,
+    target: "node",
+    format: "esm",
+    external: ["electron"],
+    minify: nodeEnv === "production",
     naming: "[name].js"
   }),
   Bun.build({
@@ -39,13 +70,15 @@ const [bunBuild, viewBuild] = await Promise.all([
     outdir: viewsRoot.pathname,
     target: "browser",
     format: "esm",
+    define: browserDefines,
     plugins: [dedupeReactPlugin],
+    minify: nodeEnv === "production",
     naming: "[name].js"
   })
 ]);
 
-if (!bunBuild.success || !viewBuild.success) {
-  for (const log of [...bunBuild.logs, ...viewBuild.logs]) {
+if (!mainBuild.success || !preloadBuild.success || !viewBuild.success) {
+  for (const log of [...mainBuild.logs, ...preloadBuild.logs, ...viewBuild.logs]) {
     console.error(log);
   }
 
@@ -60,10 +93,6 @@ await Promise.all([
   Bun.write(
     new URL("index.css", viewsRoot),
     Bun.file(new URL("../src/mainview/index.css", import.meta.url))
-  ),
-  Bun.write(
-    new URL("electrobun.config.ts", distRoot),
-    Bun.file(new URL("electrobun.config.ts", projectRoot))
   )
 ]);
 

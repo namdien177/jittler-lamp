@@ -13,7 +13,7 @@
 ## Repository shape
 
 - `apps/extension`: service worker + injectable content script + build script
-- `apps/desktop`: Electrobun shell with a minimal library-oriented desktop surface
+- `apps/desktop`: Electron shell with a minimal library-oriented desktop surface
 - `packages/shared`: canonical schemas, manifest helpers, and event contracts
 - `tests`: smoke coverage for shared contracts and workspace assumptions
 
@@ -39,14 +39,14 @@
    V1 supports one active-tab session at a time, checkpoints active session state in session storage, and exports with `chrome.downloads` instead of any remote backend.
 
 5. **Optional local companion writer**  
-   A Bun-powered companion server can run on `127.0.0.1:48115` and save session artifacts directly into a configured folder on the same machine. The extension falls back to browser downloads if that companion is unavailable.
+   A local companion server can run on `127.0.0.1:48115` and save session artifacts directly into a configured folder on the same machine. The extension falls back to browser downloads if that companion is unavailable.
    The companion only accepts write requests from `chrome-extension://` origins and rejects ordinary web origins; it does not yet pin writes to a single extension ID. Folder configuration can be changed locally through the desktop app or CLI.
 
 6. **Minimal desktop shell**  
    The desktop app exists to validate the shared bundle boundary and prepare for future import/review flows without becoming part of the recording pipeline.
 
 7. **Feasible build validation now, packaging next**  
-   The repository root build validates the desktop shell sources by bundling the Bun entry and main view assets. Electrobun remains configured for local dev/package flows, while deeper release packaging stays a follow-up concern.
+   The repository root build validates the desktop shell sources by bundling the Electron main/preload entrypoints and main view assets. Electron Builder owns local package flows.
 
 ## Explicitly out of scope for V1
 

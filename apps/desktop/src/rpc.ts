@@ -1,5 +1,3 @@
-import type { RPCSchema } from "electrobun/bun";
-
 import type { ArchiveAnnotation, SessionArchive } from "@jittle-lamp/shared";
 
 import type { ResolvedCompanionConfig } from "./companion/config";
@@ -50,164 +48,160 @@ export type DesktopCompanionRuntimeSnapshot = Pick<CompanionRuntimeState, "lastE
   recentWrites: CompanionArtifactWrite[];
 };
 
-export type DesktopRPC = {
-  bun: RPCSchema<{
-    requests: {
-      chooseOutputDirectory: {
-        params: {
-          startingFolder: string;
-        };
-        response: {
-          selectedPath: string | null;
-        };
-      };
-      addSessionTag: {
-        params: {
-          sessionId: string;
-          tag: string;
-        };
-        response: {
-          ok: true;
-        };
-      };
-      clearTempSession: {
-        params: {
-          tempId: string;
-        };
-        response: {
-          ok: true;
-        };
-      };
-      deleteSession: {
-        params: {
-          sessionId: string;
-        };
-        response: {
-          ok: true;
-        };
-      };
-      exitApp: {
-        params: undefined;
-        response: {
-          ok: true;
-        };
-      };
-      getCompanionConfig: {
-        params: undefined;
-        response: DesktopCompanionConfigSnapshot;
-      };
-      getCompanionRuntime: {
-        params: undefined;
-        response: DesktopCompanionRuntimeSnapshot;
-      };
-      getSessionNotes: {
-        params: {
-          sessionId: string;
-        };
-        response: {
-          notes: string;
-        };
-      };
-      getVideoPlaybackUrl: {
-        params: {
-          videoPath: string;
-          mimeType: string;
-        };
-        response: {
-          url: string;
-        };
-      };
-      exportSessionZip: {
-        params: {
-          sessionId: string;
-        };
-        response: {
-          savedPath: string;
-        };
-      };
-      importZipSession: {
-        params: undefined;
-        response: ViewerPayload;
-      };
-      openLocalSession: {
-        params: undefined;
-        response: ViewerPayload;
-      };
-      listAllTags: {
-        params: undefined;
-        response: string[];
-      };
-      listSessions: {
-        params: undefined;
-        response: import("./companion/sessions-db").SessionRecord[];
-      };
-      loadLibrarySession: {
-        params: {
-          sessionId: string;
-        };
-        response: ViewerPayload;
-      };
-      openPath: {
-        params: {
-          path: string;
-        };
-        response: {
-          ok: true;
-        };
-      };
-      removeSessionTag: {
-        params: {
-          sessionId: string;
-          tag: string;
-        };
-        response: {
-          ok: true;
-        };
-      };
-      saveOutputDirectory: {
-        params: {
-          outputDir: string;
-        };
-        response: DesktopCompanionConfigSnapshot;
-      };
-      setSessionNotes: {
-        params: {
-          sessionId: string;
-          notes: string;
-        };
-        response: {
-          ok: true;
-        };
-      };
-      saveSessionReviewState: {
-        params: {
-          sessionId: string;
-          notes: string;
-          annotations: ArchiveAnnotation[];
-        };
-        response: {
-          ok: true;
-          archive: SessionArchive;
-        };
-      };
-      showContextMenu: {
-        params: {
-          menu: ContextMenuItem[];
-        };
-        response: {
-          ok: true;
-        };
-      };
+export const desktopIpcRequestChannel = "jittle-lamp:desktop-request";
+export const desktopIpcMessageChannel = "jittle-lamp:desktop-message";
+
+export type DesktopRequestMap = {
+  chooseOutputDirectory: {
+    params: {
+      startingFolder: string;
     };
-    messages: {};
-  }>;
-  webview: RPCSchema<{
-    requests: {};
-    messages: {
-      contextMenuClicked: {
-        action: string;
-        data?: unknown;
-      };
+    response: {
+      selectedPath: string | null;
     };
-  }>;
+  };
+  addSessionTag: {
+    params: {
+      sessionId: string;
+      tag: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
+  clearTempSession: {
+    params: {
+      tempId: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
+  deleteSession: {
+    params: {
+      sessionId: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
+  exitApp: {
+    params: undefined;
+    response: {
+      ok: true;
+    };
+  };
+  getCompanionConfig: {
+    params: undefined;
+    response: DesktopCompanionConfigSnapshot;
+  };
+  getCompanionRuntime: {
+    params: undefined;
+    response: DesktopCompanionRuntimeSnapshot;
+  };
+  getSessionNotes: {
+    params: {
+      sessionId: string;
+    };
+    response: {
+      notes: string;
+    };
+  };
+  getVideoPlaybackUrl: {
+    params: {
+      videoPath: string;
+      mimeType: string;
+    };
+    response: {
+      url: string;
+    };
+  };
+  exportSessionZip: {
+    params: {
+      sessionId: string;
+    };
+    response: {
+      savedPath: string;
+    };
+  };
+  importZipSession: {
+    params: undefined;
+    response: ViewerPayload;
+  };
+  openLocalSession: {
+    params: undefined;
+    response: ViewerPayload;
+  };
+  listAllTags: {
+    params: undefined;
+    response: string[];
+  };
+  listSessions: {
+    params: undefined;
+    response: import("./companion/sessions-db").SessionRecord[];
+  };
+  loadLibrarySession: {
+    params: {
+      sessionId: string;
+    };
+    response: ViewerPayload;
+  };
+  openPath: {
+    params: {
+      path: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
+  removeSessionTag: {
+    params: {
+      sessionId: string;
+      tag: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
+  saveOutputDirectory: {
+    params: {
+      outputDir: string;
+    };
+    response: DesktopCompanionConfigSnapshot;
+  };
+  setSessionNotes: {
+    params: {
+      sessionId: string;
+      notes: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
+  saveSessionReviewState: {
+    params: {
+      sessionId: string;
+      notes: string;
+      annotations: ArchiveAnnotation[];
+    };
+    response: {
+      ok: true;
+      archive: SessionArchive;
+    };
+  };
+  showContextMenu: {
+    params: {
+      menu: ContextMenuItem[];
+    };
+    response: {
+      ok: true;
+    };
+  };
+};
+
+export type DesktopRendererMessageMap = {
+  contextMenuClicked: {
+    action: string;
+    data?: unknown;
+  };
 };

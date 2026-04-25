@@ -14,7 +14,7 @@ import {
 } from "./fixtures/canonical-fixtures";
 
 import { _testOverrideDb, getSessionNotes, loadLibrarySession, saveLibrarySessionReviewState, scanLibrarySessions, setSessionNotes } from "../apps/desktop/src/companion/sessions-db";
-import { buildSessionZip, clearTempSession, importZipBundle, loadLocalSession } from "../apps/desktop/src/bun/zip-import";
+import { buildSessionZip, clearTempSession, importZipBundle, loadLocalSession } from "../apps/desktop/src/session/zip-import";
 import { buildReviewedArchive, buildReviewedSessionZip } from "../apps/evidence-web/src/archive-export";
 
 const NOW = CANONICAL_NOW;

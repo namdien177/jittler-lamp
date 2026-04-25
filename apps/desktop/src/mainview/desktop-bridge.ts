@@ -1,62 +1,80 @@
-import { Electroview } from "electrobun/view";
+import type { ContextMenuItem, DesktopRendererMessageMap, DesktopRequestMap } from "../rpc";
 
-import type { ContextMenuItem, DesktopRPC } from "../rpc";
+export type DesktopBridgeRequestApi = {
+  [K in keyof DesktopRequestMap]: (
+    params: DesktopRequestMap[K]["params"]
+  ) => Promise<DesktopRequestMap[K]["response"]>;
+};
 
 export type DesktopBridge = {
   rpc: {
-    request: {
-      addSessionTag(params: { sessionId: string; tag: string }): Promise<{ ok: true }>;
-      chooseOutputDirectory(params: { startingFolder: string }): Promise<{ selectedPath: string | null }>;
-      clearTempSession(params: { tempId: string }): Promise<{ ok: true }>;
-      deleteSession(params: { sessionId: string }): Promise<{ ok: true }>;
-      exitApp(params: undefined): Promise<{ ok: true }>;
-      getCompanionConfig(params: undefined): Promise<import("../rpc").DesktopCompanionConfigSnapshot>;
-      getCompanionRuntime(params: undefined): Promise<import("../rpc").DesktopCompanionRuntimeSnapshot>;
-      exportSessionZip(params: { sessionId: string }): Promise<{ savedPath: string }>;
-      getVideoPlaybackUrl(params: { videoPath: string; mimeType: string }): Promise<{ url: string }>;
-      importZipSession(params: undefined): Promise<import("../rpc").ViewerPayload>;
-      listAllTags(params: undefined): Promise<string[]>;
-      openLocalSession(params: undefined): Promise<import("../rpc").ViewerPayload>;
-      listSessions(params: undefined): Promise<import("../rpc").SessionRecord[]>;
-      loadLibrarySession(params: { sessionId: string }): Promise<import("../rpc").ViewerPayload>;
-      openPath(params: { path: string }): Promise<{ ok: true }>;
-      removeSessionTag(params: { sessionId: string; tag: string }): Promise<{ ok: true }>;
-      saveOutputDirectory(params: { outputDir: string }): Promise<import("../rpc").DesktopCompanionConfigSnapshot>;
-      setSessionNotes(params: { sessionId: string; notes: string }): Promise<{ ok: true }>;
-      saveSessionReviewState(params: { sessionId: string; notes: string; annotations: import("@jittle-lamp/shared").ArchiveAnnotation[] }): Promise<{ ok: true; archive: import("../rpc").ViewerPayload["archive"] }>;
-      showContextMenu(params: { menu: ContextMenuItem[] }): Promise<{ ok: true }>;
-    };
+    request: DesktopBridgeRequestApi;
   };
-  onContextMenuClicked: (handler: (data: { action: string; data?: unknown }) => void) => void;
+  onContextMenuClicked: (
+    handler: (data: DesktopRendererMessageMap["contextMenuClicked"]) => void
+  ) => () => void;
 };
 
+type DesktopPreloadApi = {
+  request<K extends keyof DesktopRequestMap>(
+    name: K,
+    params: DesktopRequestMap[K]["params"]
+  ): Promise<DesktopRequestMap[K]["response"]>;
+  onContextMenuClicked(
+    handler: (data: DesktopRendererMessageMap["contextMenuClicked"]) => void
+  ): () => void;
+};
+
+const requestNames = [
+  "addSessionTag",
+  "chooseOutputDirectory",
+  "clearTempSession",
+  "deleteSession",
+  "exitApp",
+  "exportSessionZip",
+  "getCompanionConfig",
+  "getCompanionRuntime",
+  "getSessionNotes",
+  "getVideoPlaybackUrl",
+  "importZipSession",
+  "listAllTags",
+  "listSessions",
+  "loadLibrarySession",
+  "openLocalSession",
+  "openPath",
+  "removeSessionTag",
+  "saveOutputDirectory",
+  "saveSessionReviewState",
+  "setSessionNotes",
+  "showContextMenu"
+] as const satisfies readonly (keyof DesktopRequestMap)[];
+
 export function createDesktopBridge(): DesktopBridge | null {
-  let contextMenuHandler: ((data: { action: string; data?: unknown }) => void) | null = null;
+  const desktopApi = window.jittleLampDesktop;
 
-  try {
-    const rpc = Electroview.defineRPC<DesktopRPC>({
-      maxRequestTime: 10_000,
-      handlers: {
-        requests: {},
-        messages: {
-          contextMenuClicked: (data) => {
-            contextMenuHandler?.(data);
-          }
-        }
-      }
-    });
-
-    new Electroview({ rpc });
-
-    return {
-      rpc: {
-        request: rpc.request as DesktopBridge["rpc"]["request"]
-      },
-      onContextMenuClicked: (handler) => {
-        contextMenuHandler = handler;
-      }
-    };
-  } catch {
+  if (!desktopApi) {
     return null;
   }
+
+  const request = Object.fromEntries(
+    requestNames.map((name) => [
+      name,
+      (params: DesktopRequestMap[typeof name]["params"]) => desktopApi.request(name, params)
+    ])
+  ) as DesktopBridgeRequestApi;
+
+  return {
+    rpc: {
+      request
+    },
+    onContextMenuClicked: desktopApi.onContextMenuClicked
+  };
 }
+
+declare global {
+  interface Window {
+    jittleLampDesktop?: DesktopPreloadApi;
+  }
+}
+
+export type { ContextMenuItem };

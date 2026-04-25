@@ -1,7 +1,9 @@
-import { Database } from "bun:sqlite";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdirSync } from "node:fs";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+
+import Database from "libsql";
 
 import {
   archiveActionSchema,
@@ -58,6 +60,8 @@ type StoredSessionEventRow = {
 };
 
 type StoredAnnotationRow = {
+  session_id: string;
+  id: string;
   payload_json: string;
 };
 
@@ -78,7 +82,7 @@ const defaultDbDir = join(homedir(), ".jittle-lamp");
 const defaultDbPath = join(defaultDbDir, "sessions.db");
 
 let _overrideDbPath: string | null = null;
-let db: Database | null = null;
+let db: Database.Database | null = null;
 
 export function _testOverrideDb(path: string): void {
   if (db) {
@@ -92,11 +96,15 @@ function resolvedDbPath(): string {
   return _overrideDbPath ?? defaultDbPath;
 }
 
-function getDb(): Database {
+function getDb(): Database.Database {
   if (db) return db;
 
+  if (resolvedDbPath() !== ":memory:") {
+    mkdirSync(dirname(resolvedDbPath()), { recursive: true });
+  }
+
   db = new Database(resolvedDbPath());
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS session_writes (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -107,24 +115,24 @@ function getDb(): Database {
       at TEXT NOT NULL
     )
   `);
-  db.run(`
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_session_writes_session_id
     ON session_writes (session_id)
   `);
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS session_tags (
       session_id TEXT NOT NULL,
       tag TEXT NOT NULL,
       PRIMARY KEY (session_id, tag)
     )
   `);
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS session_meta (
       session_id TEXT PRIMARY KEY,
       notes TEXT NOT NULL DEFAULT ''
     )
   `);
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS session_events (
       session_id TEXT NOT NULL,
       id TEXT NOT NULL,
@@ -137,11 +145,11 @@ function getDb(): Database {
       PRIMARY KEY (session_id, id)
     )
   `);
-  db.run(`
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_session_events_session_section_seq
     ON session_events (session_id, section, seq)
   `);
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS session_annotations (
       session_id TEXT NOT NULL,
       id TEXT NOT NULL,
@@ -154,7 +162,9 @@ function getDb(): Database {
 }
 
 export async function initSessionsDb(): Promise<void> {
-  await import("node:fs/promises").then(({ mkdir }) => mkdir(dirname(resolvedDbPath()), { recursive: true }));
+  if (resolvedDbPath() !== ":memory:") {
+    await import("node:fs/promises").then(({ mkdir }) => mkdir(dirname(resolvedDbPath()), { recursive: true }));
+  }
   getDb();
 }
 
@@ -167,19 +177,18 @@ export function insertSessionWrite(input: {
   bytes: number;
   at: string;
 }): void {
-  getDb().run(
+  getDb().prepare(
     `INSERT OR REPLACE INTO session_writes
      (id, session_id, artifact_name, destination_path, session_folder, bytes, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [input.id, input.sessionId, input.artifactName, input.destinationPath, input.sessionFolder, input.bytes, input.at]
-  );
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(input.id, input.sessionId, input.artifactName, input.destinationPath, input.sessionFolder, input.bytes, input.at);
 }
 
 export function persistSessionArchive(archive: SessionArchive): void {
   const database = getDb();
 
-  database.run(`DELETE FROM session_events WHERE session_id = ?`, [archive.sessionId]);
-  database.run(`DELETE FROM session_annotations WHERE session_id = ?`, [archive.sessionId]);
+  database.prepare(`DELETE FROM session_events WHERE session_id = ?`).run(archive.sessionId);
+  database.prepare(`DELETE FROM session_annotations WHERE session_id = ?`).run(archive.sessionId);
 
   const insertEvent = database.prepare(
     `INSERT OR REPLACE INTO session_events
@@ -225,19 +234,21 @@ export function persistSessionArchive(archive: SessionArchive): void {
 function buildArchiveFromDb(sessionId: string, seed: SessionArchive): SessionArchive {
   const database = getDb();
   const rows = database
-    .query<StoredSessionEventRow, [string]>(
+    .prepare<[string]>(
       `SELECT id, section, at, seq, subtype, tags_json, payload_json
        FROM session_events
        WHERE session_id = ?
        ORDER BY seq ASC`
     )
-    .all(sessionId);
+    .all(sessionId) as StoredSessionEventRow[];
 
   const annotations = database
-    .query<StoredAnnotationRow, [string]>(
-      `SELECT payload_json FROM session_annotations WHERE session_id = ? ORDER BY id ASC`
+    .prepare<[string]>(
+      `SELECT session_id, id, payload_json FROM session_annotations WHERE session_id = ? ORDER BY id ASC`
     )
-    .all(sessionId)
+    .all(sessionId) as StoredAnnotationRow[];
+
+  const parsedAnnotations = annotations
     .map((row) => archiveAnnotationSchema.parse(JSON.parse(row.payload_json)) as ArchiveAnnotation);
 
   const actions: ArchiveAction[] = [];
@@ -288,29 +299,26 @@ function buildArchiveFromDb(sessionId: string, seed: SessionArchive): SessionArc
       console: consoleEntries,
       network: networkEntries
     },
-    annotations
+    annotations: parsedAnnotations
   });
 }
 
 export async function scanLibrarySessions(outputDir: string): Promise<SessionRecord[]> {
-  const glob = new Bun.Glob("*");
   const names: string[] = [];
 
   try {
-    for await (const name of glob.scan({ cwd: outputDir, onlyFiles: false })) {
-      names.push(name);
-    }
+    names.push(...(await readdir(outputDir)));
   } catch {
     return [];
   }
 
   const tagRows = getDb()
-    .query<{ session_id: string; tag: string }, []>(`SELECT session_id, tag FROM session_tags ORDER BY tag ASC`)
-    .all();
+    .prepare<[]>(`SELECT session_id, tag FROM session_tags ORDER BY tag ASC`)
+    .all() as { session_id: string; tag: string }[];
 
   const metaRows = getDb()
-    .query<{ session_id: string; notes: string }, []>(`SELECT session_id, notes FROM session_meta`)
-    .all();
+    .prepare<[]>(`SELECT session_id, notes FROM session_meta`)
+    .all() as { session_id: string; notes: string }[];
 
   const tagsBySession = new Map<string, string[]>();
   for (const row of tagRows) {
@@ -389,20 +397,20 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
 
 export function listSessionRecords(): SessionRecord[] {
   const rows = getDb()
-    .query<SessionWriteRow, []>(
+    .prepare<[]>(
       `SELECT id, session_id, artifact_name, destination_path, session_folder, bytes, at
        FROM session_writes
        ORDER BY at ASC`
     )
-    .all();
+    .all() as SessionWriteRow[];
 
   const tagRows = getDb()
-    .query<{ session_id: string; tag: string }, []>(`SELECT session_id, tag FROM session_tags ORDER BY tag ASC`)
-    .all();
+    .prepare<[]>(`SELECT session_id, tag FROM session_tags ORDER BY tag ASC`)
+    .all() as { session_id: string; tag: string }[];
 
   const metaRows = getDb()
-    .query<{ session_id: string; notes: string }, []>(`SELECT session_id, notes FROM session_meta`)
-    .all();
+    .prepare<[]>(`SELECT session_id, notes FROM session_meta`)
+    .all() as { session_id: string; notes: string }[];
 
   const tagsBySession = new Map<string, string[]>();
   for (const row of tagRows) {
@@ -452,27 +460,27 @@ export function listSessionRecords(): SessionRecord[] {
 }
 
 export function addSessionTag(sessionId: string, tag: string): void {
-  getDb().run(`INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)`, [sessionId, tag]);
+  getDb().prepare(`INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)`).run(sessionId, tag);
 }
 
 export function removeSessionTag(sessionId: string, tag: string): void {
-  getDb().run(`DELETE FROM session_tags WHERE session_id = ? AND tag = ?`, [sessionId, tag]);
+  getDb().prepare(`DELETE FROM session_tags WHERE session_id = ? AND tag = ?`).run(sessionId, tag);
 }
 
 export function listAllTags(): string[] {
   return getDb()
-    .query<{ tag: string }, []>(`SELECT DISTINCT tag FROM session_tags ORDER BY tag ASC`)
+    .prepare<[]>(`SELECT DISTINCT tag FROM session_tags ORDER BY tag ASC`)
     .all()
+    .map((row) => row as { tag: string })
     .map((row) => row.tag);
 }
 
 export function setSessionNotes(sessionId: string, notes: string): void {
-  getDb().run(
+  getDb().prepare(
     `INSERT INTO session_meta (session_id, notes)
      VALUES (?, ?)
-     ON CONFLICT(session_id) DO UPDATE SET notes = excluded.notes`,
-    [sessionId, notes]
-  );
+     ON CONFLICT(session_id) DO UPDATE SET notes = excluded.notes`
+  ).run(sessionId, notes);
 }
 
 export async function saveLibrarySessionReviewState(input: {
@@ -505,16 +513,18 @@ export async function saveLibrarySessionReviewState(input: {
 }
 
 export function getSessionNotes(sessionId: string): string {
-  const row = getDb().query<{ notes: string }, [string]>(`SELECT notes FROM session_meta WHERE session_id = ?`).get(sessionId);
+  const row = getDb().prepare<[string]>(`SELECT notes FROM session_meta WHERE session_id = ?`).get(sessionId) as
+    | { notes: string }
+    | undefined;
   return row?.notes ?? "";
 }
 
 export function removeSessionRecords(sessionId: string): void {
-  getDb().run(`DELETE FROM session_writes WHERE session_id = ?`, [sessionId]);
-  getDb().run(`DELETE FROM session_tags WHERE session_id = ?`, [sessionId]);
-  getDb().run(`DELETE FROM session_meta WHERE session_id = ?`, [sessionId]);
-  getDb().run(`DELETE FROM session_events WHERE session_id = ?`, [sessionId]);
-  getDb().run(`DELETE FROM session_annotations WHERE session_id = ?`, [sessionId]);
+  getDb().prepare(`DELETE FROM session_writes WHERE session_id = ?`).run(sessionId);
+  getDb().prepare(`DELETE FROM session_tags WHERE session_id = ?`).run(sessionId);
+  getDb().prepare(`DELETE FROM session_meta WHERE session_id = ?`).run(sessionId);
+  getDb().prepare(`DELETE FROM session_events WHERE session_id = ?`).run(sessionId);
+  getDb().prepare(`DELETE FROM session_annotations WHERE session_id = ?`).run(sessionId);
 }
 
 export async function loadLibrarySession(sessionId: string, outputDir: string): Promise<ViewerPayload> {

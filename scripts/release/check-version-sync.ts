@@ -1,4 +1,3 @@
-import desktopConfig from "../../apps/desktop/electrobun.config";
 import { extensionManifest } from "../../apps/extension/scripts/manifest";
 import {
   getPackageVersion,
@@ -20,12 +19,6 @@ const mismatches = versionPackageRelativePaths.flatMap((relativePath) => {
 if (extensionManifest.version !== workspaceVersion) {
   mismatches.push(
     `apps/extension/scripts/manifest.ts resolves version ${extensionManifest.version}, expected ${workspaceVersion}`
-  );
-}
-
-if (desktopConfig.app.version !== workspaceVersion) {
-  mismatches.push(
-    `apps/desktop/electrobun.config.ts resolves version ${desktopConfig.app.version}, expected ${workspaceVersion}`
   );
 }
 

@@ -1,5 +1,8 @@
+import { createReadStream } from "node:fs";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, resolve, sep } from "node:path";
+import { Readable } from "node:stream";
 
 import { initSessionsDb, insertSessionWrite, removeSessionRecords } from "./sessions-db";
 
@@ -45,7 +48,7 @@ const corsBaseHeaders = {
 const recentWritesLimit = 12;
 const mediaRegistry = new Map<string, { filePath: string; mimeType: string }>();
 
-let activeServer: Bun.Server<undefined> | null = null;
+let activeServer: Server | null = null;
 let activeConfig: ResolvedCompanionConfig | null = null;
 let runtimeState: CompanionRuntimeState = {
   status: "starting",
@@ -87,7 +90,7 @@ export async function getCompanionRuntimeState(): Promise<CompanionRuntimeState>
   };
 }
 
-export async function startCompanionServer(options: CompanionServerOptions = {}): Promise<Bun.Server<undefined>> {
+export async function startCompanionServer(options: CompanionServerOptions = {}): Promise<Server> {
   if (activeServer) {
     return activeServer;
   }
@@ -104,11 +107,23 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
   };
 
   try {
-    activeServer = Bun.serve({
-      hostname: "127.0.0.1",
-      port: companionServerPort,
-      fetch: (request) => handleCompanionRequest(request),
-      error: (error) => jsonResponse({ ok: false, error: error.message }, 500)
+    activeServer = createServer((request, response) => {
+      void handleNodeRequest(request, response);
+    });
+
+    await new Promise<void>((resolveListening, rejectListening) => {
+      const server = activeServer;
+
+      if (!server) {
+        rejectListening(new Error("Companion server was not initialized."));
+        return;
+      }
+
+      server.once("error", rejectListening);
+      server.listen(companionServerPort, "127.0.0.1", () => {
+        server.off("error", rejectListening);
+        resolveListening();
+      });
     });
 
     runtimeState = {
@@ -132,6 +147,63 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
     };
     throw error;
   }
+}
+
+async function handleNodeRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  try {
+    const webRequest = toWebRequest(request);
+    const webResponse = await handleCompanionRequest(webRequest);
+    await writeWebResponse(response, webResponse);
+  } catch (error: unknown) {
+    await writeWebResponse(response, jsonResponse({ ok: false, error: errorMessage(error) }, 500));
+  }
+}
+
+function toWebRequest(request: IncomingMessage): Request {
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        headers.append(name, entry);
+      }
+    } else if (typeof value === "string") {
+      headers.set(name, value);
+    }
+  }
+
+  const host = headers.get("host") ?? `127.0.0.1:${companionServerPort}`;
+  const url = new URL(request.url ?? "/", `http://${host}`);
+  const init: RequestInit & { duplex?: "half" } = {
+    headers,
+    method: request.method ?? "GET"
+  };
+
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = Readable.toWeb(request) as unknown as BodyInit;
+    init.duplex = "half";
+  }
+
+  return new Request(url, init);
+}
+
+async function writeWebResponse(response: ServerResponse, webResponse: Response): Promise<void> {
+  response.statusCode = webResponse.status;
+  webResponse.headers.forEach((value, name) => {
+    response.setHeader(name, value);
+  });
+
+  if (!webResponse.body) {
+    response.end();
+    return;
+  }
+
+  await new Promise<void>((resolveWrite, rejectWrite) => {
+    Readable.fromWeb(webResponse.body as unknown as import("node:stream/web").ReadableStream<Uint8Array>)
+      .on("error", rejectWrite)
+      .on("end", resolveWrite)
+      .pipe(response);
+  });
 }
 
 export async function handleCompanionRequest(request: Request): Promise<Response> {
@@ -252,7 +324,7 @@ async function serveRegisteredMedia(mediaId: string, request: Request): Promise<
   const rangeHeader = requestRangeHeader();
 
   if (!rangeHeader) {
-    return new Response(Bun.file(entry.filePath), {
+    return fileResponse(entry.filePath, {
       status: 200,
       headers: {
         "accept-ranges": "bytes",
@@ -275,8 +347,10 @@ async function serveRegisteredMedia(mediaId: string, request: Request): Promise<
     });
   }
 
-  return new Response(Bun.file(entry.filePath).slice(range.start, range.end + 1), {
+  return fileResponse(entry.filePath, {
     status: 206,
+    start: range.start,
+    end: range.end,
     headers: {
       "accept-ranges": "bytes",
       "content-length": String(range.end - range.start + 1),
@@ -288,6 +362,26 @@ async function serveRegisteredMedia(mediaId: string, request: Request): Promise<
   function requestRangeHeader(): string | null {
     return request.headers.get("range");
   }
+}
+
+function fileResponse(
+  filePath: string,
+  options: {
+    status: number;
+    start?: number;
+    end?: number;
+    headers: HeadersInit;
+  }
+): Response {
+  const streamOptions: { end?: number; start?: number } = {};
+  if (options.end !== undefined) streamOptions.end = options.end;
+  if (options.start !== undefined) streamOptions.start = options.start;
+  const stream = createReadStream(filePath, streamOptions);
+
+  return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
+    status: options.status,
+    headers: options.headers
+  });
 }
 
 function parseByteRange(rangeHeader: string, totalBytes: number): { start: number; end: number } | null {

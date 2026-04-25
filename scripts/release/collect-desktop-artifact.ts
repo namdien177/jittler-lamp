@@ -9,10 +9,13 @@ const releaseArtifactsPath = resolveRepoPath("release-artifacts");
 const isSigned = process.env.JL_MACOS_SIGNED === "true";
 
 if (!existsSync(artifactsPath)) {
-  throw new Error(`Expected Electrobun artifacts directory at ${artifactsPath}`);
+  throw new Error(`Expected Electron artifacts directory at ${artifactsPath}`);
 }
 
-const artifactCandidates = readdirSync(artifactsPath)
+const artifactCandidates = readdirSync(artifactsPath, { withFileTypes: true })
+  .filter((entry) => entry.isFile())
+  .map((entry) => entry.name)
+  .filter((fileName) => fileName.startsWith("jittle-lamp-desktop-"))
   .filter((fileName) => fileName.endsWith(".dmg") || fileName.endsWith(".zip") || fileName.endsWith(".pkg"))
   .sort((left, right) => priority(left) - priority(right) || left.localeCompare(right));
 

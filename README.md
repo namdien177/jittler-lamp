@@ -5,7 +5,7 @@
 ## Workspace layout
 
 - `apps/extension` — Chromium MV3 extension recorder for active-tab capture orchestration and local export.
-- `apps/desktop` — Electrobun desktop companion and local session viewer for folders and ZIP imports.
+- `apps/desktop` — Electron desktop companion and local session viewer for folders and ZIP imports.
 - `apps/evidence-web` — lightweight browser viewer for exported session bundles.
 - `packages/shared` — strict TypeScript schemas and helpers shared by the extension and desktop app.
 - `docs` — scope, assumptions, and architecture notes for V1.
@@ -60,9 +60,9 @@ If the desktop companion server is running, the extension can write those artifa
 
 The desktop app can act as both the optional localhost companion and the local session viewer.
 
-- `bun run --cwd apps/desktop dev` starts the local companion server on `http://127.0.0.1:48115`
+- `bun run --cwd apps/desktop dev` starts the Electron app and local companion server on `http://127.0.0.1:48115`
 - `bun run --cwd apps/desktop set-output "/absolute/path"` updates the saved output folder
-- `bun run --cwd apps/desktop package` builds a local macOS desktop app bundle
+- `bun run --cwd apps/desktop package:local` builds a local macOS desktop app bundle
 
 Inside the desktop app, the current UI supports:
 
@@ -102,7 +102,7 @@ The release notes/changelog are generated automatically by GitHub when the relea
 
 ### 1. Prepare a release version
 
-Use the root version as the release source of truth. The extension manifest and desktop Electrobun config now read that root version automatically, and the workspace `package.json` files are checked for sync.
+Use the root version as the release source of truth. The extension manifest and workspace `package.json` files are checked for sync.
 
 To bump versions before a release:
 
@@ -186,27 +186,27 @@ xattr -cr /Applications/jittle-lamp.app
 
 #### Signed and notarized releases
 
-If the required Apple credentials are available in GitHub Actions, the desktop build enables Electrobun code signing + notarization automatically and the published DMG filename switches to `signed`.
+If the required Apple credentials are available in GitHub Actions, the desktop build enables Electron Builder code signing + notarization automatically and the published DMG filename switches to `signed`.
 
 The workflow supports these secrets:
 
-- `ELECTROBUN_DEVELOPER_ID`
-- `ELECTROBUN_TEAMID`
-- either `ELECTROBUN_APPLEID` + `ELECTROBUN_APPLEIDPASS`
-- or `ELECTROBUN_APPLEAPIKEY` + `ELECTROBUN_APPLEAPIISSUER` + `ELECTROBUN_APPLE_API_KEY_P8`
+- `MACOS_CSC_LINK` + `MACOS_CSC_KEY_PASSWORD`
+- either `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`
+- or `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER`
 
-The API-key path is preferred for CI. The workflow writes `ELECTROBUN_APPLE_API_KEY_P8` into a temporary `.p8` file and points Electrobun at it automatically.
+The API-key path is preferred for CI when App Store Connect API credentials are available.
 
-Local desktop packaging commands remain:
+Desktop packaging is split by environment:
 
 ```bash
-bun run --cwd apps/desktop package
-bun run --cwd apps/desktop package:stable
+bun run --cwd apps/desktop package:local
+bun run --cwd apps/desktop package:ci
 ```
 
-With the checked-in config, Electrobun writes build output into:
+Use `package:local` on a developer machine; it loads the workspace `.env` before invoking Electron Builder so local signing/notarization credentials are available. Use `package:ci` in CI/CD; it only uses the environment variables injected by the workflow.
 
-- `apps/desktop/build/`
+With the checked-in config, Electron Builder writes build output into:
+
 - `apps/desktop/artifacts/`
 
 The release workflow collects the install-oriented artifact from `apps/desktop/artifacts/`.
@@ -225,9 +225,10 @@ bun run --cwd apps/desktop set-output "/absolute/path"
 
 For the desktop app specifically:
 
-- `bun run --cwd apps/desktop dev` starts the local companion server on `http://127.0.0.1:48115`.
+- `bun run --cwd apps/desktop dev` builds and starts the Electron desktop app with the local companion server on `http://127.0.0.1:48115`.
 - `bun run --cwd apps/desktop set-output "/absolute/path"` changes the folder where the companion writes sessions.
-- `bun run --cwd apps/desktop package` attempts an Electrobun package build.
+- `bun run --cwd apps/desktop package:local` attempts a local Electron Builder package build with workspace `.env` loaded.
+- `bun run --cwd apps/desktop package:ci` attempts a CI Electron Builder package build using only environment-provided secrets.
 - `bun run --cwd apps/desktop build` performs the repository's lightweight desktop shell build validation used by the workspace root.
 
 The companion only accepts artifact writes from `chrome-extension://` origins and rejects normal web origins. It does not currently pin a single extension ID. Output-folder changes happen locally through the desktop app or CLI, not over HTTP.

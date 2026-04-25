@@ -19,12 +19,6 @@
       "@jittle-lamp/shared": [
         "packages/shared/src/index.ts"
       ],
-      "electrobun": [
-        "types/electrobun.d.ts"
-      ],
-      "electrobun/bun": [
-        "types/electrobun-bun.d.ts"
-      ],
       "@jittle-lamp/viewer-core": [
         "packages/viewer-core/src/index.ts"
       ],

@@ -127,59 +127,62 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Prepare App Store Connect API key
-        env:
-          ELECTROBUN_APPLE_API_KEY_P8: ${{ secrets.ELECTROBUN_APPLE_API_KEY_P8 }}
-        if: ${{ env.ELECTROBUN_APPLE_API_KEY_P8 != '' }}
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/electrobun"
-          cat <<'EOF' > "$RUNNER_TEMP/electrobun/AuthKey.p8"
-          $ELECTROBUN_APPLE_API_KEY_P8
-          EOF
-
       - name: Determine signing mode
         id: signing
         env:
-          ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
-          ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
-          ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
-          ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
-          ELECTROBUN_APPLEAPIKEY: ${{ secrets.ELECTROBUN_APPLEAPIKEY }}
-          ELECTROBUN_APPLEAPIISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
-          ELECTROBUN_APPLEAPIKEYPATH: ${{ runner.temp }}/electrobun/AuthKey.p8
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         shell: bash
         run: |
-          if [[ -n "$ELECTROBUN_DEVELOPER_ID" && -n "$ELECTROBUN_TEAMID" ]] && [[ ( -n "$ELECTROBUN_APPLEID" && -n "$ELECTROBUN_APPLEIDPASS" ) || ( -n "$ELECTROBUN_APPLEAPIKEY" && -n "$ELECTROBUN_APPLEAPIISSUER" && -f "$ELECTROBUN_APPLEAPIKEYPATH" ) ]]; then
+          if [[ -n "$CSC_LINK" && -n "$CSC_KEY_PASSWORD" ]] && [[ ( -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" && -n "$APPLE_TEAM_ID" ) || ( -n "$APPLE_API_KEY" && -n "$APPLE_API_KEY_ID" && -n "$APPLE_API_ISSUER" ) ]]; then
             echo "signed=true" >> "$GITHUB_OUTPUT"
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build desktop app before packaging
-        run: bun run --cwd apps/desktop build
-
       - name: Package macOS desktop release
         env:
-          ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
-          ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
-          ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
-          ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
-          ELECTROBUN_APPLEAPIKEY: ${{ secrets.ELECTROBUN_APPLEAPIKEY }}
-          ELECTROBUN_APPLEAPIISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
-          ELECTROBUN_APPLEAPIKEYPATH: ${{ runner.temp }}/electrobun/AuthKey.p8
-        run: bun run --cwd apps/desktop package:stable
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.signing.outputs.signed == 'true' && 'true' || 'false' }}
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: bun run --cwd apps/desktop package:ci
 
       - name: Collect macOS release artifact
         env:
           JL_MACOS_SIGNED: ${{ steps.signing.outputs.signed }}
         run: bun run release:collect-desktop "${{ needs.validate-tag.outputs.version }}"
 
+      - name: Verify collected desktop artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(release-artifacts/jittle-lamp-desktop-v${{ needs.validate-tag.outputs.version }}-macos-arm64-*.dmg)
+          if [[ ${#artifacts[@]} -ne 1 ]]; then
+            echo "Expected exactly one collected desktop DMG, found ${#artifacts[@]}"
+            ls -lah release-artifacts
+            exit 1
+          fi
+          ls -lh "${artifacts[0]}"
+
       - name: Upload desktop asset
         uses: actions/upload-artifact@v4
         with:
           name: release-desktop
-          path: release-artifacts/*
+          path: release-artifacts/jittle-lamp-desktop-v${{ needs.validate-tag.outputs.version }}-macos-arm64-*.dmg
+          if-no-files-found: error
 
   publish-release:
     needs:
