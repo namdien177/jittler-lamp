@@ -19,6 +19,16 @@ type ApprovalState =
 
 const readUserCode = () => new URL(window.location.href).searchParams.get("user_code")?.trim() ?? "";
 
+const completeDesktopAuth = (input: { token: string; userCode: string }) =>
+  fetch(`${apiOrigin}/desktop-auth/flows/complete`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ userCode: input.userCode })
+  });
+
 function DesktopAuthApprovalInner(): React.JSX.Element {
   const { getToken } = useAuth();
   const submittedRef = useRef(false);
@@ -34,19 +44,18 @@ function DesktopAuthApprovalInner(): React.JSX.Element {
     const approve = async (): Promise<void> => {
       setApproval({ status: "submitting" });
       try {
-        const token = await getToken();
+        const token = await getToken({ skipCache: true });
         if (!token) {
           throw new Error("Your browser session is missing a Clerk token.");
         }
 
-        const response = await fetch(`${apiOrigin}/desktop-auth/flows/complete`, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({ userCode })
-        });
+        let response = await completeDesktopAuth({ token, userCode });
+        if (response.status === 401) {
+          const retryToken = await getToken({ skipCache: true });
+          if (retryToken && retryToken !== token) {
+            response = await completeDesktopAuth({ token: retryToken, userCode });
+          }
+        }
 
         if (!response.ok) {
           const payload = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
