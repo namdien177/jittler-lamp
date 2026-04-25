@@ -80,6 +80,17 @@ const toAuthContext = (
 	};
 };
 
+const createAuthOnlyRequest = (request: Request) => {
+	const headers = new Headers(request.headers);
+	headers.delete("content-length");
+	headers.delete("content-type");
+
+	return new Request(request.url, {
+		method: request.method,
+		headers,
+	});
+};
+
 const authenticateWithRequestState = async (
 	request: Request,
 	runtime: RuntimeConfig,
@@ -109,7 +120,7 @@ const authenticateWithRequestState = async (
 		authorizedParties?: string[];
 		jwtKey?: string;
 	} = {};
-	if (runtime.clerkJwtKey) {
+	if (runtime.clerkJwtKey && !runtime.clerkSecretKey) {
 		authenticateOptions.jwtKey = runtime.clerkJwtKey;
 	}
 	if (runtime.clerkAuthorizedParties) {
@@ -120,7 +131,7 @@ const authenticateWithRequestState = async (
 	}
 
 	const requestState = await clerkClient.authenticateRequest(
-		request,
+		createAuthOnlyRequest(request),
 		authenticateOptions,
 	);
 	const auth = requestState.toAuth() as ClerkAuthObject | null;
@@ -153,7 +164,7 @@ const authenticateWithVerifyToken = async (
 	if (runtime.clerkSecretKey) {
 		verifyOptions.secretKey = runtime.clerkSecretKey;
 	}
-	if (runtime.clerkJwtKey) {
+	if (runtime.clerkJwtKey && !runtime.clerkSecretKey) {
 		verifyOptions.jwtKey = runtime.clerkJwtKey;
 	}
 	if (runtime.clerkAuthorizedParties) {

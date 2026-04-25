@@ -360,6 +360,7 @@ describe("routes", () => {
 		const { app } = createApp(
 			createTestEnv({
 				DATABASE_URL: databaseUrl,
+				CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuZXhhbXBsZSQ",
 				CLERK_JWT_KEY: jwtKey,
 				CLERK_AUDIENCE: "test-audience",
 				WEB_APP_ORIGIN: "https://viewer.example.test",
