@@ -1,15 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Analytics } from "@vercel/analytics/react";
 import {
-  ClerkDegraded,
-  ClerkFailed,
-  ClerkLoaded,
-  ClerkLoading,
   ClerkProvider,
-  SignIn,
-  SignedIn,
-  SignedOut,
-  UserButton
+  useAuth,
+  useClerk,
+  useSignIn,
+  useUser
 } from "@clerk/clerk-react";
 import { findActiveIndex, formatOffset, type TimelineSection } from "@jittle-lamp/shared";
 import {
@@ -135,10 +132,55 @@ type DesktopController = {
   closeMergeDialog: () => void;
 };
 
+type DesktopAuthSignedInState = {
+  status: "signed-in";
+  source: "clerk" | "desktop";
+  userId: string;
+  label: string;
+  expiresAt?: number;
+};
+
+type DesktopAuthState =
+  | { status: "loading" }
+  | { status: "signed-out" }
+  | { status: "error"; message: string }
+  | DesktopAuthSignedInState;
+
+type StoredDesktopAuthSession = {
+  accessToken: string;
+  expiresAt: number;
+  clerkUserId: string;
+};
+
+type BrowserAuthFlowState =
+  | { status: "idle" }
+  | { status: "starting" }
+  | {
+      status: "polling";
+      userCode: string;
+      verificationUriComplete: string;
+      expiresAt: number;
+      intervalSeconds: number;
+    }
+  | { status: "error"; message: string };
+
+type PasswordSignInResult = { ok: true } | { ok: false; message: string };
+
+type DesktopAuthController = {
+  state: DesktopAuthState;
+  browserFlow: BrowserAuthFlowState;
+  signInWithPassword: (input: { identifier: string; password: string }) => Promise<PasswordSignInResult>;
+  startBrowserSignIn: () => Promise<void>;
+  clearBrowserFlow: () => void;
+  signOut: () => Promise<void>;
+};
+
 const runtimePollIntervalMs = 2_000;
 const signInPath = "/sign-in";
 const homePath = "/";
 const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY?.trim() ?? "";
+const apiOrigin = (process.env.JITTLE_LAMP_API_ORIGIN?.trim() || "http://127.0.0.1:3001").replace(/\/+$/, "");
+const desktopAuthStorageKey = "jittle-lamp.desktop-auth.v1";
 const mediaEventNames = [
   "loadstart",
   "loadedmetadata",
@@ -157,6 +199,7 @@ const mediaEventNames = [
 ] as const;
 
 const DesktopContext = createContext<DesktopController | null>(null);
+const DesktopAuthContext = createContext<DesktopAuthController | null>(null);
 
 function initialViewState(): ViewState {
   return {
@@ -182,6 +225,53 @@ function useDesktop(): DesktopController {
   const controller = useContext(DesktopContext);
   if (!controller) throw new Error("Desktop context was not initialized.");
   return controller;
+}
+
+function useDesktopAuth(): DesktopAuthController {
+  const controller = useContext(DesktopAuthContext);
+  if (!controller) throw new Error("Desktop auth context was not initialized.");
+  return controller;
+}
+
+function readStoredDesktopAuthSession(): StoredDesktopAuthSession | null {
+  const raw = window.localStorage.getItem(desktopAuthStorageKey);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredDesktopAuthSession>;
+    if (
+      typeof parsed.accessToken !== "string" ||
+      typeof parsed.expiresAt !== "number" ||
+      typeof parsed.clerkUserId !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      accessToken: parsed.accessToken,
+      expiresAt: parsed.expiresAt,
+      clerkUserId: parsed.clerkUserId
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredDesktopAuthSession(session: StoredDesktopAuthSession): void {
+  window.localStorage.setItem(desktopAuthStorageKey, JSON.stringify(session));
+}
+
+function clearStoredDesktopAuthSession(): void {
+  window.localStorage.removeItem(desktopAuthStorageKey);
+}
+
+function isStoredDesktopAuthSessionFresh(session: StoredDesktopAuthSession): boolean {
+  return session.expiresAt > Date.now() + 60_000;
+}
+
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+  return payload?.error?.message ?? fallback;
 }
 
 function cloneViewerState(state: ViewerState): ViewerState {
@@ -222,15 +312,6 @@ function MissingClerkConfigPage(): React.JSX.Element {
   );
 }
 
-function ClerkLoadErrorPage(): React.JSX.Element {
-  return (
-    <AuthStatusPage
-      title="Unable to load sign-in"
-      detail="Check the Clerk publishable key and network access."
-    />
-  );
-}
-
 function DesktopClerkProvider(props: { children: React.ReactNode }): React.JSX.Element {
   const navigate = useNavigate();
 
@@ -266,60 +347,370 @@ function DesktopClerkProvider(props: { children: React.ReactNode }): React.JSX.E
   );
 }
 
+function DesktopAuthProvider(props: { children: React.ReactNode }): React.JSX.Element {
+  const clerkAuth = useAuth();
+  const clerk = useClerk();
+  const signIn = useSignIn();
+  const { user } = useUser();
+  const bridge = useMemo(() => createDesktopBridge(), []);
+  const pollTimerRef = useRef<number | null>(null);
+  const [state, setState] = useState<DesktopAuthState>({ status: "loading" });
+  const [browserFlow, setBrowserFlow] = useState<BrowserAuthFlowState>({ status: "idle" });
+
+  const stopPolling = () => {
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  const loadStoredDesktopSession = async () => {
+    const stored = readStoredDesktopAuthSession();
+    if (!stored || !isStoredDesktopAuthSessionFresh(stored)) {
+      clearStoredDesktopAuthSession();
+      setState({ status: "signed-out" });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${apiOrigin}/protected/me`, {
+        headers: { authorization: `Bearer ${stored.accessToken}` }
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Stored desktop session is no longer valid."));
+      }
+
+      const profile = await response.json() as {
+        userId: string;
+        activeOrgId?: string | null;
+      };
+      setState({
+        status: "signed-in",
+        source: "desktop",
+        userId: profile.userId || stored.clerkUserId,
+        label: profile.userId || stored.clerkUserId,
+        expiresAt: stored.expiresAt
+      });
+    } catch (error) {
+      clearStoredDesktopAuthSession();
+      setState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Stored desktop session is no longer valid."
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!clerkAuth.isLoaded) {
+      setState({ status: "loading" });
+      return;
+    }
+
+    if (clerkAuth.isSignedIn) {
+      clearStoredDesktopAuthSession();
+      setState({
+        status: "signed-in",
+        source: "clerk",
+        userId: clerkAuth.userId ?? user?.id ?? "current-user",
+        label: user?.primaryEmailAddress?.emailAddress ?? user?.fullName ?? clerkAuth.userId ?? "Signed in"
+      });
+      return;
+    }
+
+    void loadStoredDesktopSession();
+  }, [clerkAuth.isLoaded, clerkAuth.isSignedIn, clerkAuth.userId, user?.id, user?.primaryEmailAddress?.emailAddress, user?.fullName]);
+
+  useEffect(() => () => stopPolling(), []);
+
+  const completeBrowserPoll = (input: {
+    deviceCode: string;
+    intervalSeconds: number;
+  }) => {
+    stopPolling();
+    pollTimerRef.current = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`${apiOrigin}/desktop-auth/flows/${encodeURIComponent(input.deviceCode)}`);
+        if (!response.ok) {
+          throw new Error(await readApiError(response, "Unable to check browser sign-in status."));
+        }
+
+        const payload = await response.json() as
+          | {
+              status: "pending" | "expired" | "denied";
+              expiresAt: number;
+              intervalSeconds: number;
+            }
+          | {
+              status: "approved";
+              tokenType: "Bearer";
+              accessToken: string;
+              expiresAt: number;
+              expiresInSeconds: number;
+              clerkUserId: string;
+            };
+
+        if (payload.status === "approved") {
+          const session = {
+            accessToken: payload.accessToken,
+            expiresAt: payload.expiresAt,
+            clerkUserId: payload.clerkUserId
+          };
+          writeStoredDesktopAuthSession(session);
+          setState({
+            status: "signed-in",
+            source: "desktop",
+            userId: payload.clerkUserId,
+            label: payload.clerkUserId,
+            expiresAt: payload.expiresAt
+          });
+          setBrowserFlow({ status: "idle" });
+          return;
+        }
+
+        if (payload.status === "pending") {
+          completeBrowserPoll({
+            deviceCode: input.deviceCode,
+            intervalSeconds: payload.intervalSeconds || input.intervalSeconds
+          });
+          return;
+        }
+
+        setBrowserFlow({
+          status: "error",
+          message:
+            payload.status === "expired"
+              ? "The browser sign-in request expired. Start a new sign-in."
+              : "The browser sign-in request was denied."
+        });
+      } catch (error) {
+        setBrowserFlow({
+          status: "error",
+          message: error instanceof Error ? error.message : "Unable to check browser sign-in status."
+        });
+      }
+    }, Math.max(input.intervalSeconds, 1) * 1000);
+  };
+
+  const startBrowserSignIn = async (): Promise<void> => {
+    stopPolling();
+    setBrowserFlow({ status: "starting" });
+
+    try {
+      const response = await fetch(`${apiOrigin}/desktop-auth/flows`, {
+        method: "POST"
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Unable to start browser sign-in."));
+      }
+
+      const payload = await response.json() as {
+        deviceCode: string;
+        userCode: string;
+        verificationUriComplete: string;
+        expiresAt: number;
+        intervalSeconds: number;
+      };
+
+      setBrowserFlow({
+        status: "polling",
+        userCode: payload.userCode,
+        verificationUriComplete: payload.verificationUriComplete,
+        expiresAt: payload.expiresAt,
+        intervalSeconds: payload.intervalSeconds
+      });
+
+      if (bridge) {
+        await bridge.rpc.request.openExternalUrl({ url: payload.verificationUriComplete });
+      } else {
+        window.open(payload.verificationUriComplete, "_blank", "noopener,noreferrer");
+      }
+
+      completeBrowserPoll({
+        deviceCode: payload.deviceCode,
+        intervalSeconds: payload.intervalSeconds
+      });
+    } catch (error) {
+      setBrowserFlow({
+        status: "error",
+        message: error instanceof Error ? error.message : "Unable to start browser sign-in."
+      });
+    }
+  };
+
+  const signInWithPassword = async (input: {
+    identifier: string;
+    password: string;
+  }): Promise<PasswordSignInResult> => {
+    if (!signIn.isLoaded) {
+      return { ok: false, message: "Sign-in is still loading." };
+    }
+
+    try {
+      const result = await signIn.signIn.create({
+        strategy: "password",
+        identifier: input.identifier,
+        password: input.password
+      });
+
+      if (result.status === "complete" && result.createdSessionId) {
+        await signIn.setActive({ session: result.createdSessionId });
+        clearStoredDesktopAuthSession();
+        return { ok: true };
+      }
+
+      const signInStatus = result.status as string | null;
+      if (signInStatus === "needs_second_factor" || signInStatus === "needs_client_trust") {
+        return {
+          ok: false,
+          message: "This account needs additional verification. Continue in the browser to finish sign-in."
+        };
+      }
+
+      return {
+        ok: false,
+        message: "Unable to finish password sign-in for this account."
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "Unable to sign in with that password."
+      };
+    }
+  };
+
+  const signOut = async (): Promise<void> => {
+    stopPolling();
+    clearStoredDesktopAuthSession();
+    setBrowserFlow({ status: "idle" });
+    if (state.status === "signed-in" && state.source === "clerk") {
+      await clerk.signOut();
+    }
+    setState({ status: "signed-out" });
+  };
+
+  const clearBrowserFlow = () => {
+    stopPolling();
+    setBrowserFlow({ status: "idle" });
+  };
+
+  const value = useMemo<DesktopAuthController>(
+    () => ({
+      state,
+      browserFlow,
+      signInWithPassword,
+      startBrowserSignIn,
+      clearBrowserFlow,
+      signOut
+    }),
+    [state, browserFlow, signIn.isLoaded]
+  );
+
+  return <DesktopAuthContext.Provider value={value}>{props.children}</DesktopAuthContext.Provider>;
+}
+
 function SignInPage(): React.JSX.Element {
+  const navigate = useNavigate();
+  const auth = useDesktopAuth();
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (auth.state.status === "signed-in") {
+    return <Navigate to={homePath} replace />;
+  }
+
+  const submitPasswordSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+    const result = await auth.signInWithPassword({
+      identifier: identifier.trim(),
+      password
+    });
+    setIsSubmitting(false);
+
+    if (result.ok) {
+      navigate(homePath, { replace: true });
+      return;
+    }
+
+    setError(result.message);
+  };
+
   return (
-    <>
-      <ClerkFailed>
-        <ClerkLoadErrorPage />
-      </ClerkFailed>
-      <ClerkDegraded>
-        <ClerkLoadErrorPage />
-      </ClerkDegraded>
-      <ClerkLoading>
-        <AuthStatusPage title="Checking session..." />
-      </ClerkLoading>
-      <ClerkLoaded>
-        <SignedIn>
-          <Navigate to={homePath} replace />
-        </SignedIn>
-        <SignedOut>
-          <main className="auth-page">
-            <SignIn
-              routing="hash"
-              oauthFlow="popup"
-              forceRedirectUrl={homePath}
-              fallbackRedirectUrl={homePath}
-              signUpForceRedirectUrl={homePath}
-              signUpFallbackRedirectUrl={homePath}
-              signInUrl={signInPath}
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-card-header">
+          <h1>Sign in to Jittle Lamp</h1>
+          <p>Use password sign-in here, or finish OAuth in your browser.</p>
+        </div>
+        <form className="auth-form" onSubmit={submitPasswordSignIn}>
+          <label className="auth-field">
+            <span>Email or username</span>
+            <input
+              type="text"
+              autoComplete="username"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.currentTarget.value)}
+              required
             />
-          </main>
-        </SignedOut>
-      </ClerkLoaded>
-    </>
+          </label>
+          <label className="auth-field">
+            <span>Password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              required
+            />
+          </label>
+          {error ? <div className="auth-error">{error}</div> : null}
+          {auth.state.status === "error" ? <div className="auth-error">{auth.state.message}</div> : null}
+          <button className="button primary auth-submit" type="submit" disabled={isSubmitting || auth.state.status === "loading"}>
+            {isSubmitting ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+        <div className="auth-divider" />
+        <button
+          className="button secondary auth-submit"
+          type="button"
+          disabled={auth.browserFlow.status === "starting" || auth.browserFlow.status === "polling"}
+          onClick={() => void auth.startBrowserSignIn()}
+        >
+          {auth.browserFlow.status === "starting" ? "Opening browser..." : "Continue in browser"}
+        </button>
+        {auth.browserFlow.status === "polling" ? (
+          <div className="auth-browser-flow" role="status">
+            <span>Waiting for browser sign-in</span>
+            <strong>{auth.browserFlow.userCode}</strong>
+            <a href={auth.browserFlow.verificationUriComplete} target="_blank" rel="noreferrer">
+              Open sign-in page
+            </a>
+            <button className="button ghost sm" type="button" onClick={auth.clearBrowserFlow}>
+              Cancel
+            </button>
+          </div>
+        ) : null}
+        {auth.browserFlow.status === "error" ? <div className="auth-error">{auth.browserFlow.message}</div> : null}
+      </section>
+    </main>
   );
 }
 
 function RequireAuth(props: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <>
-      <ClerkFailed>
-        <ClerkLoadErrorPage />
-      </ClerkFailed>
-      <ClerkDegraded>
-        <ClerkLoadErrorPage />
-      </ClerkDegraded>
-      <ClerkLoading>
-        <AuthStatusPage title="Checking session..." />
-      </ClerkLoading>
-      <ClerkLoaded>
-        <SignedIn>{props.children}</SignedIn>
-        <SignedOut>
-          <Navigate to={signInPath} replace />
-        </SignedOut>
-      </ClerkLoaded>
-    </>
-  );
+  const auth = useDesktopAuth();
+
+  if (auth.state.status === "loading") {
+    return <AuthStatusPage title="Checking session..." />;
+  }
+
+  if (auth.state.status === "signed-in") {
+    return <>{props.children}</>;
+  }
+
+  return <Navigate to={signInPath} replace />;
 }
 
 function DesktopAppLayout(): React.JSX.Element {
@@ -642,10 +1033,34 @@ function SettingsDialog(): React.JSX.Element {
             </div>
           </div>
         </div>
-        <div className="drawer-auth-footer" aria-label="Account menu">
-          <UserButton showName signInUrl={signInPath} />
-        </div>
+        <AccountFooter />
       </div>
+    </div>
+  );
+}
+
+function AccountFooter(): React.JSX.Element {
+  const auth = useDesktopAuth();
+
+  if (auth.state.status !== "signed-in") {
+    return (
+      <div className="drawer-auth-footer" aria-label="Account menu">
+        <span className="account-footer-label">Signed out</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="drawer-auth-footer" aria-label="Account menu">
+      <div className="account-footer-copy">
+        <span className="account-footer-label">{auth.state.label}</span>
+        <span className="account-footer-source">
+          {auth.state.source === "desktop" ? "Browser session" : "Password session"}
+        </span>
+      </div>
+      <button className="button ghost sm" type="button" onClick={() => void auth.signOut()}>
+        Sign out
+      </button>
     </div>
   );
 }
@@ -1615,10 +2030,13 @@ createRoot(root).render(
   <MemoryRouter>
     {clerkPublishableKey ? (
       <DesktopClerkProvider>
-        <DesktopRoutes />
+        <DesktopAuthProvider>
+          <DesktopRoutes />
+        </DesktopAuthProvider>
       </DesktopClerkProvider>
     ) : (
       <MissingClerkConfigPage />
     )}
+    <Analytics />
   </MemoryRouter>
 );

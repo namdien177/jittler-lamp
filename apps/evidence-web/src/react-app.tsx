@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Analytics } from "@vercel/analytics/react";
 import { BrowserRouter, useRoutes } from "react-router";
+import { ClerkProvider } from "@clerk/clerk-react";
 import type { JittleRouteObject } from "@jittle-lamp/viewer-react";
 import {
   buildVisibleActionRows,
@@ -27,6 +29,8 @@ import {
 
 import { buildReviewedArchive } from "./archive-export";
 import { buildReviewedZipBlob, createWebNotesAdapter, createWebPlaybackAdapter, createWebShareAdapter, createWebStorageAdapter } from "./adapters";
+import { DesktopAuthApprovalPage } from "./desktop-auth-page";
+import { clerkPublishableKey } from "./env";
 import { NetworkDetail } from "./network-detail";
 import { useWebFileAdapter } from "./web-adapter";
 
@@ -724,10 +728,19 @@ function MergeDialog(props: {
 export function bootstrap(): void {
   const root = document.getElementById("app");
   if (!root) throw new Error("Evidence web root element was not found.");
+  const app = (
+    <>
+      <BrowserRouter>
+        <EvidenceWebRoutes />
+      </BrowserRouter>
+      <Analytics />
+    </>
+  );
+
   createRoot(root).render(
-    <BrowserRouter>
-      <EvidenceWebRoutes />
-    </BrowserRouter>
+    clerkPublishableKey ? (
+      <ClerkProvider publishableKey={clerkPublishableKey}>{app}</ClerkProvider>
+    ) : app
   );
 }
 
@@ -735,6 +748,10 @@ const evidenceWebRoutes: JittleRouteObject[] = [
   {
     path: "/",
     element: <EvidenceViewerPage />
+  },
+  {
+    path: "/desktop-auth",
+    element: <DesktopAuthApprovalPage />
   }
 ];
 

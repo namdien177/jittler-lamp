@@ -154,6 +154,14 @@ export type DesktopRequestMap = {
       ok: true;
     };
   };
+  openExternalUrl: {
+    params: {
+      url: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
   removeSessionTag: {
     params: {
       sessionId: string;

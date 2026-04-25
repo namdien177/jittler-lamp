@@ -172,6 +172,17 @@ const handlers: DesktopHandlerMap = {
       ok: true as const
     };
   },
+  openExternalUrl: async ({ url }) => {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+      throw new Error("Only HTTP(S) URLs can be opened externally.");
+    }
+
+    await shell.openExternal(parsedUrl.toString());
+    return {
+      ok: true as const
+    };
+  },
   removeSessionTag: async ({ sessionId, tag }) => {
     removeSessionTag(sessionId, tag);
     return { ok: true as const };

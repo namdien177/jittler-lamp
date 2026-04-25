@@ -26,6 +26,7 @@ export type RuntimeConfig = {
 	clerkJwtKey: string | undefined;
 	clerkAudience: string | undefined;
 	clerkAuthorizedParties: string[] | undefined;
+	webAppOrigin: string | undefined;
 };
 
 const parseAuthorizedParties = (
@@ -89,5 +90,6 @@ export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
 		clerkAuthorizedParties: parseAuthorizedParties(
 			env.CLERK_AUTHORIZED_PARTIES,
 		),
+		webAppOrigin: env.WEB_APP_ORIGIN,
 	};
 };

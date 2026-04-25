@@ -1,5 +1,10 @@
 export * from "./relations";
 export {
+	createDesktopAuthFlowInputSchema,
+	desktopAuthFlowStatusSchema,
+	desktopAuthFlows,
+} from "./tables/desktop-auth-flows";
+export {
 	createEvidenceArtifactInputSchema,
 	evidenceArtifactKindSchema,
 	evidenceArtifacts,

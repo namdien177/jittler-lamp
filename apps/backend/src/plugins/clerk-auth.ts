@@ -3,6 +3,7 @@ import { Elysia, status } from "elysia";
 import type { RuntimeConfig } from "../config/runtime";
 import { apiErrorSchema, createApiError } from "../http/api-error";
 import { resolveActiveOrganizationForClerkUser } from "../services/active-organization";
+import { verifyDesktopAuthSessionToken } from "../services/desktop-auth";
 import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
 import type { CorePlugin } from "./core";
 
@@ -174,10 +175,45 @@ const authenticateWithVerifyToken = async (
 	});
 };
 
+const authenticateWithDesktopSessionToken = async (
+	request: Request,
+	runtime: RuntimeConfig,
+) => {
+	const token = readSessionToken(request);
+	if (!token) {
+		return null;
+	}
+
+	const claims = await verifyDesktopAuthSessionToken(
+		runtime,
+		decodeURIComponent(token),
+	);
+	if (!claims) {
+		return null;
+	}
+
+	return toAuthContext({
+		userId: claims.clerkUserId,
+		sessionClaims: { scope: claims.scope },
+	});
+};
+
 const authenticateRequest = async (
 	request: Request,
 	runtime: RuntimeConfig,
 ) => {
+	try {
+		const desktopAuth = await authenticateWithDesktopSessionToken(
+			request,
+			runtime,
+		);
+		if (desktopAuth) {
+			return desktopAuth;
+		}
+	} catch {
+		// Not a desktop session token; continue with Clerk verification.
+	}
+
 	if (runtime.clerkPublishableKey) {
 		return authenticateWithRequestState(request, runtime);
 	}
@@ -208,13 +244,17 @@ export const createClerkAuthPlugin = (core: CorePlugin) =>
 					);
 				}
 
-				if (!runtime.clerkSecretKey && !runtime.clerkJwtKey) {
+				if (
+					!runtime.clerkSecretKey &&
+					!runtime.clerkJwtKey &&
+					!runtime.secret
+				) {
 					return status(
 						500,
 						createApiError(
 							requestId,
 							"AUTH_MISCONFIGURED",
-							"Clerk backend auth configuration is missing",
+							"Backend auth configuration is missing",
 							500,
 						),
 					);

@@ -263,6 +263,95 @@ describe("routes", () => {
 		).toBeTrue();
 	});
 
+	it("bridges browser Clerk approval into a polled desktop token", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const clerkToken = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_desktop_auth_bridge")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+		const { app } = createApp(
+			createTestEnv({
+				DATABASE_URL: databaseUrl,
+				CLERK_JWT_KEY: jwtKey,
+				CLERK_AUDIENCE: "test-audience",
+				WEB_APP_ORIGIN: "https://viewer.example.test",
+			}),
+		);
+
+		const startResponse = await app.handle(
+			new Request("http://localhost/desktop-auth/flows", { method: "POST" }),
+		);
+		expect(startResponse.status).toBe(200);
+		const started = (await startResponse.json()) as {
+			deviceCode: string;
+			userCode: string;
+			verificationUriComplete: string;
+		};
+		expect(started.userCode).toContain("-");
+		expect(
+			started.verificationUriComplete.startsWith(
+				"https://viewer.example.test/desktop-auth?user_code=",
+			),
+		).toBeTrue();
+
+		const pendingResponse = await app.handle(
+			new Request(
+				`http://localhost/desktop-auth/flows/${encodeURIComponent(started.deviceCode)}`,
+			),
+		);
+		expect(pendingResponse.status).toBe(200);
+		expect((await pendingResponse.json()) as { status: string }).toMatchObject({
+			status: "pending",
+		});
+
+		const completeResponse = await app.handle(
+			new Request("http://localhost/desktop-auth/flows/complete", {
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${clerkToken}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ userCode: started.userCode }),
+			}),
+		);
+		expect(completeResponse.status).toBe(200);
+		expect((await completeResponse.json()) as { status: string }).toMatchObject(
+			{
+				status: "approved",
+			},
+		);
+
+		const approvedResponse = await app.handle(
+			new Request(
+				`http://localhost/desktop-auth/flows/${encodeURIComponent(started.deviceCode)}`,
+			),
+		);
+		expect(approvedResponse.status).toBe(200);
+		const approved = (await approvedResponse.json()) as {
+			status: string;
+			accessToken: string;
+			clerkUserId: string;
+		};
+		expect(approved.status).toBe("approved");
+		expect(approved.clerkUserId).toBe("user_desktop_auth_bridge");
+		expect(approved.accessToken).toBeString();
+
+		const meResponse = await app.handle(
+			new Request("http://localhost/protected/me", {
+				headers: { authorization: `Bearer ${approved.accessToken}` },
+			}),
+		);
+		expect(meResponse.status).toBe(200);
+		expect((await meResponse.json()) as { userId: string }).toMatchObject({
+			userId: "user_desktop_auth_bridge",
+		});
+	});
+
 	it("rejects client-provided orgId when starting uploads", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
 		await applyMigrations(databaseUrl);

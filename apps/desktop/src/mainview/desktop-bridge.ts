@@ -42,6 +42,7 @@ const requestNames = [
   "loadLibrarySession",
   "openLocalSession",
   "openPath",
+  "openExternalUrl",
   "removeSessionTag",
   "saveOutputDirectory",
   "saveSessionReviewState",

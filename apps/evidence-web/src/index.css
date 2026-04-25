@@ -54,6 +54,33 @@ body,
   margin: 0;
 }
 
+.desktop-auth-page {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--bg);
+}
+
+.desktop-auth-panel {
+  width: min(420px, 100%);
+  padding: var(--space-5);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+
+.desktop-auth-panel h1 {
+  margin: 0 0 var(--space-2);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.desktop-auth-panel p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
 button,
 input {
   font: inherit;

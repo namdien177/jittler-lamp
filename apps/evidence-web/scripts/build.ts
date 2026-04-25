@@ -1,7 +1,43 @@
 /// <reference types="bun-types" />
 
+import { existsSync, readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
+
 const workspaceRoot = new URL("../../../", import.meta.url);
 const distRoot = new URL("../dist/", import.meta.url);
+
+function getWorkspaceEnvValue(name: string): string {
+  const currentValue = process.env[name];
+  if (currentValue) return currentValue;
+
+  const envFile = new URL(".env", workspaceRoot);
+  if (!existsSync(envFile)) return "";
+
+  return parseEnv(readFileSync(envFile, "utf8"))[name] ?? "";
+}
+
+function getFirstWorkspaceEnvValue(names: string[]): string {
+  for (const name of names) {
+    const value = getWorkspaceEnvValue(name);
+    if (value) return value;
+  }
+
+  return "";
+}
+
+const browserDefines = {
+  "process.env.CLERK_PUBLISHABLE_KEY": JSON.stringify(getWorkspaceEnvValue("CLERK_PUBLISHABLE_KEY")),
+  "process.env.JITTLE_LAMP_API_ORIGIN": JSON.stringify(getWorkspaceEnvValue("JITTLE_LAMP_API_ORIGIN")),
+  "process.env.REACT_APP_VERCEL_OBSERVABILITY_BASEPATH": JSON.stringify(getFirstWorkspaceEnvValue([
+    "REACT_APP_VERCEL_OBSERVABILITY_BASEPATH",
+    "VERCEL_OBSERVABILITY_BASEPATH"
+  ])),
+  "process.env.REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG": JSON.stringify(getFirstWorkspaceEnvValue([
+    "REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG",
+    "VERCEL_OBSERVABILITY_CLIENT_CONFIG"
+  ])),
+  "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "production")
+};
 
 const reactEntrypoints = new Map([
   ["react", new URL("node_modules/react/index.js", workspaceRoot).pathname],
@@ -29,6 +65,7 @@ const build = await Bun.build({
   outdir: distRoot.pathname,
   target: "browser",
   format: "esm",
+  define: browserDefines,
   plugins: [dedupeReactPlugin],
   naming: "[name].js",
   minify: true

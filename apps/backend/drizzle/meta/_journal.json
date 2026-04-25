@@ -29,6 +29,13 @@
 			"when": 1745240600000,
 			"tag": "0003_team_policy_extensibility",
 			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "7",
+			"when": 1777094437000,
+			"tag": "0004_desktop_auth_flows",
+			"breakpoints": true
 		}
 	]
 }

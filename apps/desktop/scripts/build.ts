@@ -20,8 +20,26 @@ function getWorkspaceEnvValue(name: string): string {
   return parseEnv(readFileSync(envFile, "utf8"))[name] ?? "";
 }
 
+function getFirstWorkspaceEnvValue(names: string[]): string {
+  for (const name of names) {
+    const value = getWorkspaceEnvValue(name);
+    if (value) return value;
+  }
+
+  return "";
+}
+
 const browserDefines = {
   "process.env.CLERK_PUBLISHABLE_KEY": JSON.stringify(getWorkspaceEnvValue("CLERK_PUBLISHABLE_KEY")),
+  "process.env.JITTLE_LAMP_API_ORIGIN": JSON.stringify(getWorkspaceEnvValue("JITTLE_LAMP_API_ORIGIN")),
+  "process.env.REACT_APP_VERCEL_OBSERVABILITY_BASEPATH": JSON.stringify(getFirstWorkspaceEnvValue([
+    "REACT_APP_VERCEL_OBSERVABILITY_BASEPATH",
+    "VERCEL_OBSERVABILITY_BASEPATH"
+  ])),
+  "process.env.REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG": JSON.stringify(getFirstWorkspaceEnvValue([
+    "REACT_APP_VERCEL_OBSERVABILITY_CLIENT_CONFIG",
+    "VERCEL_OBSERVABILITY_CLIENT_CONFIG"
+  ])),
   "process.env.NODE_ENV": JSON.stringify(nodeEnv)
 };
 

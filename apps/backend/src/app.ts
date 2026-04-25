@@ -7,6 +7,7 @@ import { createDb } from "./db";
 import { createClerkAuthPlugin } from "./plugins/clerk-auth";
 import { createCorePlugin } from "./plugins/core";
 import { createClerkRoutes } from "./routes/clerk";
+import { createDesktopAuthRoutes } from "./routes/desktop-auth";
 import { createEvidenceUploadRoutes } from "./routes/evidence-uploads";
 import { createEvidenceRoutes } from "./routes/evidences";
 import { createHealthRoutes } from "./routes/health";
@@ -57,6 +58,7 @@ export const createApp = (
 	app
 		.use(createHealthRoutes(core))
 		.use(createClerkRoutes(auth))
+		.use(createDesktopAuthRoutes(auth))
 		.use(createEvidenceUploadRoutes(auth))
 		.use(createEvidenceRoutes(auth))
 		.use(createShareLinkRoutes(auth))
