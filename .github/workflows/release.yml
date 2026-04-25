@@ -148,6 +148,8 @@ jobs:
 
       - name: Package macOS desktop release
         env:
+          CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+          JITTLE_LAMP_API_ORIGIN: ${{ vars.JITTLE_LAMP_API_ORIGIN }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.signing.outputs.signed == 'true' && 'true' || 'false' }}
           CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}

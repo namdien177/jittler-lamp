@@ -14,15 +14,37 @@ const buildEnv = ["dev", "canary", "stable"].includes(requestedBuildEnv) ? reque
 
 if (mode === "local") {
   loadWorkspaceEnv();
-} else if (!process.env.CSC_LINK) {
-  process.env.CSC_IDENTITY_AUTO_DISCOVERY ??= "false";
+} else if (!hasCompleteSigningConfig()) {
+  disableSigning();
 }
 
 process.env.JITTLE_LAMP_DESKTOP_BUILD_ENV = buildEnv;
 
 rmSync(artifactsRoot, { recursive: true, force: true });
 run("bun", ["run", "./scripts/build.ts", `--env=${buildEnv}`]);
-run("bun", ["x", "electron-builder"]);
+run("bun", ["x", "electron-builder", "--publish=never"]);
+
+function hasCompleteSigningConfig(): boolean {
+  const hasCertificate = Boolean(process.env.CSC_LINK && process.env.CSC_KEY_PASSWORD);
+  const hasAppleIdCredentials = Boolean(
+    process.env.APPLE_ID &&
+      process.env.APPLE_APP_SPECIFIC_PASSWORD &&
+      process.env.APPLE_TEAM_ID
+  );
+  const hasAppleApiCredentials = Boolean(
+    process.env.APPLE_API_KEY &&
+      process.env.APPLE_API_KEY_ID &&
+      process.env.APPLE_API_ISSUER
+  );
+
+  return hasCertificate && (hasAppleIdCredentials || hasAppleApiCredentials);
+}
+
+function disableSigning(): void {
+  process.env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+  delete process.env.CSC_LINK;
+  delete process.env.CSC_KEY_PASSWORD;
+}
 
 function readOption(name: string): string | null {
   const prefix = `--${name}=`;
