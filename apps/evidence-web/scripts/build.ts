@@ -25,9 +25,16 @@ function getFirstWorkspaceEnvValue(names: string[]): string {
   return "";
 }
 
+function getWebApiOrigin(): string {
+  const configuredOrigin = getWorkspaceEnvValue("JITTLE_LAMP_API_ORIGIN");
+  if (configuredOrigin) return configuredOrigin;
+
+  return process.env.VERCEL ? "/api" : "";
+}
+
 const browserDefines = {
   "process.env.CLERK_PUBLISHABLE_KEY": JSON.stringify(getWorkspaceEnvValue("CLERK_PUBLISHABLE_KEY")),
-  "process.env.JITTLE_LAMP_API_ORIGIN": JSON.stringify(getWorkspaceEnvValue("JITTLE_LAMP_API_ORIGIN")),
+  "process.env.JITTLE_LAMP_API_ORIGIN": JSON.stringify(getWebApiOrigin()),
   "process.env.REACT_APP_VERCEL_OBSERVABILITY_BASEPATH": JSON.stringify(getFirstWorkspaceEnvValue([
     "REACT_APP_VERCEL_OBSERVABILITY_BASEPATH",
     "VERCEL_OBSERVABILITY_BASEPATH"

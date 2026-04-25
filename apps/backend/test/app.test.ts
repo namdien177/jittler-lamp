@@ -263,6 +263,58 @@ describe("routes", () => {
 		).toBeTrue();
 	});
 
+	it("allows CORS preflight for the configured web origin", async () => {
+		const { app } = createApp(
+			createTestEnv({
+				WEB_APP_ORIGIN: "https://viewer.example.test/",
+			}),
+		);
+
+		const response = await app.handle(
+			new Request("http://localhost/desktop-auth/flows/complete", {
+				method: "OPTIONS",
+				headers: {
+					"access-control-request-headers": "authorization,content-type",
+					"access-control-request-method": "POST",
+					origin: "https://viewer.example.test",
+				},
+			}),
+		);
+
+		expect(response.status).toBe(204);
+		expect(response.headers.get("access-control-allow-origin")).toBe(
+			"https://viewer.example.test",
+		);
+		expect(response.headers.get("access-control-allow-headers")).toContain(
+			"authorization",
+		);
+	});
+
+	it("allows CORS preflight for Clerk authorized party origins", async () => {
+		const { app } = createApp(
+			createTestEnv({
+				CLERK_AUTHORIZED_PARTIES:
+					"https://viewer.example.test,https://desktop.example.test/",
+			}),
+		);
+
+		const response = await app.handle(
+			new Request("http://localhost/desktop-auth/flows/complete", {
+				method: "OPTIONS",
+				headers: {
+					"access-control-request-headers": "authorization,content-type",
+					"access-control-request-method": "POST",
+					origin: "https://desktop.example.test",
+				},
+			}),
+		);
+
+		expect(response.status).toBe(204);
+		expect(response.headers.get("access-control-allow-origin")).toBe(
+			"https://desktop.example.test",
+		);
+	});
+
 	it("bridges browser Clerk approval into a polled desktop token", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
 		await applyMigrations(databaseUrl);

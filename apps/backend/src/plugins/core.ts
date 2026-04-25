@@ -33,12 +33,22 @@ const localWebOrigins = new Set([
 const isDevelopmentRuntime = (runtime: RuntimeConfig) =>
 	runtime.nodeEnv === "local" || runtime.nodeEnv === "development";
 
+const normalizeOrigin = (origin: string) => origin.replace(/\/+$/, "");
+
 const isAllowedCorsOrigin = (runtime: RuntimeConfig, origin: string) => {
-	if (runtime.webAppOrigin === origin) {
+	const normalizedOrigin = normalizeOrigin(origin);
+	const allowedOrigins = [
+		runtime.webAppOrigin,
+		...(runtime.clerkAuthorizedParties ?? []),
+	]
+		.filter((value): value is string => Boolean(value))
+		.map(normalizeOrigin);
+
+	if (allowedOrigins.includes(normalizedOrigin)) {
 		return true;
 	}
 
-	return isDevelopmentRuntime(runtime) && localWebOrigins.has(origin);
+	return isDevelopmentRuntime(runtime) && localWebOrigins.has(normalizedOrigin);
 };
 
 const applyCorsHeaders = (

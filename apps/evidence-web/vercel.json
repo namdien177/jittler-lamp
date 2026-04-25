@@ -4,6 +4,18 @@
   "installCommand": "bun install",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://jl-api.monthlyparty.com/:path*"
+    },
+    {
+      "source": "/desktop-auth/flows",
+      "destination": "https://jl-api.monthlyparty.com/desktop-auth/flows"
+    },
+    {
+      "source": "/desktop-auth/flows/:path*",
+      "destination": "https://jl-api.monthlyparty.com/desktop-auth/flows/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
