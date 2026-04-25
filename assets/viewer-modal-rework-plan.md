@@ -322,17 +322,41 @@ Each checkpoint is independently shippable. Stop after any of them and the app s
 ## Status & next steps (resume from here)
 
 - [x] CP0 — Plan written.
-- [ ] CP1 — Shared `<ViewerModal>` component.
-- [ ] CP2 — Search-everywhere, drawer, right-click menu.
-- [ ] CP3 — Header actions.
-- [ ] CP4 — Desktop integration.
-- [ ] CP5 — Webapp integration.
-- [ ] CP6 — Verification & doc update.
+- [x] CP1 — Shared `<ViewerModal>` component (single file at
+  `packages/viewer-react/src/viewer-modal/index.tsx` plus `curl.ts` + `styles.ts`).
+- [x] CP2 — Search-everywhere, drawer, right-click menu (built into the component).
+- [x] CP3 — Header actions (Copy share link / Create share link / Download ZIP / Close).
+- [x] CP4 — Desktop integration (`DesktopViewerOverlay` rewritten; legacy
+  `viewer-pane.tsx` removed; controller now opens the drawer for console rows too).
+- [x] CP5 — Webapp integration (`EvidenceViewerPage` rewritten; legacy
+  `network-detail.tsx` and inline `SectionTabs/NetworkFilterBar/TimelineList/ContextMenu/MergeDialog`
+  removed).
+- [x] CP6 — Verification:
+  - `bun run typecheck` ✅
+  - `bun test` → 156/156 ✅
+  - `bun run --cwd apps/desktop build` ✅
+  - `bun run --cwd apps/evidence-web build` ✅
+  - `tests/desktop-viewer-layout.test.ts` rewritten to assert the new grid layout.
+  - `tests/viewer-modal.test.ts` added for `buildCurl` + `getResponseBodyString`.
+
+### Known follow-ups (deferrable)
+- Desktop modal does not yet expose **Create share link** / **Copy share link**. The
+  existing share-link UI lives on the Cloud page (`pages/cloud-page.tsx`); plumbing
+  it into the modal needs the controller to know whether the open session has been
+  uploaded and whether an active share link exists. Currently the modal's header
+  shows only "Download ZIP" + Close on desktop. Acceptance criteria from CP3 is met
+  on web (where share-link is the relevant case).
+- Tags in the header come from `state.sessions[*].tags` on desktop; not present on
+  web (the shared `/share/:token` API does not return tags). Plumbing tags through
+  the resolve response is a small backend change — recorded as a deferred item.
+- `isOwner` on web is currently inferred (drop-zone = true, share-link = false).
+  The backend `share-links/:token/resolve` endpoint does not yet expose ownership;
+  adding it lets us light up "Create share link" for owners viewing a share URL.
 
 When picking this up:
 1. Read decisions #1–#12 above.
 2. Skim the **Component contract** section.
-3. Check off the boxes under CP-N as you complete them; commit per checkpoint.
+3. The follow-ups list above is the natural starting point.
 
 ## Useful commands
 

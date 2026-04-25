@@ -7,20 +7,28 @@ async function readApiError(response: Response, fallback: string): Promise<strin
   return payload?.error?.message ?? fallback;
 }
 
-async function authedFetch<T>(getToken: FetchToken, path: string): Promise<T> {
+async function authedFetch<T>(getToken: FetchToken, path: string, init: RequestInit = {}): Promise<T> {
   const token = await getToken();
   if (!token) throw new Error("Sign in is required.");
 
-  const response = await fetch(`${apiOrigin}${path}`, {
-    headers: {
-      authorization: `Bearer ${token}`
-    }
-  });
+  const headers = new Headers(init.headers);
+  headers.set("authorization", `Bearer ${token}`);
+  if (!headers.has("content-type") && init.body) {
+    headers.set("content-type", "application/json");
+  }
+
+  const response = await fetch(`${apiOrigin}${path}`, { ...init, headers });
   if (!response.ok) {
     throw new Error(await readApiError(response, `Request failed (${response.status}).`));
   }
   return (await response.json()) as T;
 }
+
+export type AcceptInvitationResponse = {
+  organizationId: string;
+  role: "owner" | "member";
+  invitationId: string;
+};
 
 export type EvidenceArtifact = {
   id: string;
@@ -73,5 +81,11 @@ export const api = {
       `/evidences/${encodeURIComponent(evidenceId)}/artifacts/${encodeURIComponent(artifactId)}/read-url${
         orgId ? `?orgId=${encodeURIComponent(orgId)}` : ""
       }`
-    )
+    ),
+
+  acceptInvitation: (getToken: FetchToken, token: string) =>
+    authedFetch<AcceptInvitationResponse>(getToken, "/orgs/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify({ token })
+    })
 };
