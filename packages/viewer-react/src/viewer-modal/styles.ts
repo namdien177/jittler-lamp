@@ -112,7 +112,7 @@ export const viewerModalStyles = `
 
 .jl-vm-body {
   display: grid;
-  grid-template-columns: 3fr minmax(0, 600px);=
+  grid-template-columns: minmax(0, 3fr) minmax(0, min(4fr, 600px));
   min-height: 0;
   overflow: hidden;
 }
