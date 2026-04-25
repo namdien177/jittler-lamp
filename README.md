@@ -181,13 +181,17 @@ The current workflow always produces an **arm64** macOS artifact. It does not cl
 
 #### Unsigned releases
 
-If Apple signing credentials are not configured in GitHub Actions, the workflow still builds an unsigned DMG. That is useful for internal download/testing, but it is **not** the same thing as a frictionless public macOS installer.
+If Apple signing credentials are not configured in GitHub Actions, the workflow still builds an unsigned DMG. Electron Builder may apply an ad-hoc signature so the app bundle is internally consistent, but that is **not** the same thing as Apple Developer ID signing and notarization.
+
+This means a no-cost Apple account is enough for local development, but it is not enough for a frictionless public macOS installer. Public distribution that opens normally on other Macs requires the paid Apple Developer Program so CI can sign with a Developer ID Application certificate and notarize the DMG/app.
 
 Unsigned macOS releases may still be blocked by Gatekeeper after download. If needed, a user can remove quarantine manually after installing the app:
 
 ```bash
-xattr -cr /Applications/jittle-lamp.app
+xattr -cr "/Applications/Jittle Lamp.app"
 ```
+
+After clearing quarantine, open the app from Finder once. Users may still need to right-click **Open** on the first launch depending on their macOS security settings.
 
 #### Signed and notarized releases
 
