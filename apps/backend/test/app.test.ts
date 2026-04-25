@@ -814,6 +814,142 @@ describe("routes", () => {
 		}
 	});
 
+	it("replaces cloud artifacts when resyncing a desktop session", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_uploads_desktop_resync",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_uploads_desktop_resync" },
+		});
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_uploads_desktop_resync")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: TEST_APP_SECRET,
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const startDesktopSync = (body: Record<string, unknown>) =>
+			app.handle(
+				new Request("http://localhost/evidences/desktop-sessions/sync/start", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${token}`,
+					},
+					body: JSON.stringify(body),
+				}),
+			);
+
+		const initialResponse = await startDesktopSync({
+			sessionId: "local-session-resync",
+			title: "Original desktop session",
+			sourceMetadata: "original",
+			artifacts: [
+				{
+					key: "recording",
+					kind: "recording",
+					mimeType: "video/webm",
+					bytes: 11,
+					checksum: `sha256:${await sha256Hex("hello world")}`,
+				},
+				{
+					key: "archive",
+					kind: "network-log",
+					mimeType: "application/json",
+					bytes: 2,
+					checksum: `sha256:${await sha256Hex("{}")}`,
+				},
+			],
+		});
+		expect(initialResponse.status).toBe(200);
+		const initialPayload = (await initialResponse.json()) as {
+			evidenceId: string;
+			organizationId: string;
+			uploadSessions: Array<{ uploadId: string; storageKey: string }>;
+		};
+
+		const resyncResponse = await startDesktopSync({
+			sessionId: "local-session-resync",
+			title: "Updated desktop session",
+			sourceMetadata: "updated",
+			replaceEvidenceId: initialPayload.evidenceId,
+			artifacts: [
+				{
+					key: "recording",
+					kind: "recording",
+					mimeType: "video/webm",
+					bytes: 12,
+					checksum: `sha256:${await sha256Hex("hello world!")}`,
+				},
+				{
+					key: "archive",
+					kind: "network-log",
+					mimeType: "application/json",
+					bytes: 13,
+					checksum: `sha256:${await sha256Hex('{"ok":true}')}`,
+				},
+			],
+		});
+		expect(resyncResponse.status).toBe(200);
+		const resyncPayload = (await resyncResponse.json()) as {
+			evidenceId: string;
+			organizationId: string;
+			uploadSessions: Array<{ uploadId: string; storageKey: string }>;
+		};
+
+		expect(resyncPayload.evidenceId).toBe(initialPayload.evidenceId);
+		expect(resyncPayload.organizationId).toBe(initialPayload.organizationId);
+		expect(
+			resyncPayload.uploadSessions.map((session) => session.uploadId),
+		).not.toEqual(
+			initialPayload.uploadSessions.map((session) => session.uploadId),
+		);
+
+		const evidence = await db.query.evidences.findFirst({
+			where: eq(evidences.id, initialPayload.evidenceId),
+			columns: { title: true, sourceMetadata: true },
+		});
+		expect(evidence).toEqual({
+			title: "Updated desktop session",
+			sourceMetadata: "updated",
+		});
+
+		const artifacts = await db.query.evidenceArtifacts.findMany({
+			where: eq(evidenceArtifacts.evidenceId, initialPayload.evidenceId),
+			columns: { id: true, bytes: true, uploadStatus: true },
+		});
+		expect(artifacts).toHaveLength(2);
+		expect(artifacts.map((artifact) => artifact.id).sort()).toEqual(
+			resyncPayload.uploadSessions.map((session) => session.uploadId).sort(),
+		);
+		expect(
+			artifacts.map((artifact) => artifact.bytes).sort((a, b) => a - b),
+		).toEqual([12, 13]);
+		expect(
+			artifacts.every((artifact) => artifact.uploadStatus === "uploading"),
+		).toBe(true);
+	});
+
 	it("does not allow completion before blob upload exists", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
 		await applyMigrations(databaseUrl);

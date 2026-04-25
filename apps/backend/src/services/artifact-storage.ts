@@ -1,4 +1,5 @@
 import {
+	DeleteObjectCommand,
 	GetObjectCommand,
 	PutObjectCommand,
 	S3Client,
@@ -20,6 +21,7 @@ export type ArtifactStorage = {
 		responseContentType: string;
 		expiresInSeconds?: number;
 	}) => Promise<{ url: string; expiresAt: number; ttlSeconds: number }>;
+	deleteObject: (input: { key: string }) => Promise<void>;
 };
 
 const memoryObjects = new Map<
@@ -74,6 +76,14 @@ export const createArtifactStorage = (
 
 			return { url, expiresAt, ttlSeconds };
 		},
+		deleteObject: async (input) => {
+			await client.send(
+				new DeleteObjectCommand({
+					Bucket: runtime.s3?.bucket,
+					Key: input.key,
+				}),
+			);
+		},
 	};
 };
 
@@ -90,5 +100,8 @@ const createMemoryArtifactStorage = (): ArtifactStorage => ({
 		throw new Error(
 			"S3 storage is not configured; signed read URLs are unavailable.",
 		);
+	},
+	deleteObject: async (input) => {
+		memoryObjects.delete(input.key);
 	},
 });

@@ -40,6 +40,7 @@ const startDesktopSessionSyncBodySchema = t.Object({
 	sessionId: t.String({ minLength: 1 }),
 	title: t.String({ minLength: 1 }),
 	sourceMetadata: t.Optional(t.String()),
+	replaceEvidenceId: t.Optional(t.String({ minLength: 1 })),
 	artifacts: t.Array(
 		t.Object({
 			key: t.Union([t.Literal("recording"), t.Literal("archive")]),
@@ -314,7 +315,16 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 			app
 				.post(
 					"/evidences/desktop-sessions/sync/start",
-					async ({ authContext, body, db, request, requestId, set }) => {
+					async ({
+						artifactStorage,
+						authContext,
+						body,
+						db,
+						request,
+						requestId,
+						requestLogger,
+						set,
+					}) => {
 						if (!db) {
 							set.status = 503;
 							return createDbUnavailableError(requestId);
@@ -350,25 +360,90 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 							);
 						}
 
+						const existingEvidence = body.replaceEvidenceId
+							? await db.query.evidences.findFirst({
+									where: and(
+										eq(evidences.id, body.replaceEvidenceId),
+										eq(evidences.orgId, workspace.activeOrgId),
+									),
+									columns: {
+										id: true,
+										orgId: true,
+										sourceType: true,
+										sourceExternalId: true,
+									},
+								})
+							: null;
+						if (body.replaceEvidenceId && !existingEvidence) {
+							set.status = 404;
+							return createApiError(
+								requestId,
+								"EVIDENCE_NOT_FOUND",
+								"Evidence not found for active organization",
+								404,
+							);
+						}
+						if (
+							existingEvidence &&
+							(existingEvidence.sourceType !== "desktop-session" ||
+								existingEvidence.sourceExternalId !== body.sessionId)
+						) {
+							set.status = 409;
+							return createApiError(
+								requestId,
+								"DESKTOP_SESSION_RESYNC_MISMATCH",
+								"Replacement evidence does not match the requested desktop session",
+								409,
+							);
+						}
+
+						const replacedArtifactKeys = existingEvidence
+							? (
+									await db.query.evidenceArtifacts.findMany({
+										where: eq(
+											evidenceArtifacts.evidenceId,
+											existingEvidence.id,
+										),
+										columns: { s3Key: true },
+									})
+								).map((artifact) => artifact.s3Key)
+							: [];
+
 						const now = Date.now();
 						const created = await db.transaction(async (tx) => {
-							const [evidence] = await tx
-								.insert(evidences)
-								.values({
-									orgId: workspace.activeOrgId,
-									createdBy: workspace.localUserId,
-									title: body.title,
-									sourceType: "desktop-session",
-									sourceExternalId: body.sessionId,
-									sourceMetadata: body.sourceMetadata,
-									scopeType: "organization",
-									scopeId: workspace.activeOrgId,
-									updatedAt: now,
-								})
-								.returning({ id: evidences.id, orgId: evidences.orgId });
+							const [evidence] = existingEvidence
+								? await tx
+										.update(evidences)
+										.set({
+											title: body.title,
+											sourceMetadata: body.sourceMetadata,
+											updatedAt: now,
+										})
+										.where(eq(evidences.id, existingEvidence.id))
+										.returning({ id: evidences.id, orgId: evidences.orgId })
+								: await tx
+										.insert(evidences)
+										.values({
+											orgId: workspace.activeOrgId,
+											createdBy: workspace.localUserId,
+											title: body.title,
+											sourceType: "desktop-session",
+											sourceExternalId: body.sessionId,
+											sourceMetadata: body.sourceMetadata,
+											scopeType: "organization",
+											scopeId: workspace.activeOrgId,
+											updatedAt: now,
+										})
+										.returning({ id: evidences.id, orgId: evidences.orgId });
 
 							if (!evidence) {
-								throw new Error("Failed to create desktop session evidence");
+								throw new Error("Failed to save desktop session evidence");
+							}
+
+							if (existingEvidence) {
+								await tx
+									.delete(evidenceArtifacts)
+									.where(eq(evidenceArtifacts.evidenceId, evidence.id));
 							}
 
 							await tx
@@ -435,6 +510,28 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 								uploadSessions,
 							};
 						});
+
+						if (replacedArtifactKeys.length > 0) {
+							const results = await Promise.allSettled(
+								replacedArtifactKeys.map((key) =>
+									artifactStorage.deleteObject({ key }),
+								),
+							);
+							const failedDeleteCount = results.filter(
+								(result) => result.status === "rejected",
+							).length;
+							if (failedDeleteCount > 0) {
+								requestLogger.warn(
+									{
+										event: "desktop-session.resync.artifact-delete-failed",
+										evidenceId: created.evidenceId,
+										failedDeleteCount,
+										requestId,
+									},
+									"failed to delete replaced desktop session artifact objects",
+								);
+							}
+						}
 
 						return created;
 					},

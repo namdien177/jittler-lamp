@@ -259,6 +259,7 @@ export const api = {
       sessionId: string;
       title: string;
       sourceMetadata?: string;
+      replaceEvidenceId?: string;
       artifacts: Array<{
         key: "recording" | "archive";
         kind: "recording" | "network-log";

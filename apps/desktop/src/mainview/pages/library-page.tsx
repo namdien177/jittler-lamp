@@ -326,20 +326,6 @@ function SessionCard(props: {
       toast.error("Local record unavailable", "Remote-only records cannot be synced from this device yet.");
       return null;
     }
-    if (session.remoteEvidenceId) {
-      return {
-        id: session.remoteEvidenceId,
-        orgId: session.remoteOrgId ?? "",
-        title: session.sessionId,
-        sourceType: "desktop-session",
-        sourceExternalId: session.sessionId,
-        sourceMetadata: null,
-        createdBy: "",
-        createdAt: Date.parse(session.recordedAt),
-        updatedAt: Date.now()
-      };
-    }
-
     setSyncing(true);
     try {
       const upload = await desktop.prepareSessionUpload(session.sessionId);
@@ -354,10 +340,12 @@ function SessionCard(props: {
           checksum: artifact.checksum
         }))
       });
+      const replaceEvidenceId = session.remoteEvidenceId;
       const started = await api.startDesktopSessionSync(auth.getToken, {
         sessionId: upload.sessionId,
         title: upload.title,
         sourceMetadata,
+        ...(replaceEvidenceId ? { replaceEvidenceId } : {}),
         artifacts: upload.artifacts.map((artifact) => ({
           key: artifact.key,
           kind: artifact.kind,
@@ -393,7 +381,10 @@ function SessionCard(props: {
         updatedAt: Date.now()
       };
       onRemoteSynced(evidence);
-      toast.success("Synced to server", "Remote sharing is now available.");
+      toast.success(
+        replaceEvidenceId ? "Resynced to server" : "Synced to server",
+        replaceEvidenceId ? "Cloud assets now match the local session." : "Remote sharing is now available."
+      );
       return evidence;
     } catch (error) {
       toast.error("Sync failed", error instanceof Error ? error.message : undefined);
@@ -503,7 +494,7 @@ function SessionCard(props: {
         <button className="button ghost sm" type="button" onClick={() => desktop.openSessionFolder(session.sessionId)} disabled={!hasLocalRecord}>
           Open folder
         </button>
-        {!hasRemoteRecord ? (
+        {hasLocalRecord ? (
           <button className="button secondary sm" type="button" onClick={() => void syncToServer()} disabled={!hasLocalRecord || syncing}>
             {syncing ? "Syncing…" : "Sync"}
           </button>

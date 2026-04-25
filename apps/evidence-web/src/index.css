@@ -152,12 +152,53 @@ input {
   color: var(--text-muted);
 }
 
-.drop-zone {
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  height: 52px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.app-header-brand {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+}
+
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.app-header-org {
+  display: flex;
+  align-items: center;
+}
+
+.drop-zone {
+  display: flex;
+  flex: 1;
+  align-items: center;
   justify-content: center;
-  height: 100vh;
   padding: var(--space-5);
+}
+
+.app-shell .desktop-auth-page {
+  flex: 1;
 }
 
 .drop-area {

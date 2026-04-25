@@ -43,9 +43,10 @@ import {
   type ViewerModalRow
 } from "@jittle-lamp/viewer-react";
 
+import { AppHeader } from "./app-header";
 import { buildReviewedArchive } from "./archive-export";
 import { buildReviewedZipBlob, createWebNotesAdapter, createWebPlaybackAdapter, createWebShareAdapter, createWebStorageAdapter } from "./adapters";
-import { api, type ArtifactReadUrl, type EvidenceArtifact } from "./api";
+import { api, type ArtifactReadUrl, type EvidenceArtifact, type FetchToken } from "./api";
 import { DesktopAuthApprovalPage } from "./desktop-auth-page";
 import { clerkPublishableKey } from "./env";
 import { JoinOrganizationPage } from "./join-org-page";
@@ -90,7 +91,6 @@ function EvidenceViewerPage(props: {
   auth?: ReturnType<typeof useAuth> | undefined;
 }): React.JSX.Element {
   const shareToken = props.shareToken;
-  const auth = props.auth;
   const [state, setState] = useState<AppState>(() => initialState());
   const [contextMenu, setContextMenu] = useState<ViewerContextMenuState>({
     open: false,
@@ -113,6 +113,15 @@ function EvidenceViewerPage(props: {
     videoReadUrl: ArtifactReadUrl;
     archiveReadUrl: ArtifactReadUrl;
   } | null>(null);
+  const authRef = useRef(props.auth);
+  authRef.current = props.auth;
+  const stableGetToken = useRef<FetchToken>(() => {
+    const current = authRef.current;
+    if (!current) return Promise.resolve(null);
+    return current.getToken();
+  }).current;
+  const authIsLoaded = props.auth?.isLoaded;
+  const authIsSignedIn = props.auth?.isSignedIn;
 
   const storageAdapter = useMemo(() => createWebStorageAdapter(), []);
   const playbackAdapter = useMemo(() => createWebPlaybackAdapter(), []);
@@ -127,9 +136,8 @@ function EvidenceViewerPage(props: {
 
   useEffect(() => {
     if (!shareToken) return;
-    if (!auth) return;
-    if (!auth.isLoaded) return;
-    if (!auth.isSignedIn) {
+    if (!authIsLoaded) return;
+    if (!authIsSignedIn) {
       setState((prev) => ({
         ...prev,
         phase: "error",
@@ -142,7 +150,7 @@ function EvidenceViewerPage(props: {
     setState((prev) => ({ ...prev, phase: "loading", error: null, restrictedOrgName: null }));
     void (async () => {
       try {
-        const resolved = await api.resolveShareLink(auth.getToken, shareToken);
+        const resolved = await api.resolveShareLink(stableGetToken, shareToken);
         if (cancelled) return;
         if (resolved.shareLink.access === "denied") {
           setState((prev) => ({
@@ -154,7 +162,7 @@ function EvidenceViewerPage(props: {
           return;
         }
         const artifactResult = await api.listEvidenceArtifacts(
-          auth.getToken,
+          stableGetToken,
           resolved.shareLink.evidenceId,
           resolved.shareLink.orgId
         );
@@ -165,8 +173,8 @@ function EvidenceViewerPage(props: {
         }
 
         const [videoReadUrl, archiveReadUrl] = await Promise.all([
-          api.createArtifactReadUrl(auth.getToken, resolved.shareLink.evidenceId, recordingArtifact.id, resolved.shareLink.orgId),
-          api.createArtifactReadUrl(auth.getToken, resolved.shareLink.evidenceId, archiveArtifact.id, resolved.shareLink.orgId)
+          api.createArtifactReadUrl(stableGetToken, resolved.shareLink.evidenceId, recordingArtifact.id, resolved.shareLink.orgId),
+          api.createArtifactReadUrl(stableGetToken, resolved.shareLink.evidenceId, archiveArtifact.id, resolved.shareLink.orgId)
         ]);
         const loaded = await loadRemoteSessionArtifacts({
           archiveUrl: archiveReadUrl.url,
@@ -210,12 +218,12 @@ function EvidenceViewerPage(props: {
     return () => {
       cancelled = true;
     };
-  }, [shareToken, auth]);
+  }, [shareToken, authIsLoaded, authIsSignedIn, stableGetToken]);
 
   useEffect(() => {
     if (!shareToken || state.phase !== "viewing") return;
     const remote = remoteSessionRef.current;
-    if (!remote || !auth?.isSignedIn) return;
+    if (!remote || !authIsSignedIn) return;
 
     let cancelled = false;
     const renew = async (): Promise<void> => {
@@ -223,22 +231,11 @@ function EvidenceViewerPage(props: {
       if (!current || cancelled) return;
       try {
         const [videoReadUrl, archiveReadUrl] = await Promise.all([
-          api.createArtifactReadUrl(auth.getToken, current.evidenceId, current.recordingArtifact.id, current.orgId),
-          api.createArtifactReadUrl(auth.getToken, current.evidenceId, current.archiveArtifact.id, current.orgId)
+          api.createArtifactReadUrl(stableGetToken, current.evidenceId, current.recordingArtifact.id, current.orgId),
+          api.createArtifactReadUrl(stableGetToken, current.evidenceId, current.archiveArtifact.id, current.orgId)
         ]);
         if (cancelled) return;
         remoteSessionRef.current = { ...current, videoReadUrl, archiveReadUrl };
-        setState((prev) => {
-          if (prev.phase !== "viewing" || !videoRef.current) return prev;
-          const currentTime = videoRef.current.currentTime;
-          const wasPaused = videoRef.current.paused;
-          queueMicrotask(() => {
-            if (!videoRef.current) return;
-            videoRef.current.currentTime = currentTime;
-            if (!wasPaused) void videoRef.current.play().catch(() => undefined);
-          });
-          return { ...prev, videoUrl: videoReadUrl.url };
-        });
       } catch {
         setFeedback("Unable to renew signed evidence URLs.", "error");
       }
@@ -250,7 +247,7 @@ function EvidenceViewerPage(props: {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [shareToken, state.phase, auth]);
+  }, [shareToken, state.phase, authIsSignedIn, stableGetToken]);
 
   const applyMergeGroup = (validation: ReturnType<typeof validateMergeDialog> & { ok: true }): void => {
     const newGroup = createMergeGroup({
@@ -543,31 +540,34 @@ function EvidenceViewerPage(props: {
       );
     }
     return (
-      <div className="drop-zone">
-        <div
-          className="drop-area"
-          data-dragover={fileAdapter.isDragOver ? "true" : "false"}
-          onDragOver={fileAdapter.onDragOver}
-          onDragLeave={fileAdapter.onDragLeave}
-          onDrop={fileAdapter.onDrop}
-          onClick={fileAdapter.openDialog}
-        >
-          <div className="drop-icon">⇪</div>
-          <p className="drop-title">{state.phase === "loading" ? "Loading…" : "Drop a session ZIP here"}</p>
-          <p className="drop-sub">{state.phase === "loading" ? "Extracting and validating…" : "or click to browse"}</p>
-          {state.phase === "error" ? <p className="drop-error">{state.error ?? "Unknown error"}</p> : null}
-          {state.phase !== "loading" ? (
-            <label className="drop-btn">
-              <input
-                type="file"
-                accept=".zip"
-                style={{ display: "none" }}
-                ref={fileAdapter.inputRef}
-                onChange={fileAdapter.onInputChange}
-              />
-              Browse file
-            </label>
-          ) : null}
+      <div className="app-shell">
+        <AppHeader />
+        <div className="drop-zone">
+          <div
+            className="drop-area"
+            data-dragover={fileAdapter.isDragOver ? "true" : "false"}
+            onDragOver={fileAdapter.onDragOver}
+            onDragLeave={fileAdapter.onDragLeave}
+            onDrop={fileAdapter.onDrop}
+            onClick={fileAdapter.openDialog}
+          >
+            <div className="drop-icon">⇪</div>
+            <p className="drop-title">{state.phase === "loading" ? "Loading…" : "Drop a session ZIP here"}</p>
+            <p className="drop-sub">{state.phase === "loading" ? "Extracting and validating…" : "or click to browse"}</p>
+            {state.phase === "error" ? <p className="drop-error">{state.error ?? "Unknown error"}</p> : null}
+            {state.phase !== "loading" ? (
+              <label className="drop-btn">
+                <input
+                  type="file"
+                  accept=".zip"
+                  style={{ display: "none" }}
+                  ref={fileAdapter.inputRef}
+                  onChange={fileAdapter.onInputChange}
+                />
+                Browse file
+              </label>
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -700,6 +700,18 @@ function EvidenceViewerPage(props: {
       onNotesChange={() => undefined}
       onSaveNotes={() => undefined}
       onVideoTimeUpdate={updateHighlight}
+      onVideoError={() => {
+        const latest = remoteSessionRef.current;
+        const videoEl = videoRef.current;
+        if (!latest || !videoEl) return;
+        if (videoEl.src === latest.videoReadUrl.url) return;
+        const currentTime = videoEl.currentTime;
+        const wasPaused = videoEl.paused;
+        videoEl.src = latest.videoReadUrl.url;
+        videoEl.load();
+        videoEl.currentTime = currentTime;
+        if (!wasPaused) void videoEl.play().catch(() => undefined);
+      }}
       activeSection={state.activeSection}
       onSectionChange={(section) =>
         setState((prev) => ({ ...prev, activeSection: section, activeIndex: -1, networkDetailIndex: null }))

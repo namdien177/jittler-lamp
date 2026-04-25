@@ -12,6 +12,7 @@ import {
 import { useNavigate, useSearchParams } from "react-router";
 
 import { api } from "./api";
+import { AppHeader } from "./app-header";
 import { clerkPublishableKey } from "./env";
 
 function safeRedirectPath(input: string | null): string {
@@ -48,35 +49,38 @@ function JoinOrganizationForm(): React.JSX.Element {
   };
 
   return (
-    <main className="desktop-auth-page">
-      <section className="desktop-auth-panel" aria-live="polite">
-        <h1>Join an organisation</h1>
-        <p>Paste the invitation code an organisation owner shared with you.</p>
-        <form
-          className="join-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <input
-            className="join-input"
-            type="text"
-            placeholder="inv_…"
-            value={token}
-            autoFocus
-            disabled={busy}
-            onChange={(event) => setToken(event.currentTarget.value)}
-          />
-          {error ? <p className="join-error">{error}</p> : null}
-          <div className="join-actions">
-            <button className="drop-btn" type="submit" disabled={busy}>
-              {busy ? "Joining…" : "Join workspace"}
-            </button>
-          </div>
-        </form>
-      </section>
-    </main>
+    <div className="app-shell">
+      <AppHeader />
+      <main className="desktop-auth-page">
+        <section className="desktop-auth-panel" aria-live="polite">
+          <h1>Join an organisation</h1>
+          <p>Paste the invitation code an organisation owner shared with you.</p>
+          <form
+            className="join-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <input
+              className="join-input"
+              type="text"
+              placeholder="inv_…"
+              value={token}
+              autoFocus
+              disabled={busy}
+              onChange={(event) => setToken(event.currentTarget.value)}
+            />
+            {error ? <p className="join-error">{error}</p> : null}
+            <div className="join-actions">
+              <button className="drop-btn" type="submit" disabled={busy}>
+                {busy ? "Joining…" : "Join workspace"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
   );
 }
 
