@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="namdien177/jittler-lamp"
+app_name="Jittle Lamp.app"
+install_dir="/Applications"
+tag="${JITTLE_LAMP_VERSION:-}"
+requested_signing_suffix="${JITTLE_LAMP_SIGNING_SUFFIX:-}"
+
+if [[ "$(uname -m)" != "arm64" ]]; then
+  echo "This installer only supports the current macOS arm64 desktop release." >&2
+  exit 1
+fi
+
+if [[ -z "$tag" ]]; then
+  latest_url="$(curl -fsSLI -o /dev/null -w "%{url_effective}" "https://github.com/${repo}/releases/latest")"
+  tag="${latest_url##*/}"
+fi
+
+if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Unable to resolve a stable Jittle Lamp release tag. Received: ${tag}" >&2
+  exit 1
+fi
+
+asset_name=""
+asset_url=""
+
+if [[ -n "$requested_signing_suffix" ]]; then
+  candidate_suffixes=("$requested_signing_suffix")
+else
+  candidate_suffixes=("signed" "unsigned" "adhoc")
+fi
+
+for suffix in "${candidate_suffixes[@]}"; do
+  candidate_name="jittle-lamp-desktop-${tag}-macos-arm64-${suffix}.dmg"
+  candidate_url="https://github.com/${repo}/releases/download/${tag}/${candidate_name}"
+
+  if curl -fsIL -o /dev/null "$candidate_url"; then
+    asset_name="$candidate_name"
+    asset_url="$candidate_url"
+    break
+  fi
+done
+
+if [[ -z "$asset_url" ]]; then
+  echo "Unable to find a macOS arm64 desktop DMG for ${tag}." >&2
+  exit 1
+fi
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/jittle-lamp-install.XXXXXX")"
+dmg_path="${tmp_dir}/${asset_name}"
+mount_point=""
+
+cleanup() {
+  if [[ -n "$mount_point" ]]; then
+    hdiutil detach "$mount_point" -quiet || true
+  fi
+
+  rm -rf "$tmp_dir"
+}
+
+trap cleanup EXIT
+
+echo "Downloading ${asset_url}"
+curl -fL --retry 3 --connect-timeout 20 -o "$dmg_path" "$asset_url"
+
+echo "Mounting ${asset_name}"
+mount_point="$(hdiutil attach "$dmg_path" -nobrowse -readonly | awk '/\/Volumes\// { print substr($0, index($0, "/Volumes/")); exit }')"
+
+if [[ -z "$mount_point" || ! -d "${mount_point}/${app_name}" ]]; then
+  echo "Mounted image does not contain ${app_name}." >&2
+  exit 1
+fi
+
+echo "Installing ${app_name} to ${install_dir}"
+if [[ -w "$install_dir" ]]; then
+  ditto "${mount_point}/${app_name}" "${install_dir}/${app_name}"
+else
+  sudo ditto "${mount_point}/${app_name}" "${install_dir}/${app_name}"
+fi
+
+echo "Installed ${install_dir}/${app_name}"

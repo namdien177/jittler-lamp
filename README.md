@@ -4,6 +4,22 @@
 
 ![Jittle Lamp product preview](apps/evidence-web/assets/img-prev.png)
 
+## Install Desktop App
+
+For macOS arm64, install the latest desktop release from Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | bash
+```
+
+To install a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | JITTLE_LAMP_VERSION=vX.Y.Z bash
+```
+
+The same command can also replace an existing install with the latest release. In-app updates use the packaged desktop app's updater instead of a browser download, so they do not use this terminal installer path.
+
 ## Workspace layout
 
 - `apps/extension` — Chromium MV3 extension recorder for active-tab capture orchestration.
@@ -185,7 +201,21 @@ If Apple signing credentials are not configured in GitHub Actions, the workflow 
 
 This means a no-cost Apple account is enough for local development, but it is not enough for a frictionless public macOS installer. Public distribution that opens normally on other Macs requires the paid Apple Developer Program so CI can sign with a Developer ID Application certificate and notarize the DMG/app.
 
-Unsigned macOS releases may still be blocked by Gatekeeper after download. If needed, a user can remove quarantine manually after installing the app:
+Unsigned macOS releases may still be blocked by Gatekeeper after browser download. For internal installs, use the terminal installer so the DMG is downloaded and copied to `/Applications` without browser quarantine metadata:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | bash
+```
+
+To install a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | JITTLE_LAMP_VERSION=vX.Y.Z bash
+```
+
+The same terminal installer can be rerun later to replace an existing app with the latest release. The in-app updater downloads update artifacts from inside the packaged desktop app, so it does not go through the browser quarantine path. If an unsigned/ad-hoc update ever fails, rerun the terminal installer to replace the app manually.
+
+If the app was already downloaded through a browser and macOS blocks it, remove quarantine manually after installing the app:
 
 ```bash
 xattr -cr "/Applications/Jittle Lamp.app"
