@@ -263,6 +263,37 @@ describe("routes", () => {
 		).toBeTrue();
 	});
 
+	it("normalizes Clerk authorized party origins for auth checks", async () => {
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({
+			azp: "https://viewer.example.test",
+			scope: "read write",
+		})
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_authorized_party")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp(
+			createTestEnv({
+				CLERK_JWT_KEY: jwtKey,
+				CLERK_AUTHORIZED_PARTIES: "https://viewer.example.test/",
+			}),
+		);
+
+		const response = await app.handle(
+			new Request("http://localhost/protected/me", {
+				headers: { authorization: `Bearer ${token}` },
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect((await response.json()) as { userId: string }).toMatchObject({
+			userId: "user_authorized_party",
+		});
+	});
+
 	it("allows CORS preflight for the configured web origin", async () => {
 		const { app } = createApp(
 			createTestEnv({

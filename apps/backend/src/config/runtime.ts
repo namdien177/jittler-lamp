@@ -39,6 +39,7 @@ const parseAuthorizedParties = (
 	const parsed = authorizedParties
 		.split(",")
 		.map((value) => value.trim())
+		.map((value) => value.replace(/\/+$/, ""))
 		.filter(Boolean);
 
 	return parsed.length > 0 ? parsed : undefined;

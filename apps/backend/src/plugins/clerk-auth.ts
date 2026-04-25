@@ -263,7 +263,8 @@ export const createClerkAuthPlugin = (core: CorePlugin) =>
 				let authContext: AuthContext | null;
 				try {
 					authContext = await authenticateRequest(request, runtime);
-				} catch {
+				} catch (error) {
+					requestLogger.warn({ err: error }, "failed to authenticate request");
 					return status(
 						401,
 						createApiError(
