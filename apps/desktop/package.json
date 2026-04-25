@@ -1,6 +1,6 @@
 {
   "name": "@jittle-lamp/desktop",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Jittle Lamp desktop companion and local session viewer.",
   "private": true,
   "type": "module",
