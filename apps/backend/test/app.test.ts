@@ -294,6 +294,96 @@ describe("routes", () => {
 		});
 	});
 
+	it("returns profile and member organizations for the authenticated user", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const provisioned = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_settings_profile",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_settings_profile" },
+		});
+
+		const [teamOrganization] = await db
+			.insert(organizations)
+			.values({ name: "Team Settings", isPersonal: false })
+			.returning({ id: organizations.id });
+		if (!teamOrganization) {
+			throw new Error("Failed to create team organization");
+		}
+
+		await db.insert(organizationMembers).values({
+			organizationId: teamOrganization.id,
+			userId: provisioned.userId,
+			role: "member",
+		});
+		await db
+			.update(users)
+			.set({ activeOrgId: teamOrganization.id, updatedAt: Date.now() })
+			.where(eq(users.id, provisioned.userId));
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_settings_profile")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp(
+			createTestEnv({
+				DATABASE_URL: databaseUrl,
+				CLERK_JWT_KEY: jwtKey,
+				CLERK_AUDIENCE: "test-audience",
+			}),
+		);
+
+		const response = await app.handle(
+			new Request("http://localhost/protected/me", {
+				headers: { authorization: `Bearer ${token}` },
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		const payload = (await response.json()) as {
+			user: { displayName: string; email: string | null };
+			activeOrgId: string | null;
+			organizations: Array<{
+				id: string;
+				name: string;
+				role: string;
+				isPersonal: boolean;
+				isActive: boolean;
+			}>;
+		};
+		expect(payload.user).toMatchObject({
+			displayName: "user_clerk_settings_profile",
+			email: null,
+		});
+		expect(payload.activeOrgId).toBe(teamOrganization.id);
+		expect(payload.organizations).toContainEqual({
+			id: provisioned.organizationId,
+			name: "user_clerk_settings_profile Personal",
+			role: "owner",
+			isPersonal: true,
+			isActive: false,
+		});
+		expect(payload.organizations).toContainEqual({
+			id: teamOrganization.id,
+			name: "Team Settings",
+			role: "member",
+			isPersonal: false,
+			isActive: true,
+		});
+	});
+
 	it("allows CORS preflight for the configured web origin", async () => {
 		const { app } = createApp(
 			createTestEnv({

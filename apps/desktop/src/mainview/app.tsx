@@ -137,7 +137,29 @@ type DesktopAuthSignedInState = {
   source: "clerk" | "desktop";
   userId: string;
   label: string;
+  accessToken?: string;
+  profile?: DesktopAccountProfile;
   expiresAt?: number;
+};
+
+type DesktopOrganizationSummary = {
+  id: string;
+  name: string;
+  role: string;
+  isPersonal: boolean;
+  isActive: boolean;
+};
+
+type DesktopAccountProfile = {
+  userId: string;
+  activeOrgId: string | null;
+  user: {
+    id: string;
+    displayName: string;
+    email: string | null;
+    imageUrl: string | null;
+  };
+  organizations: DesktopOrganizationSummary[];
 };
 
 type DesktopAuthState =
@@ -274,6 +296,37 @@ async function readApiError(response: Response, fallback: string): Promise<strin
   return payload?.error?.message ?? fallback;
 }
 
+async function fetchDesktopAccountProfile(accessToken: string): Promise<DesktopAccountProfile> {
+  const response = await fetch(`${apiOrigin}/protected/me`, {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Unable to load account profile."));
+  }
+
+  return await response.json() as DesktopAccountProfile;
+}
+
+function getAccountDisplayLabel(profile: DesktopAccountProfile, fallback: string): string {
+  const displayName = profile.user.displayName.trim();
+  if (displayName && displayName !== profile.user.id) return displayName;
+  return profile.user.email ?? displayName ?? fallback;
+}
+
+function getAccountInitials(profile: DesktopAccountProfile | null, fallback: string): string {
+  const label = profile ? getAccountDisplayLabel(profile, fallback) : fallback;
+  const parts = label
+    .replace(/@.*/, "")
+    .split(/[\s._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const initials =
+    parts.length > 1 && parts[0] && parts[1]
+      ? `${parts[0][0]}${parts[1][0]}`
+      : parts[0]?.slice(0, 2);
+  return (initials || "JL").toUpperCase();
+}
+
 function cloneViewerState(state: ViewerState): ViewerState {
   return {
     ...state,
@@ -373,22 +426,14 @@ function DesktopAuthProvider(props: { children: React.ReactNode }): React.JSX.El
     }
 
     try {
-      const response = await fetch(`${apiOrigin}/protected/me`, {
-        headers: { authorization: `Bearer ${stored.accessToken}` }
-      });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, "Stored desktop session is no longer valid."));
-      }
-
-      const profile = await response.json() as {
-        userId: string;
-        activeOrgId?: string | null;
-      };
+      const profile = await fetchDesktopAccountProfile(stored.accessToken);
       setState({
         status: "signed-in",
         source: "desktop",
         userId: profile.userId || stored.clerkUserId,
-        label: profile.userId || stored.clerkUserId,
+        label: getAccountDisplayLabel(profile, stored.clerkUserId),
+        accessToken: stored.accessToken,
+        profile,
         expiresAt: stored.expiresAt
       });
     } catch (error) {
@@ -412,13 +457,13 @@ function DesktopAuthProvider(props: { children: React.ReactNode }): React.JSX.El
         status: "signed-in",
         source: "clerk",
         userId: clerkAuth.userId ?? user?.id ?? "current-user",
-        label: user?.primaryEmailAddress?.emailAddress ?? user?.fullName ?? clerkAuth.userId ?? "Signed in"
+        label: user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? clerkAuth.userId ?? "Signed in"
       });
       return;
     }
 
     void loadStoredDesktopSession();
-  }, [clerkAuth.isLoaded, clerkAuth.isSignedIn, clerkAuth.userId, user?.id, user?.primaryEmailAddress?.emailAddress, user?.fullName]);
+  }, [clerkAuth.isLoaded, clerkAuth.isSignedIn, clerkAuth.userId, user?.id, user?.primaryEmailAddress?.emailAddress, user?.fullName, user?.username]);
 
   useEffect(() => () => stopPolling(), []);
 
@@ -456,11 +501,14 @@ function DesktopAuthProvider(props: { children: React.ReactNode }): React.JSX.El
             clerkUserId: payload.clerkUserId
           };
           writeStoredDesktopAuthSession(session);
+          const profile = await fetchDesktopAccountProfile(payload.accessToken).catch(() => null);
           setState({
             status: "signed-in",
             source: "desktop",
             userId: payload.clerkUserId,
-            label: payload.clerkUserId,
+            label: profile ? getAccountDisplayLabel(profile, payload.clerkUserId) : payload.clerkUserId,
+            accessToken: payload.accessToken,
+            ...(profile ? { profile } : {}),
             expiresAt: payload.expiresAt
           });
           setBrowserFlow({ status: "idle" });
@@ -979,6 +1027,8 @@ function SettingsDialog(): React.JSX.Element {
           </button>
         </div>
         <div className="drawer-content">
+          <AccountSettingsSection />
+
           <div className="drawer-section">
             <span className="drawer-section-label">Output folder</span>
             <div className="drawer-path-display">{config?.outputDir ?? desktop.state.runtime?.outputDir ?? "—"}</div>
@@ -1039,6 +1089,162 @@ function SettingsDialog(): React.JSX.Element {
   );
 }
 
+function AccountSettingsSection(): React.JSX.Element {
+  const auth = useDesktopAuth();
+  const clerkAuth = useAuth();
+  const [profile, setProfile] = useState<DesktopAccountProfile | null>(
+    auth.state.status === "signed-in" ? auth.state.profile ?? null : null
+  );
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectingOrgId, setSelectingOrgId] = useState<string | null>(null);
+
+  const getAccessToken = async () => {
+    if (auth.state.status !== "signed-in") return null;
+    if (auth.state.source === "desktop") {
+      return auth.state.accessToken ?? readStoredDesktopAuthSession()?.accessToken ?? null;
+    }
+    return await clerkAuth.getToken({ skipCache: true });
+  };
+
+  const refreshProfile = async () => {
+    if (auth.state.status !== "signed-in") {
+      setProfile(null);
+      setError(null);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Account session is missing an API token.");
+      }
+      setProfile(await fetchDesktopAccountProfile(token));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to load account profile.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (auth.state.status === "signed-in" && auth.state.profile) {
+      setProfile(auth.state.profile);
+    }
+    void refreshProfile();
+  }, [
+    auth.state.status,
+    auth.state.status === "signed-in" ? auth.state.source : null,
+    auth.state.status === "signed-in" ? auth.state.userId : null,
+    auth.state.status === "signed-in" ? auth.state.accessToken : null
+  ]);
+
+  const selectOrganization = async (organizationId: string) => {
+    if (selectingOrgId || profile?.activeOrgId === organizationId) return;
+
+    setSelectingOrgId(organizationId);
+    setError(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Account session is missing an API token.");
+      }
+
+      const response = await fetch(`${apiOrigin}/orgs/${encodeURIComponent(organizationId)}/select-active`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Unable to switch organisation."));
+      }
+
+      setProfile(await fetchDesktopAccountProfile(token));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to switch organisation.");
+    } finally {
+      setSelectingOrgId(null);
+    }
+  };
+
+  if (auth.state.status !== "signed-in") {
+    return (
+      <div className="drawer-section account-section">
+        <span className="drawer-section-label">Account</span>
+        <div className="account-summary">
+          <div className="account-avatar" aria-hidden="true">JL</div>
+          <div className="account-summary-copy">
+            <span className="account-name">Signed out</span>
+            <span className="account-meta">Sign in to sync workspace context.</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const displayLabel = profile ? getAccountDisplayLabel(profile, auth.state.label) : auth.state.label;
+  const activeOrg = profile?.organizations.find((organization) => organization.isActive) ?? null;
+
+  return (
+    <div className="drawer-section account-section">
+      <span className="drawer-section-label">Account</span>
+      <div className="account-summary">
+        <div className="account-avatar" aria-hidden="true">
+          {getAccountInitials(profile, auth.state.label)}
+        </div>
+        <div className="account-summary-copy">
+          <span className="account-name">{displayLabel}</span>
+          <span className="account-meta">
+            {profile?.user.email && profile.user.email !== displayLabel
+              ? profile.user.email
+              : auth.state.source === "desktop"
+                ? "Browser session"
+                : "Password session"}
+          </span>
+        </div>
+      </div>
+
+      <div className="org-switcher">
+        <div className="org-switcher-header">
+          <span>Organisation</span>
+          <span>{isLoading ? "Loading" : activeOrg?.name ?? "No active organisation"}</span>
+        </div>
+        <div className="org-list" aria-label="Organisation selection">
+          {profile?.organizations.length ? (
+            profile.organizations.map((organization) => {
+              const isSelecting = selectingOrgId === organization.id;
+              return (
+                <button
+                  className="org-option"
+                  data-active={organization.isActive ? "true" : "false"}
+                  key={organization.id}
+                  type="button"
+                  disabled={Boolean(selectingOrgId) || organization.isActive}
+                  onClick={() => void selectOrganization(organization.id)}
+                >
+                  <span className="org-option-main">
+                    <span className="org-option-name">{organization.name}</span>
+                    <span className="org-option-meta">
+                      {organization.isPersonal ? "Personal" : "Team"} · {organization.role}
+                    </span>
+                  </span>
+                  <span className="org-option-state">
+                    {organization.isActive ? "Active" : isSelecting ? "Switching" : "Switch"}
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <div className="org-empty">{isLoading ? "Loading organisations…" : "No selectable organisations found."}</div>
+          )}
+        </div>
+      </div>
+      {error ? <div className="account-inline-error">{error}</div> : null}
+    </div>
+  );
+}
+
 function AccountFooter(): React.JSX.Element {
   const auth = useDesktopAuth();
 
@@ -1053,7 +1259,9 @@ function AccountFooter(): React.JSX.Element {
   return (
     <div className="drawer-auth-footer" aria-label="Account menu">
       <div className="account-footer-copy">
-        <span className="account-footer-label">{auth.state.label}</span>
+        <span className="account-footer-label">
+          {auth.state.profile ? getAccountDisplayLabel(auth.state.profile, auth.state.label) : auth.state.label}
+        </span>
         <span className="account-footer-source">
           {auth.state.source === "desktop" ? "Browser session" : "Password session"}
         </span>
