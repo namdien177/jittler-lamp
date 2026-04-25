@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import { evidences, shareLinks } from "../db/schema";
@@ -52,6 +52,21 @@ const revokedShareLinkResponseSchema = t.Object({
 		id: t.String({ minLength: 1 }),
 		revokedAt: t.Number(),
 	}),
+});
+
+const shareLinkSummarySchema = t.Object({
+	id: t.String({ minLength: 1 }),
+	evidenceId: t.String({ minLength: 1 }),
+	orgId: t.String({ minLength: 1 }),
+	scope: t.Literal("internal"),
+	createdAt: t.Number(),
+	expiresAt: t.Number(),
+	revokedAt: t.Union([t.Number(), t.Null()]),
+	createdBy: t.String({ minLength: 1 }),
+});
+
+const listShareLinksResponseSchema = t.Object({
+	shareLinks: t.Array(shareLinkSummarySchema),
 });
 
 const hashToken = async (token: string): Promise<string> => {
@@ -170,6 +185,87 @@ export const createShareLinkRoutes = (auth: ClerkAuthPlugin) =>
 						},
 						response: {
 							200: shareLinkResponseSchema,
+							401: apiErrorSchema,
+							403: apiErrorSchema,
+							404: apiErrorSchema,
+							500: apiErrorSchema,
+							503: apiErrorSchema,
+						},
+					},
+				)
+				.get(
+					"/evidences/:id/share-links",
+					async ({ authContext, db, params, requestId, set }) => {
+						if (!db) {
+							set.status = 503;
+							return createDbUnavailableError(requestId);
+						}
+
+						if (!authContext.localUserId) {
+							set.status = 403;
+							return createForbiddenPayload(requestId);
+						}
+
+						const evidence = await db.query.evidences.findFirst({
+							where: eq(evidences.id, params.id),
+							columns: { id: true, orgId: true, teamId: true },
+						});
+						if (!evidence) {
+							set.status = 404;
+							return createApiError(
+								requestId,
+								"EVIDENCE_NOT_FOUND",
+								"Evidence not found",
+								404,
+							);
+						}
+
+						const evidencePolicy = createEvidencePolicy();
+						const canAccess = await evidencePolicy.canViewEvidence(db, {
+							organizationId: evidence.orgId,
+							teamId: evidence.teamId,
+							userId: authContext.localUserId,
+						});
+						if (!canAccess) {
+							set.status = 403;
+							return createForbiddenPayload(requestId);
+						}
+
+						const rows = await db
+							.select({
+								id: shareLinks.id,
+								evidenceId: shareLinks.evidenceId,
+								orgId: shareLinks.orgId,
+								createdAt: shareLinks.createdAt,
+								expiresAt: shareLinks.expiresAt,
+								revokedAt: shareLinks.revokedAt,
+								createdBy: shareLinks.createdBy,
+							})
+							.from(shareLinks)
+							.where(eq(shareLinks.evidenceId, evidence.id))
+							.orderBy(desc(shareLinks.createdAt));
+
+						return {
+							shareLinks: rows.map((row) => ({
+								id: row.id,
+								evidenceId: row.evidenceId,
+								orgId: row.orgId,
+								scope: "internal" as const,
+								createdAt: row.createdAt,
+								expiresAt: row.expiresAt,
+								revokedAt: row.revokedAt,
+								createdBy: row.createdBy,
+							})),
+						};
+					},
+					{
+						params: evidenceIdParamsSchema,
+						detail: {
+							tags: ["evidences"],
+							summary: "Lists share links for an evidence",
+						},
+						response: {
+							200: listShareLinksResponseSchema,
 							401: apiErrorSchema,
 							403: apiErrorSchema,
 							404: apiErrorSchema,

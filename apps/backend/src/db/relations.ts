@@ -1,7 +1,9 @@
 import { relations } from "drizzle-orm";
 
+import { desktopRecordingSessions } from "./tables/desktop-recording-sessions";
 import { evidenceArtifacts } from "./tables/evidence-artifacts";
 import { evidences } from "./tables/evidences";
+import { organizationInvitations } from "./tables/organization-invitations";
 import { organizationMembers } from "./tables/organization-members";
 import { organizations } from "./tables/organizations";
 import { provisioningEvents } from "./tables/provisioning-events";
@@ -13,6 +15,10 @@ export const usersRelations = relations(users, ({ many }) => ({
 	provisioningEvents: many(provisioningEvents),
 	createdEvidences: many(evidences),
 	createdShareLinks: many(shareLinks),
+	desktopRecordingSessions: many(desktopRecordingSessions),
+	sentInvitations: many(organizationInvitations, {
+		relationName: "invitedByUser",
+	}),
 }));
 
 export const organizationsRelations = relations(
@@ -25,6 +31,27 @@ export const organizationsRelations = relations(
 		memberships: many(organizationMembers),
 		evidences: many(evidences),
 		shareLinks: many(shareLinks),
+		invitations: many(organizationInvitations),
+		desktopRecordingSessions: many(desktopRecordingSessions),
+	}),
+);
+
+export const organizationInvitationsRelations = relations(
+	organizationInvitations,
+	({ one }) => ({
+		organization: one(organizations, {
+			fields: [organizationInvitations.organizationId],
+			references: [organizations.id],
+		}),
+		invitedByUser: one(users, {
+			fields: [organizationInvitations.invitedBy],
+			references: [users.id],
+			relationName: "invitedByUser",
+		}),
+		acceptedByUser: one(users, {
+			fields: [organizationInvitations.acceptedBy],
+			references: [users.id],
+		}),
 	}),
 );
 
@@ -63,7 +90,26 @@ export const evidencesRelations = relations(evidences, ({ many, one }) => ({
 	}),
 	artifacts: many(evidenceArtifacts),
 	shareLinks: many(shareLinks),
+	desktopRecordingSession: many(desktopRecordingSessions),
 }));
+
+export const desktopRecordingSessionsRelations = relations(
+	desktopRecordingSessions,
+	({ one }) => ({
+		evidence: one(evidences, {
+			fields: [desktopRecordingSessions.evidenceId],
+			references: [evidences.id],
+		}),
+		organization: one(organizations, {
+			fields: [desktopRecordingSessions.orgId],
+			references: [organizations.id],
+		}),
+		createdByUser: one(users, {
+			fields: [desktopRecordingSessions.createdBy],
+			references: [users.id],
+		}),
+	}),
+);
 
 export const evidenceArtifactsRelations = relations(
 	evidenceArtifacts,

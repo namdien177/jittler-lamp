@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
-import { BrowserRouter, useRoutes } from "react-router";
-import { ClerkProvider } from "@clerk/clerk-react";
+import { BrowserRouter, useParams, useRoutes } from "react-router";
+import { ClerkProvider, useAuth } from "@clerk/clerk-react";
 import type { JittleRouteObject } from "@jittle-lamp/viewer-react";
 import {
   buildVisibleActionRows,
@@ -29,8 +29,10 @@ import {
 
 import { buildReviewedArchive } from "./archive-export";
 import { buildReviewedZipBlob, createWebNotesAdapter, createWebPlaybackAdapter, createWebShareAdapter, createWebStorageAdapter } from "./adapters";
+import { api, type ArtifactReadUrl, type EvidenceArtifact } from "./api";
 import { DesktopAuthApprovalPage } from "./desktop-auth-page";
 import { clerkPublishableKey } from "./env";
+import { loadRemoteSessionArtifacts } from "./loader";
 import { NetworkDetail } from "./network-detail";
 import { useWebFileAdapter } from "./web-adapter";
 
@@ -78,7 +80,12 @@ function initialState(): AppState {
   };
 }
 
-function EvidenceViewerPage(): React.JSX.Element {
+function EvidenceViewerPage(props: {
+  shareToken?: string | undefined;
+  auth?: ReturnType<typeof useAuth> | undefined;
+}): React.JSX.Element {
+  const shareToken = props.shareToken;
+  const auth = props.auth;
   const [state, setState] = useState<AppState>(() => initialState());
   const [contextMenu, setContextMenu] = useState<{
     open: boolean;
@@ -98,6 +105,14 @@ function EvidenceViewerPage(): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const autoScrollingRef = useRef(false);
+  const remoteSessionRef = useRef<{
+    evidenceId: string;
+    orgId: string;
+    recordingArtifact: EvidenceArtifact;
+    archiveArtifact: EvidenceArtifact;
+    videoReadUrl: ArtifactReadUrl;
+    archiveReadUrl: ArtifactReadUrl;
+  } | null>(null);
   const ACTION_HIGHLIGHT_DELTA_MS = 200;
 
   const storageAdapter = useMemo(() => createWebStorageAdapter(), []);
@@ -110,6 +125,123 @@ function EvidenceViewerPage(): React.JSX.Element {
   const setFeedback = (text: string, tone: FeedbackTone): void => {
     setState((prev) => ({ ...prev, feedback: text, feedbackTone: tone }));
   };
+
+  useEffect(() => {
+    if (!shareToken) return;
+    if (!auth) return;
+    if (!auth.isLoaded) return;
+    if (!auth.isSignedIn) {
+      setState((prev) => ({
+        ...prev,
+        phase: "error",
+        error: "Sign in to view this shared evidence."
+      }));
+      return;
+    }
+
+    let cancelled = false;
+    setState((prev) => ({ ...prev, phase: "loading", error: null }));
+    void (async () => {
+      try {
+        const resolved = await api.resolveShareLink(auth.getToken, shareToken);
+        const artifactResult = await api.listEvidenceArtifacts(
+          auth.getToken,
+          resolved.shareLink.evidenceId,
+          resolved.shareLink.orgId
+        );
+        const recordingArtifact = artifactResult.artifacts.find((artifact) => artifact.kind === "recording");
+        const archiveArtifact = artifactResult.artifacts.find((artifact) => artifact.kind === "network-log");
+        if (!recordingArtifact || !archiveArtifact) {
+          throw new Error("Shared evidence is missing recording or archive artifacts.");
+        }
+
+        const [videoReadUrl, archiveReadUrl] = await Promise.all([
+          api.createArtifactReadUrl(auth.getToken, resolved.shareLink.evidenceId, recordingArtifact.id, resolved.shareLink.orgId),
+          api.createArtifactReadUrl(auth.getToken, resolved.shareLink.evidenceId, archiveArtifact.id, resolved.shareLink.orgId)
+        ]);
+        const loaded = await loadRemoteSessionArtifacts({
+          archiveUrl: archiveReadUrl.url,
+          videoUrl: videoReadUrl.url
+        });
+        if (cancelled) return;
+        remoteSessionRef.current = {
+          evidenceId: resolved.shareLink.evidenceId,
+          orgId: resolved.shareLink.orgId,
+          recordingArtifact,
+          archiveArtifact,
+          videoReadUrl,
+          archiveReadUrl
+        };
+        setState((prev) => ({
+          ...prev,
+          archive: loaded.archive,
+          videoUrl: loaded.videoUrl,
+          recordingBytes: null,
+          timeline: loaded.timeline,
+          activeIndex: -1,
+          networkDetailIndex: null,
+          networkSearchQuery: "",
+          activeSection: "actions",
+          networkSubtypeFilter: "all",
+          autoFollow: true,
+          selectedActionIds: new Set(),
+          anchorActionId: null,
+          mergeGroups: loaded.mergeGroups,
+          phase: "viewing",
+          error: null,
+          feedback: null
+        }));
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setState((prev) => ({ ...prev, phase: "error", error: message }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shareToken, auth]);
+
+  useEffect(() => {
+    if (!shareToken || state.phase !== "viewing") return;
+    const remote = remoteSessionRef.current;
+    if (!remote || !auth?.isSignedIn) return;
+
+    let cancelled = false;
+    const renew = async (): Promise<void> => {
+      const current = remoteSessionRef.current;
+      if (!current || cancelled) return;
+      try {
+        const [videoReadUrl, archiveReadUrl] = await Promise.all([
+          api.createArtifactReadUrl(auth.getToken, current.evidenceId, current.recordingArtifact.id, current.orgId),
+          api.createArtifactReadUrl(auth.getToken, current.evidenceId, current.archiveArtifact.id, current.orgId)
+        ]);
+        if (cancelled) return;
+        remoteSessionRef.current = { ...current, videoReadUrl, archiveReadUrl };
+        setState((prev) => {
+          if (prev.phase !== "viewing" || !videoRef.current) return prev;
+          const currentTime = videoRef.current.currentTime;
+          const wasPaused = videoRef.current.paused;
+          queueMicrotask(() => {
+            if (!videoRef.current) return;
+            videoRef.current.currentTime = currentTime;
+            if (!wasPaused) void videoRef.current.play().catch(() => undefined);
+          });
+          return { ...prev, videoUrl: videoReadUrl.url };
+        });
+      } catch {
+        setFeedback("Unable to renew signed evidence URLs.", "error");
+      }
+    };
+
+    const delay = Math.max(30_000, remote.videoReadUrl.renewAfterMs);
+    const timer = window.setInterval(() => void renew(), delay);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [shareToken, state.phase, auth]);
 
   const applyMergeGroup = (validation: ReturnType<typeof validateMergeDialog> & { ok: true }): void => {
     const newGroup = createMergeGroup({
@@ -744,10 +876,27 @@ export function bootstrap(): void {
   );
 }
 
+function SharedEvidenceViewerPage(): React.JSX.Element {
+  const { shareToken } = useParams();
+  const auth = useAuth();
+  return <EvidenceViewerPage shareToken={shareToken} auth={auth} />;
+}
+
 const evidenceWebRoutes: JittleRouteObject[] = [
   {
     path: "/",
     element: <EvidenceViewerPage />
+  },
+  {
+    path: "/share/:shareToken",
+    element: clerkPublishableKey ? (
+      <SharedEvidenceViewerPage />
+    ) : (
+      <div className="viewer-empty" role="alert">
+        <h2>Clerk is not configured</h2>
+        <p>Set CLERK_PUBLISHABLE_KEY before opening shared evidence.</p>
+      </div>
+    )
   },
   {
     path: "/desktop-auth",

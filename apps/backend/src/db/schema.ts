@@ -4,6 +4,7 @@ export {
 	desktopAuthFlowStatusSchema,
 	desktopAuthFlows,
 } from "./tables/desktop-auth-flows";
+export { desktopRecordingSessions } from "./tables/desktop-recording-sessions";
 export {
 	createEvidenceArtifactInputSchema,
 	evidenceArtifactKindSchema,
@@ -15,6 +16,12 @@ export {
 	evidenceScopeTypeSchema,
 	evidences,
 } from "./tables/evidences";
+export {
+	createOrganizationInvitationInputSchema,
+	organizationInvitationRoleSchema,
+	organizationInvitationStatusSchema,
+	organizationInvitations,
+} from "./tables/organization-invitations";
 export {
 	createOrganizationMembershipInputSchema,
 	defaultOrganizationRoles,

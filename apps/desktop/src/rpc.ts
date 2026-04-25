@@ -124,6 +124,33 @@ export type DesktopRequestMap = {
       savedPath: string;
     };
   };
+  prepareSessionUpload: {
+    params: {
+      sessionId: string;
+    };
+    response: {
+      sessionId: string;
+      title: string;
+      artifacts: Array<{
+        key: "recording" | "archive";
+        kind: "recording" | "network-log";
+        mimeType: string;
+        bytes: number;
+        checksum: string;
+        payload: Uint8Array;
+      }>;
+    };
+  };
+  markSessionRemoteSynced: {
+    params: {
+      sessionId: string;
+      evidenceId: string;
+      orgId: string;
+    };
+    response: {
+      ok: true;
+    };
+  };
   importZipSession: {
     params: undefined;
     response: ViewerPayload;

@@ -1,0 +1,94 @@
+import {
+	GetObjectCommand,
+	PutObjectCommand,
+	S3Client,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+import type { RuntimeConfig } from "../config/runtime";
+
+export type ArtifactStorage = {
+	mode: "s3" | "memory";
+	putObject: (input: {
+		key: string;
+		body: Uint8Array;
+		contentType: string;
+		checksumSha256: string;
+	}) => Promise<void>;
+	createReadUrl: (input: {
+		key: string;
+		responseContentType: string;
+		expiresInSeconds?: number;
+	}) => Promise<{ url: string; expiresAt: number; ttlSeconds: number }>;
+};
+
+const memoryObjects = new Map<
+	string,
+	{ body: Uint8Array; contentType: string; checksumSha256: string }
+>();
+
+export const createArtifactStorage = (
+	runtime: RuntimeConfig,
+): ArtifactStorage => {
+	if (!runtime.s3) {
+		return createMemoryArtifactStorage();
+	}
+
+	const client = new S3Client({
+		region: runtime.s3.region,
+		forcePathStyle: runtime.s3.forcePathStyle,
+		credentials: {
+			accessKeyId: runtime.s3.accessKeyId,
+			secretAccessKey: runtime.s3.secretAccessKey,
+		},
+		...(runtime.s3.endpoint ? { endpoint: runtime.s3.endpoint } : {}),
+	});
+
+	return {
+		mode: "s3",
+		putObject: async (input) => {
+			await client.send(
+				new PutObjectCommand({
+					Bucket: runtime.s3?.bucket,
+					Key: input.key,
+					Body: input.body,
+					ContentType: input.contentType,
+					ChecksumSHA256: input.checksumSha256,
+					ServerSideEncryption: "AES256",
+				}),
+			);
+		},
+		createReadUrl: async (input) => {
+			const ttlSeconds =
+				input.expiresInSeconds ?? runtime.s3?.signedUrlTtlSeconds ?? 900;
+			const expiresAt = Date.now() + ttlSeconds * 1000;
+			const url = await getSignedUrl(
+				client,
+				new GetObjectCommand({
+					Bucket: runtime.s3?.bucket,
+					Key: input.key,
+					ResponseContentType: input.responseContentType,
+				}),
+				{ expiresIn: ttlSeconds },
+			);
+
+			return { url, expiresAt, ttlSeconds };
+		},
+	};
+};
+
+const createMemoryArtifactStorage = (): ArtifactStorage => ({
+	mode: "memory",
+	putObject: async (input) => {
+		memoryObjects.set(input.key, {
+			body: input.body,
+			contentType: input.contentType,
+			checksumSha256: input.checksumSha256,
+		});
+	},
+	createReadUrl: async () => {
+		throw new Error(
+			"S3 storage is not configured; signed read URLs are unavailable.",
+		);
+	},
+});

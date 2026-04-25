@@ -14,6 +14,7 @@ import { createHealthRoutes } from "./routes/health";
 import { createOrganizationRoutes } from "./routes/orgs";
 import { createProtectedRoutes } from "./routes/protected";
 import { createShareLinkRoutes } from "./routes/share-links";
+import { createArtifactStorage } from "./services/artifact-storage";
 import { createLogger } from "./utils/logger";
 
 export const createApp = (
@@ -23,8 +24,9 @@ export const createApp = (
 	const runtime = buildRuntimeConfig(env);
 	const logger = createLogger(runtime.logLevel);
 	const db = createDb(runtime.databaseUrl, runtime.tursoAuthToken);
+	const artifactStorage = createArtifactStorage(runtime);
 
-	const core = createCorePlugin({ runtime, db, logger });
+	const core = createCorePlugin({ runtime, db, logger, artifactStorage });
 	const auth = createClerkAuthPlugin(core);
 
 	const app = new Elysia().use(core);

@@ -37,6 +37,9 @@ export type SessionRecord = {
   recordedAt: string;
   tags: string[];
   notes: string;
+  remoteEvidenceId?: string | undefined;
+  remoteOrgId?: string | undefined;
+  remoteSyncedAt?: string | undefined;
 };
 
 type SessionWriteRow = {
@@ -155,6 +158,14 @@ function getDb(): Database.Database {
       id TEXT NOT NULL,
       payload_json TEXT NOT NULL,
       PRIMARY KEY (session_id, id)
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_remote_syncs (
+      session_id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL,
+      org_id TEXT NOT NULL,
+      synced_at TEXT NOT NULL
     )
   `);
 
@@ -334,6 +345,7 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
   for (const row of metaRows) {
     notesBySession.set(row.session_id, row.notes);
   }
+  const remoteBySession = getRemoteSyncsBySession();
 
   const sessions: SessionRecord[] = [];
 
@@ -368,6 +380,7 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
       continue;
     }
 
+    const remote = remoteBySession.get(sessionId);
     sessions.push({
       sessionId,
       sessionFolder: folderPath,
@@ -388,7 +401,10 @@ export async function scanLibrarySessions(outputDir: string): Promise<SessionRec
       totalBytes: webmBytes + archiveBytes,
       recordedAt: archive.createdAt,
       tags: tagsBySession.get(sessionId) ?? [],
-      notes: notesBySession.get(sessionId) ?? ""
+      notes: notesBySession.get(sessionId) ?? "",
+      remoteEvidenceId: remote?.evidenceId,
+      remoteOrgId: remote?.orgId,
+      remoteSyncedAt: remote?.syncedAt
     });
   }
 
@@ -426,6 +442,7 @@ export function listSessionRecords(): SessionRecord[] {
   for (const row of metaRows) {
     notesBySession.set(row.session_id, row.notes);
   }
+  const remoteBySession = getRemoteSyncsBySession();
 
   const sessionMap = new Map<string, SessionRecord>();
 
@@ -445,6 +462,7 @@ export function listSessionRecords(): SessionRecord[] {
       continue;
     }
 
+    const remote = remoteBySession.get(row.session_id);
     sessionMap.set(row.session_id, {
       sessionId: row.session_id,
       sessionFolder: row.session_folder,
@@ -452,7 +470,10 @@ export function listSessionRecords(): SessionRecord[] {
       totalBytes: row.bytes,
       recordedAt: row.at,
       tags: tagsBySession.get(row.session_id) ?? [],
-      notes: notesBySession.get(row.session_id) ?? ""
+      notes: notesBySession.get(row.session_id) ?? "",
+      remoteEvidenceId: remote?.evidenceId,
+      remoteOrgId: remote?.orgId,
+      remoteSyncedAt: remote?.syncedAt
     });
   }
 
@@ -525,6 +546,46 @@ export function removeSessionRecords(sessionId: string): void {
   getDb().prepare(`DELETE FROM session_meta WHERE session_id = ?`).run(sessionId);
   getDb().prepare(`DELETE FROM session_events WHERE session_id = ?`).run(sessionId);
   getDb().prepare(`DELETE FROM session_annotations WHERE session_id = ?`).run(sessionId);
+}
+
+type RemoteSyncRow = {
+  session_id: string;
+  evidence_id: string;
+  org_id: string;
+  synced_at: string;
+};
+
+function getRemoteSyncsBySession(): Map<string, { evidenceId: string; orgId: string; syncedAt: string }> {
+  const rows = getDb()
+    .prepare<[]>(`SELECT session_id, evidence_id, org_id, synced_at FROM session_remote_syncs`)
+    .all() as RemoteSyncRow[];
+
+  return new Map(
+    rows.map((row) => [
+      row.session_id,
+      {
+        evidenceId: row.evidence_id,
+        orgId: row.org_id,
+        syncedAt: row.synced_at
+      }
+    ])
+  );
+}
+
+export function markSessionRemoteSynced(input: {
+  sessionId: string;
+  evidenceId: string;
+  orgId: string;
+  syncedAt?: string;
+}): void {
+  getDb().prepare(
+    `INSERT INTO session_remote_syncs (session_id, evidence_id, org_id, synced_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET
+       evidence_id = excluded.evidence_id,
+       org_id = excluded.org_id,
+       synced_at = excluded.synced_at`
+  ).run(input.sessionId, input.evidenceId, input.orgId, input.syncedAt ?? new Date().toISOString());
 }
 
 export async function loadLibrarySession(sessionId: string, outputDir: string): Promise<ViewerPayload> {

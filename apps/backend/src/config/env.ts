@@ -18,6 +18,13 @@ const envSchema = z
 		DATABASE_URL: z.string().url().optional(),
 		RUN_DB_MIGRATIONS: z.string().optional(),
 		TURSO_AUTH_TOKEN: z.string().min(1).optional(),
+		S3_BUCKET: z.string().min(1).optional(),
+		S3_REGION: z.string().min(1).optional(),
+		S3_ENDPOINT: z.string().url().optional(),
+		S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+		S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+		S3_FORCE_PATH_STYLE: z.string().optional(),
+		S3_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(60).optional(),
 		LOG_LEVEL: z
 			.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
 			.optional(),
@@ -42,6 +49,38 @@ const envSchema = z
 				code: z.ZodIssueCode.custom,
 				path: ["TURSO_AUTH_TOKEN"],
 				message: "TURSO_AUTH_TOKEN is required for remote libSQL/Turso URLs",
+			});
+		}
+
+		const s3Configured = Boolean(
+			env.S3_BUCKET ||
+				env.S3_REGION ||
+				env.S3_ENDPOINT ||
+				env.S3_ACCESS_KEY_ID ||
+				env.S3_SECRET_ACCESS_KEY,
+		);
+		if (s3Configured) {
+			for (const key of [
+				"S3_BUCKET",
+				"S3_REGION",
+				"S3_ACCESS_KEY_ID",
+				"S3_SECRET_ACCESS_KEY",
+			] as const) {
+				if (!env[key]) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						path: [key],
+						message: `${key} is required when S3 storage is configured`,
+					});
+				}
+			}
+		}
+
+		if (env.NODE_ENV === "production" && !env.S3_BUCKET) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["S3_BUCKET"],
+				message: "S3_BUCKET is required in production",
 			});
 		}
 

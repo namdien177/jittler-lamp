@@ -1,348 +1,39 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
-import {
-  ClerkProvider,
-  useAuth,
-  useClerk,
-  useSignIn,
-  useUser
-} from "@clerk/clerk-react";
-import { findActiveIndex, formatOffset, type TimelineSection } from "@jittle-lamp/shared";
-import {
-  createMergeGroup,
-  deriveSectionTimeline,
-  deriveTimeline,
-  getArchiveMergeGroups,
-  getContiguousMergeableSelection,
-  openMergeDialog as openMergeDialogState,
-  closeMergeDialog as closeMergeDialogState,
-  selectActionRange,
-  selectSingleAction,
-  toggleActionSelection,
-  validateMergeDialog
-} from "@jittle-lamp/viewer-core";
-import {
-  MemoryRouter,
-  Navigate,
-  NavLink,
-  Outlet,
-  useNavigate
-} from "react-router";
-import { useRoutes } from "react-router";
+import { formatOffset, type TimelineSection } from "@jittle-lamp/shared";
+import { deriveSectionTimeline } from "@jittle-lamp/viewer-core";
+import { MemoryRouter, Navigate, NavLink, Outlet, useLocation, useNavigate, useRoutes } from "react-router";
 import type { JittleRouteObject } from "@jittle-lamp/viewer-react";
 
-import type { DesktopCompanionConfigSnapshot, DesktopCompanionRuntimeSnapshot, SessionRecord, ViewerPayload } from "../rpc";
-import { createDesktopBridge, type DesktopBridge } from "./desktop-bridge";
 import {
-  filterSessions,
-  formatRuntimeLabel,
-  formatSourceLabel,
-  type DatePreset
-} from "./catalog-view";
-import { createDesktopNotesAdapter, createDesktopShareAdapter, createDesktopStorageAdapter } from "./adapters";
-import { formatBytes, formatErrorMessage, formatRelativeTime } from "./utils";
-import {
-  collectViewerVideoDiagnostics,
-  createViewerVideoState,
-  loadViewerVideoSource,
-  recordViewerVideoEvent,
-  resetViewerVideoDiagnostics,
-  type ViewerVideoState
-} from "./viewer-video";
-import { applyViewerPayload, createViewerState, resetViewerState, type ViewerState } from "./viewer-state";
-import { getViewerSourceLabel, shouldClearViewerTempSession } from "./viewer-source";
+  DesktopAuthProvider,
+  DesktopClerkProvider,
+  clerkPublishableKey,
+  useDesktopAuth
+} from "./auth-context";
+import { useDesktopController, type DesktopController } from "./desktop-controller";
+import { LibraryPage } from "./pages/library-page";
+import { CloudPage } from "./pages/cloud-page";
+import { OrganisationPage } from "./pages/organisation-page";
+import { AccountPage } from "./pages/account-page";
+import { SettingsPage } from "./pages/settings-page";
+import { ToastProvider } from "./ui/toast";
 import { ViewerPane } from "./viewer-pane";
-import { reportDesktopViewerTelemetry } from "./viewer-rollout";
+import { createDesktopNotesAdapter } from "./adapters";
+import { getViewerSourceLabel } from "./viewer-source";
+import { formatRuntimeLabel } from "./catalog-view";
+import { getInitials } from "./utils";
 
-type FeedbackTone = "neutral" | "success" | "error";
-
-type ViewState = {
-  bridgeError: string | null;
-  config: DesktopCompanionConfigSnapshot | null;
-  runtime: DesktopCompanionRuntimeSnapshot | null;
-  sessions: SessionRecord[];
-  allTags: string[];
-  dateFilter: DatePreset;
-  tagFilter: string | null;
-  editingTagSessionId: string | null;
-  tagInputValue: string;
-  pendingDeleteId: string | null;
-  draftOutputDir: string;
-  feedback: { text: string; tone: FeedbackTone };
-  isChoosingFolder: boolean;
-  isLoading: boolean;
-  isSaving: boolean;
-};
-
-type TimelineRow = {
-  id: string;
-  offsetMs: number;
-  section: TimelineSection;
-  label: string;
-  kind: string;
-  selected: boolean;
-  merged: boolean;
-  mergedRange?: string;
-  tags: string[];
-};
-
-type DesktopController = {
-  bridge: DesktopBridge | null;
-  state: ViewState;
-  viewerState: ViewerState;
-  viewerVideoRef: React.RefObject<HTMLVideoElement | null>;
-  viewerReactRootRef: React.RefObject<HTMLDivElement | null>;
-  filteredSessions: SessionRecord[];
-  setDateFilter: (preset: DatePreset) => void;
-  setTagFilter: (tag: string | null) => void;
-  setTagFilterDraft: (value: string) => void;
-  openSettings: () => void;
-  closeSettings: () => void;
-  chooseFolder: () => void;
-  saveFolder: () => void;
-  openCurrentOutputFolder: () => void;
-  openConfigFile: () => void;
-  openLocalSession: () => void;
-  importZip: () => void;
-  viewSession: (sessionId: string) => void;
-  openSessionFolder: (sessionId: string) => void;
-  exportSessionZip: (sessionId: string) => void;
-  deleteSessionClick: (sessionId: string) => void;
-  startTagEdit: (sessionId: string) => void;
-  cancelTagEdit: () => void;
-  setInlineTagDraft: (value: string) => void;
-  addTagToSession: (sessionId: string, tag: string) => void;
-  removeTagFromSession: (sessionId: string, tag: string) => void;
-  closeViewer: () => void;
-  setViewerNotesValue: (value: string) => void;
-  saveViewerNotes: () => void;
-  copyViewerValue: (value: string, label: string) => void;
-  setViewerSection: (section: TimelineSection) => void;
-  setViewerSubtype: (value: ViewerState["networkSubtypeFilter"]) => void;
-  setViewerSearch: (value: string) => void;
-  clickTimelineItem: (itemId: string, offsetMs: number, event: React.MouseEvent<HTMLButtonElement>) => void;
-  openTimelineContext: (itemId: string, event: React.MouseEvent<HTMLButtonElement>) => void;
-  focusViewerTimeline: () => void;
-  closeNetworkDetail: () => void;
-  updateTimelineHighlight: () => void;
-  handleViewerVideoError: () => void;
-  setMergeValue: (value: string) => void;
-  submitMergeDialog: () => void;
-  closeMergeDialog: () => void;
-};
-
-type DesktopAuthSignedInState = {
-  status: "signed-in";
-  source: "clerk" | "desktop";
-  userId: string;
-  label: string;
-  accessToken?: string;
-  profile?: DesktopAccountProfile;
-  expiresAt?: number;
-};
-
-type DesktopOrganizationSummary = {
-  id: string;
-  name: string;
-  role: string;
-  isPersonal: boolean;
-  isActive: boolean;
-};
-
-type DesktopAccountProfile = {
-  userId: string;
-  activeOrgId: string | null;
-  user: {
-    id: string;
-    displayName: string;
-    email: string | null;
-    imageUrl: string | null;
-  };
-  organizations: DesktopOrganizationSummary[];
-};
-
-type DesktopAuthState =
-  | { status: "loading" }
-  | { status: "signed-out" }
-  | { status: "error"; message: string }
-  | DesktopAuthSignedInState;
-
-type StoredDesktopAuthSession = {
-  accessToken: string;
-  expiresAt: number;
-  clerkUserId: string;
-};
-
-type BrowserAuthFlowState =
-  | { status: "idle" }
-  | { status: "starting" }
-  | {
-      status: "polling";
-      userCode: string;
-      verificationUriComplete: string;
-      expiresAt: number;
-      intervalSeconds: number;
-    }
-  | { status: "error"; message: string };
-
-type PasswordSignInResult = { ok: true } | { ok: false; message: string };
-
-type DesktopAuthController = {
-  state: DesktopAuthState;
-  browserFlow: BrowserAuthFlowState;
-  signInWithPassword: (input: { identifier: string; password: string }) => Promise<PasswordSignInResult>;
-  startBrowserSignIn: () => Promise<void>;
-  clearBrowserFlow: () => void;
-  signOut: () => Promise<void>;
-};
-
-const runtimePollIntervalMs = 2_000;
 const signInPath = "/sign-in";
 const homePath = "/";
-const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY?.trim() ?? "";
-const apiOrigin = (process.env.JITTLE_LAMP_API_ORIGIN?.trim() || "http://127.0.0.1:3001").replace(/\/+$/, "");
-const desktopAuthStorageKey = "jittle-lamp.desktop-auth.v1";
-const mediaEventNames = [
-  "loadstart",
-  "loadedmetadata",
-  "loadeddata",
-  "canplay",
-  "canplaythrough",
-  "play",
-  "playing",
-  "waiting",
-  "stalled",
-  "suspend",
-  "abort",
-  "emptied",
-  "pause",
-  "error"
-] as const;
 
-const DesktopContext = createContext<DesktopController | null>(null);
-const DesktopAuthContext = createContext<DesktopAuthController | null>(null);
-
-function initialViewState(): ViewState {
-  return {
-    bridgeError: null,
-    config: null,
-    runtime: null,
-    sessions: [],
-    allTags: [],
-    dateFilter: "all",
-    tagFilter: null,
-    editingTagSessionId: null,
-    tagInputValue: "",
-    pendingDeleteId: null,
-    draftOutputDir: "",
-    feedback: { text: "Loading desktop companion status…", tone: "neutral" },
-    isChoosingFolder: false,
-    isLoading: true,
-    isSaving: false
-  };
-}
+const DesktopControllerContext = React.createContext<DesktopController | null>(null);
 
 function useDesktop(): DesktopController {
-  const controller = useContext(DesktopContext);
-  if (!controller) throw new Error("Desktop context was not initialized.");
-  return controller;
-}
-
-function useDesktopAuth(): DesktopAuthController {
-  const controller = useContext(DesktopAuthContext);
-  if (!controller) throw new Error("Desktop auth context was not initialized.");
-  return controller;
-}
-
-function readStoredDesktopAuthSession(): StoredDesktopAuthSession | null {
-  const raw = window.localStorage.getItem(desktopAuthStorageKey);
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<StoredDesktopAuthSession>;
-    if (
-      typeof parsed.accessToken !== "string" ||
-      typeof parsed.expiresAt !== "number" ||
-      typeof parsed.clerkUserId !== "string"
-    ) {
-      return null;
-    }
-
-    return {
-      accessToken: parsed.accessToken,
-      expiresAt: parsed.expiresAt,
-      clerkUserId: parsed.clerkUserId
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredDesktopAuthSession(session: StoredDesktopAuthSession): void {
-  window.localStorage.setItem(desktopAuthStorageKey, JSON.stringify(session));
-}
-
-function clearStoredDesktopAuthSession(): void {
-  window.localStorage.removeItem(desktopAuthStorageKey);
-}
-
-function isStoredDesktopAuthSessionFresh(session: StoredDesktopAuthSession): boolean {
-  return session.expiresAt > Date.now() + 60_000;
-}
-
-async function readApiError(response: Response, fallback: string): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-  return payload?.error?.message ?? fallback;
-}
-
-async function fetchDesktopAccountProfile(accessToken: string): Promise<DesktopAccountProfile> {
-  const response = await fetch(`${apiOrigin}/protected/me`, {
-    headers: { authorization: `Bearer ${accessToken}` }
-  });
-  if (!response.ok) {
-    throw new Error(await readApiError(response, "Unable to load account profile."));
-  }
-
-  return await response.json() as DesktopAccountProfile;
-}
-
-function getAccountDisplayLabel(profile: DesktopAccountProfile, fallback: string): string {
-  const displayName = profile.user.displayName.trim();
-  if (displayName && displayName !== profile.user.id) return displayName;
-  return profile.user.email ?? displayName ?? fallback;
-}
-
-function getAccountInitials(profile: DesktopAccountProfile | null, fallback: string): string {
-  const label = profile ? getAccountDisplayLabel(profile, fallback) : fallback;
-  const parts = label
-    .replace(/@.*/, "")
-    .split(/[\s._-]+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const initials =
-    parts.length > 1 && parts[0] && parts[1]
-      ? `${parts[0][0]}${parts[1][0]}`
-      : parts[0]?.slice(0, 2);
-  return (initials || "JL").toUpperCase();
-}
-
-function cloneViewerState(state: ViewerState): ViewerState {
-  return {
-    ...state,
-    timeline: [...state.timeline],
-    pendingMergeActionIds: [...state.pendingMergeActionIds],
-    selectedActionIds: new Set(state.selectedActionIds),
-    mergeGroups: [...state.mergeGroups]
-  };
-}
-
-type ClerkNavigationMetadata = {
-  windowNavigate: (to: URL | string) => void;
-};
-
-function shouldUseWindowNavigation(to: string): boolean {
-  return /^[a-z][a-z\d+.-]*:/i.test(to) || to.startsWith("//");
+  const ctx = React.useContext(DesktopControllerContext);
+  if (!ctx) throw new Error("Desktop controller is unavailable");
+  return ctx;
 }
 
 function AuthStatusPage(props: { title: string; detail?: string }): React.JSX.Element {
@@ -365,297 +56,6 @@ function MissingClerkConfigPage(): React.JSX.Element {
   );
 }
 
-function DesktopClerkProvider(props: { children: React.ReactNode }): React.JSX.Element {
-  const navigate = useNavigate();
-
-  const createRouter = (replace: boolean) => (
-    to: string,
-    metadata?: ClerkNavigationMetadata
-  ) => {
-    if (shouldUseWindowNavigation(to)) {
-      if (metadata) {
-        metadata.windowNavigate(to);
-      } else {
-        window.location.href = to;
-      }
-      return;
-    }
-
-    navigate(to, { replace });
-  };
-
-  const routerPush = useMemo(() => createRouter(false), [navigate]);
-  const routerReplace = useMemo(() => createRouter(true), [navigate]);
-
-  return (
-    <ClerkProvider
-      publishableKey={clerkPublishableKey}
-      signInUrl={signInPath}
-      afterSignOutUrl={signInPath}
-      routerPush={routerPush}
-      routerReplace={routerReplace}
-    >
-      {props.children}
-    </ClerkProvider>
-  );
-}
-
-function DesktopAuthProvider(props: { children: React.ReactNode }): React.JSX.Element {
-  const clerkAuth = useAuth();
-  const clerk = useClerk();
-  const signIn = useSignIn();
-  const { user } = useUser();
-  const bridge = useMemo(() => createDesktopBridge(), []);
-  const pollTimerRef = useRef<number | null>(null);
-  const [state, setState] = useState<DesktopAuthState>({ status: "loading" });
-  const [browserFlow, setBrowserFlow] = useState<BrowserAuthFlowState>({ status: "idle" });
-
-  const stopPolling = () => {
-    if (pollTimerRef.current !== null) {
-      window.clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-  };
-
-  const loadStoredDesktopSession = async () => {
-    const stored = readStoredDesktopAuthSession();
-    if (!stored || !isStoredDesktopAuthSessionFresh(stored)) {
-      clearStoredDesktopAuthSession();
-      setState({ status: "signed-out" });
-      return;
-    }
-
-    try {
-      const profile = await fetchDesktopAccountProfile(stored.accessToken);
-      setState({
-        status: "signed-in",
-        source: "desktop",
-        userId: profile.userId || stored.clerkUserId,
-        label: getAccountDisplayLabel(profile, stored.clerkUserId),
-        accessToken: stored.accessToken,
-        profile,
-        expiresAt: stored.expiresAt
-      });
-    } catch (error) {
-      clearStoredDesktopAuthSession();
-      setState({
-        status: "error",
-        message: error instanceof Error ? error.message : "Stored desktop session is no longer valid."
-      });
-    }
-  };
-
-  useEffect(() => {
-    if (!clerkAuth.isLoaded) {
-      setState({ status: "loading" });
-      return;
-    }
-
-    if (clerkAuth.isSignedIn) {
-      clearStoredDesktopAuthSession();
-      setState({
-        status: "signed-in",
-        source: "clerk",
-        userId: clerkAuth.userId ?? user?.id ?? "current-user",
-        label: user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? clerkAuth.userId ?? "Signed in"
-      });
-      return;
-    }
-
-    void loadStoredDesktopSession();
-  }, [clerkAuth.isLoaded, clerkAuth.isSignedIn, clerkAuth.userId, user?.id, user?.primaryEmailAddress?.emailAddress, user?.fullName, user?.username]);
-
-  useEffect(() => () => stopPolling(), []);
-
-  const completeBrowserPoll = (input: {
-    deviceCode: string;
-    intervalSeconds: number;
-  }) => {
-    stopPolling();
-    pollTimerRef.current = window.setTimeout(async () => {
-      try {
-        const response = await fetch(`${apiOrigin}/desktop-auth/flows/${encodeURIComponent(input.deviceCode)}`);
-        if (!response.ok) {
-          throw new Error(await readApiError(response, "Unable to check browser sign-in status."));
-        }
-
-        const payload = await response.json() as
-          | {
-              status: "pending" | "expired" | "denied";
-              expiresAt: number;
-              intervalSeconds: number;
-            }
-          | {
-              status: "approved";
-              tokenType: "Bearer";
-              accessToken: string;
-              expiresAt: number;
-              expiresInSeconds: number;
-              clerkUserId: string;
-            };
-
-        if (payload.status === "approved") {
-          const session = {
-            accessToken: payload.accessToken,
-            expiresAt: payload.expiresAt,
-            clerkUserId: payload.clerkUserId
-          };
-          writeStoredDesktopAuthSession(session);
-          const profile = await fetchDesktopAccountProfile(payload.accessToken).catch(() => null);
-          setState({
-            status: "signed-in",
-            source: "desktop",
-            userId: payload.clerkUserId,
-            label: profile ? getAccountDisplayLabel(profile, payload.clerkUserId) : payload.clerkUserId,
-            accessToken: payload.accessToken,
-            ...(profile ? { profile } : {}),
-            expiresAt: payload.expiresAt
-          });
-          setBrowserFlow({ status: "idle" });
-          return;
-        }
-
-        if (payload.status === "pending") {
-          completeBrowserPoll({
-            deviceCode: input.deviceCode,
-            intervalSeconds: payload.intervalSeconds || input.intervalSeconds
-          });
-          return;
-        }
-
-        setBrowserFlow({
-          status: "error",
-          message:
-            payload.status === "expired"
-              ? "The browser sign-in request expired. Start a new sign-in."
-              : "The browser sign-in request was denied."
-        });
-      } catch (error) {
-        setBrowserFlow({
-          status: "error",
-          message: error instanceof Error ? error.message : "Unable to check browser sign-in status."
-        });
-      }
-    }, Math.max(input.intervalSeconds, 1) * 1000);
-  };
-
-  const startBrowserSignIn = async (): Promise<void> => {
-    stopPolling();
-    setBrowserFlow({ status: "starting" });
-
-    try {
-      const response = await fetch(`${apiOrigin}/desktop-auth/flows`, {
-        method: "POST"
-      });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, "Unable to start browser sign-in."));
-      }
-
-      const payload = await response.json() as {
-        deviceCode: string;
-        userCode: string;
-        verificationUriComplete: string;
-        expiresAt: number;
-        intervalSeconds: number;
-      };
-
-      setBrowserFlow({
-        status: "polling",
-        userCode: payload.userCode,
-        verificationUriComplete: payload.verificationUriComplete,
-        expiresAt: payload.expiresAt,
-        intervalSeconds: payload.intervalSeconds
-      });
-
-      if (bridge) {
-        await bridge.rpc.request.openExternalUrl({ url: payload.verificationUriComplete });
-      } else {
-        window.open(payload.verificationUriComplete, "_blank", "noopener,noreferrer");
-      }
-
-      completeBrowserPoll({
-        deviceCode: payload.deviceCode,
-        intervalSeconds: payload.intervalSeconds
-      });
-    } catch (error) {
-      setBrowserFlow({
-        status: "error",
-        message: error instanceof Error ? error.message : "Unable to start browser sign-in."
-      });
-    }
-  };
-
-  const signInWithPassword = async (input: {
-    identifier: string;
-    password: string;
-  }): Promise<PasswordSignInResult> => {
-    if (!signIn.isLoaded) {
-      return { ok: false, message: "Sign-in is still loading." };
-    }
-
-    try {
-      const result = await signIn.signIn.create({
-        strategy: "password",
-        identifier: input.identifier,
-        password: input.password
-      });
-
-      if (result.status === "complete" && result.createdSessionId) {
-        await signIn.setActive({ session: result.createdSessionId });
-        clearStoredDesktopAuthSession();
-        return { ok: true };
-      }
-
-      const signInStatus = result.status as string | null;
-      if (signInStatus === "needs_second_factor" || signInStatus === "needs_client_trust") {
-        return {
-          ok: false,
-          message: "This account needs additional verification. Continue in the browser to finish sign-in."
-        };
-      }
-
-      return {
-        ok: false,
-        message: "Unable to finish password sign-in for this account."
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        message: error instanceof Error ? error.message : "Unable to sign in with that password."
-      };
-    }
-  };
-
-  const signOut = async (): Promise<void> => {
-    stopPolling();
-    clearStoredDesktopAuthSession();
-    setBrowserFlow({ status: "idle" });
-    if (state.status === "signed-in" && state.source === "clerk") {
-      await clerk.signOut();
-    }
-    setState({ status: "signed-out" });
-  };
-
-  const clearBrowserFlow = () => {
-    stopPolling();
-    setBrowserFlow({ status: "idle" });
-  };
-
-  const value = useMemo<DesktopAuthController>(
-    () => ({
-      state,
-      browserFlow,
-      signInWithPassword,
-      startBrowserSignIn,
-      clearBrowserFlow,
-      signOut
-    }),
-    [state, browserFlow, signIn.isLoaded]
-  );
-
-  return <DesktopAuthContext.Provider value={value}>{props.children}</DesktopAuthContext.Provider>;
-}
-
 function SignInPage(): React.JSX.Element {
   const navigate = useNavigate();
   const auth = useDesktopAuth();
@@ -668,21 +68,16 @@ function SignInPage(): React.JSX.Element {
     return <Navigate to={homePath} replace />;
   }
 
-  const submitPasswordSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submitPasswordSignIn = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     setError(null);
     setIsSubmitting(true);
-    const result = await auth.signInWithPassword({
-      identifier: identifier.trim(),
-      password
-    });
+    const result = await auth.signInWithPassword({ identifier: identifier.trim(), password });
     setIsSubmitting(false);
-
     if (result.ok) {
       navigate(homePath, { replace: true });
       return;
     }
-
     setError(result.message);
   };
 
@@ -690,13 +85,14 @@ function SignInPage(): React.JSX.Element {
     <main className="auth-page">
       <section className="auth-card">
         <div className="auth-card-header">
-          <h1>Sign in to Jittle Lamp</h1>
-          <p>Use password sign-in here, or finish OAuth in your browser.</p>
+          <h1>Welcome to Jittle Lamp</h1>
+          <p>Sign in with your password or finish OAuth in your browser.</p>
         </div>
         <form className="auth-form" onSubmit={submitPasswordSignIn}>
-          <label className="auth-field">
+          <label className="field">
             <span>Email or username</span>
             <input
+              className="input field-input"
               type="text"
               autoComplete="username"
               value={identifier}
@@ -704,9 +100,10 @@ function SignInPage(): React.JSX.Element {
               required
             />
           </label>
-          <label className="auth-field">
+          <label className="field">
             <span>Password</span>
             <input
+              className="input field-input"
               type="password"
               autoComplete="current-password"
               value={password}
@@ -716,18 +113,18 @@ function SignInPage(): React.JSX.Element {
           </label>
           {error ? <div className="auth-error">{error}</div> : null}
           {auth.state.status === "error" ? <div className="auth-error">{auth.state.message}</div> : null}
-          <button className="button primary auth-submit" type="submit" disabled={isSubmitting || auth.state.status === "loading"}>
-            {isSubmitting ? "Signing in..." : "Sign in"}
+          <button className="button primary lg" type="submit" disabled={isSubmitting || auth.state.status === "loading"}>
+            {isSubmitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
         <div className="auth-divider" />
         <button
-          className="button secondary auth-submit"
+          className="button secondary lg"
           type="button"
           disabled={auth.browserFlow.status === "starting" || auth.browserFlow.status === "polling"}
           onClick={() => void auth.startBrowserSignIn()}
         >
-          {auth.browserFlow.status === "starting" ? "Opening browser..." : "Continue in browser"}
+          {auth.browserFlow.status === "starting" ? "Opening browser…" : "Continue in browser"}
         </button>
         {auth.browserFlow.status === "polling" ? (
           <div className="auth-browser-flow" role="status">
@@ -736,7 +133,7 @@ function SignInPage(): React.JSX.Element {
             <a href={auth.browserFlow.verificationUriComplete} target="_blank" rel="noreferrer">
               Open sign-in page
             </a>
-            <button className="button ghost sm" type="button" onClick={auth.clearBrowserFlow}>
+            <button className="button ghost xs" type="button" onClick={auth.clearBrowserFlow}>
               Cancel
             </button>
           </div>
@@ -751,533 +148,201 @@ function RequireAuth(props: { children: React.ReactNode }): React.JSX.Element {
   const auth = useDesktopAuth();
 
   if (auth.state.status === "loading") {
-    return <AuthStatusPage title="Checking session..." />;
+    return <AuthStatusPage title="Checking session…" />;
   }
-
   if (auth.state.status === "signed-in") {
     return <>{props.children}</>;
   }
-
   return <Navigate to={signInPath} replace />;
 }
 
-function DesktopAppLayout(): React.JSX.Element {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const controller = useDesktopController(isSettingsOpen, setIsSettingsOpen);
-
-  return (
-    <DesktopContext.Provider value={controller}>
-      <div className="app-shell">
-        <DesktopTopBar />
-        <Outlet />
-        {isSettingsOpen ? <SettingsDialog /> : null}
-        <DesktopViewerOverlay />
-      </div>
-    </DesktopContext.Provider>
-  );
-}
-
-function DesktopTopBar(): React.JSX.Element {
+function Sidebar(): React.JSX.Element {
   const desktop = useDesktop();
-  const status = desktop.state.runtime?.status ?? "starting";
-
-  return (
-    <div className="top-bar">
-      <div className="top-bar-left">
-        <span className="app-name">Jittle Lamp</span>
-        <nav className="page-tabs" aria-label="Desktop pages">
-          <NavLink
-            className={({ isActive }) => (isActive ? "page-tab active" : "page-tab")}
-            to="/"
-            end
-          >
-            Library
-          </NavLink>
-        </nav>
-      </div>
-      <div className="top-bar-right">
-        <span className="status-pill" data-status={status}>{formatRuntimeLabel(status)}</span>
-        <span className="output-path">{desktop.state.runtime?.outputDir ?? desktop.state.config?.outputDir ?? "—"}</span>
-        <button className="open-local-btn" type="button" onClick={desktop.openLocalSession}>
-          Open Local…
-        </button>
-        <button className="import-zip-btn" type="button" onClick={desktop.importZip}>
-          Import ZIP…
-        </button>
-        <button className="gear-btn" type="button" aria-label="Settings" onClick={desktop.openSettings}>
-          ⚙
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LibraryPage(): React.JSX.Element {
-  const desktop = useDesktop();
-
-  return (
-    <main className="desktop-page library-page">
-      <div className="filter-bar">
-        <div className="date-toggles">
-          {(["today", "week", "month", "all"] as const).map((preset) => (
-            <button
-              key={preset}
-              className="date-toggle"
-              type="button"
-              data-active={desktop.state.dateFilter === preset ? "true" : "false"}
-              onClick={() => desktop.setDateFilter(preset)}
-            >
-              {preset === "all" ? "All" : preset[0]!.toUpperCase() + preset.slice(1)}
-            </button>
-          ))}
-        </div>
-        <TagFilter />
-        <span className="results-count">
-          {desktop.filteredSessions.length} session{desktop.filteredSessions.length === 1 ? "" : "s"}
-        </span>
-      </div>
-
-      <FeedbackBanner />
-
-      <div className="sessions-scroll">
-        {desktop.filteredSessions.length === 0 ? (
-          <div className="empty-state">
-            <span>No sessions found.</span>
-            <span className="empty-hint">Start a browser recording with the extension to populate this list.</span>
-          </div>
-        ) : (
-          desktop.filteredSessions.map((session) => <SessionCard key={session.sessionId} session={session} />)
-        )}
-      </div>
-    </main>
-  );
-}
-
-function TagFilter(): React.JSX.Element {
-  const desktop = useDesktop();
-  const [draft, setDraft] = useState("");
-  const trimmed = draft.trim().toLowerCase();
-  const matches = trimmed ? desktop.state.allTags.filter((tag) => tag.toLowerCase().includes(trimmed)) : [];
-
-  if (desktop.state.tagFilter !== null) {
-    return (
-      <div className="tag-filter">
-        <span className="active-tag-chip">
-          {desktop.state.tagFilter}
-          <button className="tag-chip-remove" type="button" aria-label="Remove tag filter" onClick={() => desktop.setTagFilter(null)}>
-            ✕
-          </button>
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="tag-filter">
-      <input
-        className="tag-filter-input"
-        type="text"
-        placeholder="Filter by tag…"
-        value={draft}
-        onChange={(event) => {
-          setDraft(event.currentTarget.value);
-          desktop.setTagFilterDraft(event.currentTarget.value);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            setDraft("");
-            desktop.setTagFilterDraft("");
-          }
-        }}
-        autoComplete="off"
-      />
-      {matches.length > 0 ? (
-        <div className="tag-autocomplete">
-          {matches.map((tag) => (
-            <button key={tag} className="tag-option" type="button" onClick={() => desktop.setTagFilter(tag)}>
-              {tag}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function FeedbackBanner(): React.JSX.Element {
-  const { state } = useDesktop();
-  return (
-    <div className="feedback-banner" data-tone={state.feedback.tone}>
-      {state.feedback.text}
-    </div>
-  );
-}
-
-function SessionCard(props: { session: SessionRecord }): React.JSX.Element {
-  const desktop = useDesktop();
-  const session = props.session;
-  const shortId = session.sessionId.length > 24
-    ? `${session.sessionId.slice(0, 10)}…${session.sessionId.slice(-8)}`
-    : session.sessionId;
-  const hasWebm = session.artifacts.some((artifact) => artifact.artifactName === "recording.webm");
-  const hasJson = session.artifacts.some((artifact) => artifact.artifactName === "session.archive.json");
-  const isPending = desktop.state.pendingDeleteId === session.sessionId;
-  const isEditing = desktop.state.editingTagSessionId === session.sessionId;
-  const inlineDraft = desktop.state.tagInputValue.trim().toLowerCase();
-  const inlineMatches = inlineDraft
-    ? desktop.state.allTags.filter((tag) => !session.tags.includes(tag) && tag.toLowerCase().includes(inlineDraft))
-    : [];
-
-  return (
-    <article className="session-card">
-      <div className="session-head">
-        <span className="session-id" title={session.sessionId}>{shortId}</span>
-        <span className="session-time">{formatRelativeTime(session.recordedAt)}</span>
-      </div>
-      <div className="session-artifacts">
-        <span className={`artifact-tag ${hasWebm ? "artifact-present" : "artifact-missing"}`}>webm</span>
-        <span className={`artifact-tag ${hasJson ? "artifact-present" : "artifact-missing"}`}>json</span>
-        <span className="session-size">{formatBytes(session.totalBytes)}</span>
-      </div>
-      <div className="session-tags">
-        {session.tags.map((tag) => (
-          <span key={tag} className="tag-chip">
-            {tag}
-            <button
-              className="tag-chip-x"
-              type="button"
-              aria-label={`Remove tag ${tag}`}
-              onClick={() => desktop.removeTagFromSession(session.sessionId, tag)}
-            >
-              ✕
-            </button>
-          </span>
-        ))}
-        {isEditing ? (
-          <div className="tag-editor-wrap">
-            <input
-              className="tag-input-inline"
-              type="text"
-              value={desktop.state.tagInputValue}
-              placeholder="tag name"
-              autoFocus
-              autoComplete="off"
-              onChange={(event) => desktop.setInlineTagDraft(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && event.currentTarget.value.trim()) {
-                  desktop.addTagToSession(session.sessionId, event.currentTarget.value);
-                } else if (event.key === "Escape") {
-                  desktop.cancelTagEdit();
-                }
-              }}
-            />
-            {inlineMatches.length > 0 ? (
-              <div className="tag-autocomplete">
-                {inlineMatches.map((tag) => (
-                  <button key={tag} className="tag-option" type="button" onClick={() => desktop.addTagToSession(session.sessionId, tag)}>
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <button className="tag-add-btn" type="button" onClick={() => desktop.startTagEdit(session.sessionId)}>
-            + tag
-          </button>
-        )}
-      </div>
-      <p className="session-path">{session.sessionFolder}</p>
-      <div className="session-actions">
-        <button className="button ghost sm" type="button" onClick={() => desktop.viewSession(session.sessionId)}>View</button>
-        <button className="button ghost sm" type="button" onClick={() => desktop.openSessionFolder(session.sessionId)}>Open</button>
-        <button className="button ghost sm" type="button" onClick={() => desktop.exportSessionZip(session.sessionId)}>ZIP</button>
-        <button
-          className={`button ghost sm${isPending ? " session-delete-confirm" : ""}`}
-          type="button"
-          onClick={() => desktop.deleteSessionClick(session.sessionId)}
-        >
-          {isPending ? "Confirm?" : "Delete"}
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function SettingsDialog(): React.JSX.Element {
-  const desktop = useDesktop();
-  const config = desktop.state.config;
-  const isEnvOverrideActive = config?.envOverrideActive ?? false;
-  const isDirty = Boolean(config && desktop.state.draftOutputDir !== config.outputDir);
-  const hasBridgeError = desktop.state.bridgeError !== null;
-
-  return (
-    <div
-      className="drawer-overlay"
-      data-open="true"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) desktop.closeSettings();
-      }}
-    >
-      <div className="settings-drawer" data-open="true" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
-        <div className="drawer-header">
-          <span className="drawer-title" id="settings-dialog-title">Settings</span>
-          <button className="drawer-close" type="button" aria-label="Back to library" onClick={desktop.closeSettings}>
-            ✕
-          </button>
-        </div>
-        <div className="drawer-content">
-          <AccountSettingsSection />
-
-          <div className="drawer-section">
-            <span className="drawer-section-label">Output folder</span>
-            <div className="drawer-path-display">{config?.outputDir ?? desktop.state.runtime?.outputDir ?? "—"}</div>
-            <p className="drawer-effective-summary">
-              {config
-                ? isEnvOverrideActive
-                  ? "Environment override is active — the desktop route is locked until that variable is removed."
-                  : "The extension will use this folder whenever the local companion is online."
-                : "Reading the current output folder…"}
-            </p>
-            {isEnvOverrideActive ? (
-              <div className="env-override-warning">
-                JITTLE_LAMP_OUTPUT_DIR is active and overrides the saved setting.
-              </div>
-            ) : null}
-            <input className="path-input" type="text" value={desktop.state.draftOutputDir} readOnly />
-            <div className="drawer-action-row">
-              <button
-                className="button primary sm"
-                type="button"
-                disabled={hasBridgeError || desktop.state.isLoading || desktop.state.isChoosingFolder || desktop.state.isSaving || isEnvOverrideActive}
-                onClick={desktop.chooseFolder}
-              >
-                {desktop.state.isChoosingFolder ? "Choosing…" : "Choose folder…"}
-              </button>
-              <button
-                className="button secondary sm"
-                type="button"
-                disabled={hasBridgeError || desktop.state.isLoading || desktop.state.isSaving || !isDirty || isEnvOverrideActive}
-                onClick={desktop.saveFolder}
-              >
-                {desktop.state.isSaving ? "Saving…" : "Save route"}
-              </button>
-            </div>
-            <div className="drawer-action-row">
-              <button className="button ghost sm" type="button" disabled={hasBridgeError || desktop.state.isLoading || !config} onClick={desktop.openCurrentOutputFolder}>
-                Open folder
-              </button>
-              <button className="button ghost sm" type="button" disabled={hasBridgeError || desktop.state.isLoading || !config} onClick={desktop.openConfigFile}>
-                Open config
-              </button>
-            </div>
-          </div>
-
-          <div className="drawer-section">
-            <span className="drawer-section-label">Route details</span>
-            <div className="drawer-detail-grid">
-              <DetailItem label="Source" value={config ? formatSourceLabel(config.source) : "—"} />
-              <DetailItem label="Saved file" value={config?.savedOutputDir ?? "No saved override"} />
-              <DetailItem label="Default folder" value={config?.defaultOutputDir ?? "—"} />
-              <DetailItem label="Config file" value={config?.configFilePath ?? "—"} />
-            </div>
-          </div>
-        </div>
-        <AccountFooter />
-      </div>
-    </div>
-  );
-}
-
-function AccountSettingsSection(): React.JSX.Element {
   const auth = useDesktopAuth();
-  const clerkAuth = useAuth();
-  const [profile, setProfile] = useState<DesktopAccountProfile | null>(
-    auth.state.status === "signed-in" ? auth.state.profile ?? null : null
-  );
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectingOrgId, setSelectingOrgId] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const profile = auth.state.status === "signed-in" ? auth.state.profile ?? null : null;
+  const activeOrg = profile?.organizations.find((org) => org.isActive) ?? null;
+  const accountLabel = auth.state.status === "signed-in" ? auth.state.label : "Signed out";
+  const sessionCount = desktop.state.sessions.length;
 
-  const getAccessToken = async () => {
-    if (auth.state.status !== "signed-in") return null;
-    if (auth.state.source === "desktop") {
-      return auth.state.accessToken ?? readStoredDesktopAuthSession()?.accessToken ?? null;
-    }
-    return await clerkAuth.getToken({ skipCache: true });
-  };
-
-  const refreshProfile = async () => {
-    if (auth.state.status !== "signed-in") {
-      setProfile(null);
-      setError(null);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Account session is missing an API token.");
-      }
-      setProfile(await fetchDesktopAccountProfile(token));
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to load account profile.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (auth.state.status === "signed-in" && auth.state.profile) {
-      setProfile(auth.state.profile);
-    }
-    void refreshProfile();
-  }, [
-    auth.state.status,
-    auth.state.status === "signed-in" ? auth.state.source : null,
-    auth.state.status === "signed-in" ? auth.state.userId : null,
-    auth.state.status === "signed-in" ? auth.state.accessToken : null
-  ]);
+    if (!menuOpen) return;
+    const onClickOutside = (event: MouseEvent): void => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [menuOpen]);
 
-  const selectOrganization = async (organizationId: string) => {
-    if (selectingOrgId || profile?.activeOrgId === organizationId) return;
-
-    setSelectingOrgId(organizationId);
-    setError(null);
-    try {
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Account session is missing an API token.");
-      }
-
-      const response = await fetch(`${apiOrigin}/orgs/${encodeURIComponent(organizationId)}/select-active`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` }
-      });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, "Unable to switch organisation."));
-      }
-
-      setProfile(await fetchDesktopAccountProfile(token));
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to switch organisation.");
-    } finally {
-      setSelectingOrgId(null);
-    }
+  const goto = (path: string): void => {
+    setMenuOpen(false);
+    navigate(path);
   };
 
-  if (auth.state.status !== "signed-in") {
-    return (
-      <div className="drawer-section account-section">
-        <span className="drawer-section-label">Account</span>
-        <div className="account-summary">
-          <div className="account-avatar" aria-hidden="true">JL</div>
-          <div className="account-summary-copy">
-            <span className="account-name">Signed out</span>
-            <span className="account-meta">Sign in to sync workspace context.</span>
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <div className="sidebar-brand-mark">JL</div>
+        <div className="column" style={{ gap: 2 }}>
+          <span className="sidebar-brand-name">Jittle Lamp</span>
+          <span className="sidebar-brand-version">v0.1.6 · desktop</span>
+        </div>
+      </div>
+
+      <div className="sidebar-section">
+        <span className="sidebar-section-label">Workspace</span>
+        <NavLink to="/" end className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
+          <span className="sidebar-link-icon" aria-hidden>📚</span>
+          <span>Library</span>
+          <span className="sidebar-link-count">{sessionCount}</span>
+        </NavLink>
+        <NavLink to="/cloud" className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
+          <span className="sidebar-link-icon" aria-hidden>☁️</span>
+          <span>Cloud evidences</span>
+        </NavLink>
+        <NavLink to="/organisations" className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
+          <span className="sidebar-link-icon" aria-hidden>👥</span>
+          <span>Organisations</span>
+        </NavLink>
+      </div>
+
+      <div className="sidebar-footer" ref={menuRef}>
+        {menuOpen ? (
+          <div className="sidebar-account-menu" role="menu">
+            <button
+              className="sidebar-account-menu-item"
+              type="button"
+              role="menuitem"
+              onClick={() => goto("/account")}
+            >
+              <span aria-hidden>👤</span>
+              <span>Account</span>
+            </button>
+            <button
+              className="sidebar-account-menu-item"
+              type="button"
+              role="menuitem"
+              onClick={() => goto("/account/companion")}
+            >
+              <span aria-hidden>⚙</span>
+              <span>Companion settings</span>
+            </button>
+            {auth.state.status === "signed-in" ? (
+              <>
+                <div className="sidebar-account-menu-divider" />
+                <button
+                  className="sidebar-account-menu-item danger"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void auth.signOut();
+                  }}
+                >
+                  <span aria-hidden>↩</span>
+                  <span>Sign out</span>
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="sidebar-account"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen ? "true" : "false"}
+          onClick={() => setMenuOpen((prev) => !prev)}
+        >
+          <div className="sidebar-account-avatar">{getInitials(accountLabel)}</div>
+          <div className="sidebar-account-meta">
+            <span className="sidebar-account-name">{accountLabel}</span>
+            <span className="sidebar-account-org">{activeOrg ? activeOrg.name : "No active workspace"}</span>
+          </div>
+          <span className="sidebar-account-chevron" aria-hidden>▾</span>
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function MainHeader(): React.JSX.Element {
+  const desktop = useDesktop();
+  const status = desktop.state.runtime?.status ?? "starting";
+  return (
+    <div className="main-header">
+      <div className="main-header-title">
+        <h1>Asset manager</h1>
+        <span>{desktop.state.runtime?.outputDir ?? desktop.state.config?.outputDir ?? "—"}</span>
+      </div>
+      <div className="main-header-actions">
+        <span className="status-pill" data-status={status}>{formatRuntimeLabel(status)}</span>
+        <button className="button ghost sm" type="button" onClick={desktop.openLocalSession}>
+          Open local
+        </button>
+        <button className="button ghost sm" type="button" onClick={desktop.importZip}>
+          Import ZIP
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DesktopAppLayout(): React.JSX.Element {
+  const desktop = useDesktopController();
+
+  return (
+    <DesktopControllerContext.Provider value={desktop}>
+      <div className="app-shell">
+        <Sidebar />
+        <div className="main-area">
+          <MainHeader />
+          <div className="main-content">
+            <Outlet />
           </div>
         </div>
       </div>
-    );
-  }
-
-  const displayLabel = profile ? getAccountDisplayLabel(profile, auth.state.label) : auth.state.label;
-  const activeOrg = profile?.organizations.find((organization) => organization.isActive) ?? null;
-
-  return (
-    <div className="drawer-section account-section">
-      <span className="drawer-section-label">Account</span>
-      <div className="account-summary">
-        <div className="account-avatar" aria-hidden="true">
-          {getAccountInitials(profile, auth.state.label)}
-        </div>
-        <div className="account-summary-copy">
-          <span className="account-name">{displayLabel}</span>
-          <span className="account-meta">
-            {profile?.user.email && profile.user.email !== displayLabel
-              ? profile.user.email
-              : auth.state.source === "desktop"
-                ? "Browser session"
-                : "Password session"}
-          </span>
-        </div>
-      </div>
-
-      <div className="org-switcher">
-        <div className="org-switcher-header">
-          <span>Organisation</span>
-          <span>{isLoading ? "Loading" : activeOrg?.name ?? "No active organisation"}</span>
-        </div>
-        <div className="org-list" aria-label="Organisation selection">
-          {profile?.organizations.length ? (
-            profile.organizations.map((organization) => {
-              const isSelecting = selectingOrgId === organization.id;
-              return (
-                <button
-                  className="org-option"
-                  data-active={organization.isActive ? "true" : "false"}
-                  key={organization.id}
-                  type="button"
-                  disabled={Boolean(selectingOrgId) || organization.isActive}
-                  onClick={() => void selectOrganization(organization.id)}
-                >
-                  <span className="org-option-main">
-                    <span className="org-option-name">{organization.name}</span>
-                    <span className="org-option-meta">
-                      {organization.isPersonal ? "Personal" : "Team"} · {organization.role}
-                    </span>
-                  </span>
-                  <span className="org-option-state">
-                    {organization.isActive ? "Active" : isSelecting ? "Switching" : "Switch"}
-                  </span>
-                </button>
-              );
-            })
-          ) : (
-            <div className="org-empty">{isLoading ? "Loading organisations…" : "No selectable organisations found."}</div>
-          )}
-        </div>
-      </div>
-      {error ? <div className="account-inline-error">{error}</div> : null}
-    </div>
+      <DesktopViewerOverlay />
+    </DesktopControllerContext.Provider>
   );
 }
 
-function AccountFooter(): React.JSX.Element {
-  const auth = useDesktopAuth();
-
-  if (auth.state.status !== "signed-in") {
-    return (
-      <div className="drawer-auth-footer" aria-label="Account menu">
-        <span className="account-footer-label">Signed out</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="drawer-auth-footer" aria-label="Account menu">
-      <div className="account-footer-copy">
-        <span className="account-footer-label">
-          {auth.state.profile ? getAccountDisplayLabel(auth.state.profile, auth.state.label) : auth.state.label}
-        </span>
-        <span className="account-footer-source">
-          {auth.state.source === "desktop" ? "Browser session" : "Password session"}
-        </span>
-      </div>
-      <button className="button ghost sm" type="button" onClick={() => void auth.signOut()}>
-        Sign out
-      </button>
-    </div>
-  );
+function LibraryRoute(): React.JSX.Element {
+  return <LibraryPage desktop={useDesktop()} />;
 }
 
-function DetailItem(props: { label: string; value: string }): React.JSX.Element {
+function SettingsRoute(): React.JSX.Element {
+  return <SettingsPage desktop={useDesktop()} />;
+}
+
+function AccountLayout(): React.JSX.Element {
+  const location = useLocation();
+  const isCompanion = location.pathname === "/account/companion";
+
   return (
-    <div className="drawer-detail-item">
-      <span className="drawer-detail-label">{props.label}</span>
-      <span className="drawer-detail-value">{props.value}</span>
+    <div className="page">
+      <div className="account-tabs" aria-label="Account sections">
+        <NavLink to="/account" end className={({ isActive }) => `account-tab ${isActive ? "active" : ""}`}>
+          Account
+        </NavLink>
+        <NavLink
+          to="/account/companion"
+          className={({ isActive }) => `account-tab ${isActive || isCompanion ? "active" : ""}`}
+        >
+          Companion
+        </NavLink>
+      </div>
+      <Outlet />
     </div>
   );
 }
@@ -1285,19 +350,20 @@ function DetailItem(props: { label: string; value: string }): React.JSX.Element 
 function DesktopViewerOverlay(): React.JSX.Element {
   const desktop = useDesktop();
   const payload = desktop.viewerState.payload;
-  const readOnlyNotice = payload ? createDesktopNotesAdapter().getReadOnlyNotice(payload.source) : null;
-  const isReadOnly = payload ? !createDesktopNotesAdapter().canEdit(payload.source) : false;
+  const notesAdapter = createDesktopNotesAdapter();
+  const readOnlyNotice = payload ? notesAdapter.getReadOnlyNotice(payload.source) : null;
+  const isReadOnly = payload ? !notesAdapter.canEdit(payload.source) : false;
   const detailItem =
     desktop.viewerState.networkDetailIndex === null
       ? null
       : desktop.viewerState.timeline[desktop.viewerState.networkDetailIndex] ?? null;
   const sectionItems = payload
     ? deriveSectionTimeline(
-      payload.archive,
-      desktop.viewerState.activeSection,
-      desktop.viewerState.networkSubtypeFilter,
-      desktop.viewerState.networkSearchQuery
-    )
+        payload.archive,
+        desktop.viewerState.activeSection,
+        desktop.viewerState.networkSubtypeFilter,
+        desktop.viewerState.networkSearchQuery
+      )
     : [];
   const activeItem = desktop.viewerState.activeIndex >= 0 ? sectionItems[desktop.viewerState.activeIndex] : null;
   const activeItemId = activeItem
@@ -1322,7 +388,9 @@ function DesktopViewerOverlay(): React.JSX.Element {
         <div className="viewer-header">
           <div className="viewer-header-left">
             <span className="viewer-title">{payload.archive.name}</span>
-            <span className="viewer-source-badge" data-source={payload.source}>{getViewerSourceLabel(payload.source)}</span>
+            <span className="viewer-source-badge" data-source={payload.source}>
+              {getViewerSourceLabel(payload.source)}
+            </span>
           </div>
           <button className="viewer-close" type="button" aria-label="Close viewer" onClick={desktop.closeViewer}>
             ✕
@@ -1343,7 +411,7 @@ function DesktopViewerOverlay(): React.JSX.Element {
               <span className="viewer-notes-label">Session notes</span>
               {readOnlyNotice ? <div className="viewer-zip-notice">{readOnlyNotice}</div> : null}
               <textarea
-                className="viewer-notes-textarea"
+                className="textarea viewer-notes-textarea"
                 placeholder="Add notes…"
                 value={desktop.viewerState.notesValue}
                 readOnly={isReadOnly}
@@ -1352,7 +420,7 @@ function DesktopViewerOverlay(): React.JSX.Element {
               {!isReadOnly ? (
                 <div className="viewer-notes-actions">
                   <button
-                    className="button sm primary"
+                    className="button primary sm"
                     type="button"
                     disabled={!desktop.viewerState.notesDirty || desktop.viewerState.notesSaving}
                     onClick={desktop.saveViewerNotes}
@@ -1363,12 +431,12 @@ function DesktopViewerOverlay(): React.JSX.Element {
               ) : null}
             </div>
           </div>
-          <div ref={desktop.viewerReactRootRef}>
+          <div className="viewer-right" ref={desktop.viewerReactRootRef}>
             <ViewerPane
               activeSection={desktop.viewerState.activeSection}
               networkSearchQuery={desktop.viewerState.networkSearchQuery}
               networkSubtypeFilter={desktop.viewerState.networkSubtypeFilter}
-              timelineRows={buildTimelineRows(desktop.viewerState)}
+              timelineRows={buildTimelineRows(desktop)}
               activeItemId={activeItemId}
               autoFollow={desktop.viewerState.autoFollow}
               focusVisible={!desktop.viewerState.autoFollow}
@@ -1378,14 +446,14 @@ function DesktopViewerOverlay(): React.JSX.Element {
                 value: desktop.viewerState.mergeDialogValue,
                 error: desktop.viewerState.mergeDialogError
               }}
-              onSectionChange={desktop.setViewerSection}
+              onSectionChange={(section: TimelineSection) => desktop.setViewerSection(section)}
               onSubtypeChange={desktop.setViewerSubtype}
               onSearchChange={desktop.setViewerSearch}
               onTimelineClick={desktop.clickTimelineItem}
               onTimelineContext={desktop.openTimelineContext}
               onFocus={desktop.focusViewerTimeline}
               onCloseDetail={desktop.closeNetworkDetail}
-              onCopy={desktop.copyViewerValue}
+              onCopy={(value, label) => void desktop.copyViewerValue(value, label)}
               onMergeValueChange={desktop.setMergeValue}
               onMergeConfirm={desktop.submitMergeDialog}
               onMergeCancel={desktop.closeMergeDialog}
@@ -1397,759 +465,22 @@ function DesktopViewerOverlay(): React.JSX.Element {
   );
 }
 
-function useDesktopController(
-  isSettingsOpen: boolean,
-  setIsSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>
-): DesktopController {
-  const bridge = useMemo(() => createDesktopBridge(), []);
-  const [state, setState] = useState<ViewState>(() => initialViewState());
-  const [viewerState, setViewerState] = useState<ViewerState>(() => createViewerState());
-  const stateRef = useRef(state);
-  const viewerStateRef = useRef(viewerState);
-  const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const viewerVideoRef = useRef<HTMLVideoElement | null>(null);
-  const viewerReactRootRef = useRef<HTMLDivElement | null>(null);
-  const viewerVideoStateRef = useRef<ViewerVideoState>(createViewerVideoState());
-  const contextTargetIdRef = useRef<string | null>(null);
-  const hasReportedViewerBootRef = useRef(false);
-  const isAutoScrollingRef = useRef(false);
-  const storageAdapter = useMemo(() => (bridge ? createDesktopStorageAdapter(bridge) : null), [bridge]);
-  const notesAdapter = useMemo(() => createDesktopNotesAdapter(), []);
-  const shareAdapter = useMemo(() => createDesktopShareAdapter(), []);
-  void shareAdapter;
+type TimelineRow = {
+  id: string;
+  offsetMs: number;
+  section: TimelineSection;
+  label: string;
+  kind: string;
+  selected: boolean;
+  merged: boolean;
+  mergedRange?: string;
+  tags: string[];
+};
 
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
-
-  useEffect(() => {
-    viewerStateRef.current = viewerState;
-  }, [viewerState]);
-
-  const patchState = (update: Partial<ViewState> | ((previous: ViewState) => ViewState)): void => {
-    setState((previous) => (typeof update === "function" ? update(previous) : { ...previous, ...update }));
-  };
-
-  const updateViewer = (mutator: (next: ViewerState) => void): void => {
-    setViewerState((previous) => {
-      const next = cloneViewerState(previous);
-      mutator(next);
-      return next;
-    });
-  };
-
-  const filteredSessions = useMemo(
-    () => filterSessions({ sessions: state.sessions, tagFilter: state.tagFilter, dateFilter: state.dateFilter }),
-    [state.dateFilter, state.sessions, state.tagFilter]
-  );
-
-  const getSelectedActionEntryIds = (): string[] => {
-    const current = viewerStateRef.current;
-    const payload = current.payload;
-    return payload ? getContiguousMergeableSelection(payload.archive, current.mergeGroups, current.selectedActionIds) : [];
-  };
-
-  const renderViewerPane = (): void => {
-    if (!hasReportedViewerBootRef.current) {
-      reportDesktopViewerTelemetry({ implementation: "react", phase: "booted" });
-      hasReportedViewerBootRef.current = true;
-    }
-  };
-
-  const persistViewerReviewState = async (successText?: string): Promise<void> => {
-    const current = viewerStateRef.current;
-    const payload = current.payload;
-    if (!payload) return;
-
-    if (!notesAdapter.canEdit(payload.source) || !storageAdapter) {
-      if (successText) patchState({ feedback: { tone: "neutral", text: successText } });
-      return;
-    }
-
-    const response = await storageAdapter.saveSessionReviewState?.({
-      sessionId: payload.archive.sessionId,
-      notes: current.notesValue,
-      annotations: current.mergeGroups
-    });
-    if (!response) throw new Error("Session review persistence adapter is unavailable.");
-
-    updateViewer((next) => {
-      if (!next.payload || next.payload.archive.sessionId !== payload.archive.sessionId) return;
-      next.notesDirty = false;
-      next.payload = {
-        ...next.payload,
-        archive: response.archive,
-        notes: next.notesValue
-      };
-      next.timeline = deriveTimeline(response.archive);
-      next.mergeGroups = getArchiveMergeGroups(response.archive);
-    });
-
-    if (successText) patchState({ feedback: { tone: "success", text: successText } });
-  };
-
-  const openViewer = (payload: ViewerPayload): void => {
-    const previousPayload = viewerStateRef.current.payload;
-    if (previousPayload && shouldClearViewerTempSession(previousPayload) && bridge) {
-      const previousTempId = previousPayload.tempId;
-      if (previousTempId !== undefined) {
-        void bridge.rpc.request.clearTempSession({ tempId: previousTempId }).catch(() => undefined);
-      }
-    }
-
-    setViewerState(() => {
-      const next = createViewerState();
-      applyViewerPayload(next, payload);
-      return next;
-    });
-    renderViewerPane();
-  };
-
-  const closeViewer = (): void => {
-    const payload = viewerStateRef.current.payload;
-    const video = viewerVideoRef.current;
-
-    setViewerState((previous) => {
-      const next = cloneViewerState(previous);
-      resetViewerState(next);
-      return next;
-    });
-
-    contextTargetIdRef.current = null;
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
-    viewerVideoStateRef.current.loadVersion += 1;
-    resetViewerVideoDiagnostics(viewerVideoStateRef.current);
-
-    if (payload && shouldClearViewerTempSession(payload) && bridge) {
-      const tempId = payload.tempId;
-      if (tempId !== undefined) {
-        void bridge.rpc.request.clearTempSession({ tempId }).catch(() => undefined);
-      }
-    }
-  };
-
-  useEffect(() => {
-    reportDesktopViewerTelemetry({ implementation: "react", phase: "selected" });
-  }, []);
-
-  useEffect(() => {
-    if (!bridge) {
-      patchState({
-        bridgeError: "Electron preload bridge did not initialize in this renderer.",
-        feedback: { tone: "error", text: "Desktop runtime unavailable." },
-        isLoading: false
-      });
-      return;
-    }
-
-    const activeBridge = bridge;
-    let cancelled = false;
-
-    async function loadInitialData(): Promise<void> {
-      try {
-        const [config, runtime, sessions, allTags] = await Promise.all([
-          activeBridge.rpc.request.getCompanionConfig(undefined),
-          activeBridge.rpc.request.getCompanionRuntime(undefined),
-          activeBridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => []),
-          activeBridge.rpc.request.listAllTags(undefined).catch((): string[] => [])
-        ]);
-
-        if (cancelled) return;
-        patchState({
-          config,
-          runtime,
-          sessions,
-          allTags,
-          draftOutputDir: config.outputDir,
-          feedback: {
-            tone: runtime.status === "error" ? "error" : "neutral",
-            text:
-              runtime.status === "error"
-                ? runtime.lastError ?? "The desktop companion failed to start."
-                : config.envOverrideActive
-                  ? "JITTLE_LAMP_OUTPUT_DIR is currently overriding the saved desktop setting."
-                  : "Choose a folder, save it, and keep this app open while recording."
-          },
-          isLoading: false
-        });
-      } catch (error) {
-        if (cancelled) return;
-        patchState({
-          feedback: {
-            tone: "error",
-            text: formatErrorMessage(error, "Unable to load desktop companion state.")
-          },
-          isLoading: false
-        });
-      }
-    }
-
-    void loadInitialData();
-    return () => {
-      cancelled = true;
-    };
-  }, [bridge]);
-
-  useEffect(() => {
-    if (!bridge) return;
-
-    const interval = setInterval(() => {
-      void (async () => {
-        try {
-          const [runtime, sessions, allTags] = await Promise.all([
-            bridge.rpc.request.getCompanionRuntime(undefined),
-            bridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => stateRef.current.sessions),
-            bridge.rpc.request.listAllTags(undefined).catch((): string[] => stateRef.current.allTags)
-          ]);
-
-          patchState((previous) => ({
-            ...previous,
-            runtime,
-            sessions,
-            allTags,
-            feedback:
-              runtime.status === "error"
-                ? {
-                  tone: "error",
-                  text: runtime.lastError ?? "The desktop companion runtime is reporting an error."
-                }
-                : previous.feedback.tone !== "success" && !previous.isSaving && !previous.isChoosingFolder
-                  ? {
-                    tone: "neutral",
-                    text:
-                      runtime.status === "listening"
-                        ? "Desktop companion is listening locally. Extension exports should land here without browser download prompts."
-                        : "Waiting for the desktop companion runtime."
-                  }
-                  : previous.feedback
-          }));
-        } catch (error) {
-          patchState({
-            feedback: {
-              tone: "error",
-              text: formatErrorMessage(error, "Unable to refresh the companion runtime.")
-            }
-          });
-        }
-      })();
-    }, runtimePollIntervalMs);
-
-    return () => clearInterval(interval);
-  }, [bridge]);
-
-  useEffect(() => {
-    if (!bridge) return;
-    bridge.onContextMenuClicked(({ action }) => {
-      if (action === "merge") {
-        const selectedActionIds = getSelectedActionEntryIds();
-        if (selectedActionIds.length < 2) {
-          patchState({ feedback: { tone: "error", text: "Select at least two actions before merging." } });
-          return;
-        }
-        updateViewer((next) => openMergeDialogState(next, selectedActionIds));
-      } else if (action === "unmerge") {
-        const targetId = contextTargetIdRef.current;
-        contextTargetIdRef.current = null;
-        if (!targetId) return;
-        updateViewer((next) => {
-          next.mergeGroups = next.mergeGroups.filter((group) => group.id !== targetId);
-          next.selectedActionIds = new Set();
-        });
-        void persistViewerReviewState("Merge removed.");
-      }
-    });
-  }, [bridge]);
-
-  useEffect(() => {
-    const video = viewerVideoRef.current;
-    if (!video) return;
-
-    const handlers = mediaEventNames.map((eventName) => {
-      const handler = (): void => recordViewerVideoEvent(video, viewerVideoStateRef.current, eventName);
-      video.addEventListener(eventName, handler);
-      return { eventName, handler };
-    });
-
-    return () => {
-      for (const { eventName, handler } of handlers) {
-        video.removeEventListener(eventName, handler);
-      }
-    };
-  }, [viewerState.open]);
-
-  useEffect(() => {
-    const payload = viewerState.payload;
-    const video = viewerVideoRef.current;
-    if (!payload || !viewerState.open || !video) return;
-
-    const recordingArtifact = payload.archive.artifacts.find((artifact) => artifact.kind === "recording.webm");
-    void loadViewerVideoSource({
-      videoPath: payload.videoPath,
-      mimeType: recordingArtifact?.mimeType || "video/webm",
-      viewerVideo: video,
-      viewerVideoState: viewerVideoStateRef.current,
-      desktopBridge: bridge,
-      getViewerSource: () => viewerStateRef.current.payload?.source ?? "unknown",
-      isViewerOpen: () => viewerStateRef.current.open,
-      onBridgeUnavailable: () => {
-        patchState({ feedback: { tone: "error", text: "Desktop bridge unavailable for evidence video loading." } });
-      },
-      onLoadFailure: (error, diagnostics) => {
-        console.warn(formatErrorMessage(error, "Unable to load the evidence video through desktop RPC."), diagnostics);
-      }
-    });
-  }, [bridge, viewerState.open, viewerState.payload?.videoPath]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        if (viewerStateRef.current.mergeDialogOpen) {
-          updateViewer((next) => closeMergeDialogState(next));
-        } else if (viewerStateRef.current.open) {
-          closeViewer();
-        } else if (isSettingsOpen) {
-          setIsSettingsOpen(false);
-        } else if (stateRef.current.editingTagSessionId !== null) {
-          patchState({ editingTagSessionId: null, tagInputValue: "" });
-        }
-        return;
-      }
-
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "q") {
-        event.preventDefault();
-        if (bridge) void bridge.rpc.request.exitApp(undefined);
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [bridge, isSettingsOpen, setIsSettingsOpen]);
-
-  return {
-    bridge,
-    state,
-    viewerState,
-    viewerVideoRef,
-    viewerReactRootRef,
-    filteredSessions,
-    setDateFilter: (preset) => patchState({ dateFilter: preset }),
-    setTagFilter: (tag) => patchState({ tagFilter: tag }),
-    setTagFilterDraft: () => undefined,
-    openSettings: () => setIsSettingsOpen(true),
-    closeSettings: () => setIsSettingsOpen(false),
-    chooseFolder: () => {
-      void (async () => {
-        const current = stateRef.current;
-        if (!bridge || !current.config || current.config.envOverrideActive) return;
-        patchState({
-          isChoosingFolder: true,
-          feedback: { tone: "neutral", text: "Waiting for a local folder selection…" }
-        });
-        try {
-          const { selectedPath } = await bridge.rpc.request.chooseOutputDirectory({
-            startingFolder: current.draftOutputDir || current.config.outputDir
-          });
-          patchState({
-            draftOutputDir: selectedPath ?? stateRef.current.draftOutputDir,
-            feedback: selectedPath
-              ? { tone: "neutral", text: "Folder selected. Save route to switch the running companion." }
-              : { tone: "neutral", text: "Folder selection cancelled." }
-          });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Unable to open the native folder picker.") } });
-        } finally {
-          patchState({ isChoosingFolder: false });
-        }
-      })();
-    },
-    saveFolder: () => {
-      void (async () => {
-        const current = stateRef.current;
-        if (!bridge || !current.config || current.config.envOverrideActive) return;
-        patchState({
-          isSaving: true,
-          feedback: { tone: "neutral", text: "Saving folder route and refreshing the running companion…" }
-        });
-        try {
-          const nextConfig = await bridge.rpc.request.saveOutputDirectory({ outputDir: current.draftOutputDir });
-          const nextRuntime = await bridge.rpc.request.getCompanionRuntime(undefined);
-          patchState({
-            config: nextConfig,
-            runtime: nextRuntime,
-            draftOutputDir: nextConfig.outputDir,
-            feedback: { tone: "success", text: "Saved. New extension exports will use this folder immediately." }
-          });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Unable to save the output folder.") } });
-        } finally {
-          patchState({ isSaving: false });
-        }
-      })();
-    },
-    openCurrentOutputFolder: () => {
-      const current = stateRef.current;
-      if (!bridge || !current.config) return;
-      void bridge.rpc.request.openPath({ path: current.config.outputDir });
-    },
-    openConfigFile: () => {
-      const current = stateRef.current;
-      if (!bridge || !current.config) return;
-      void bridge.rpc.request.openPath({ path: current.config.configFilePath });
-    },
-    openLocalSession: () => {
-      void (async () => {
-        if (!bridge || viewerStateRef.current.isOpening) return;
-        updateViewer((next) => {
-          next.isOpening = true;
-        });
-        patchState({ feedback: { tone: "neutral", text: "Opening local session folder…" } });
-        try {
-          const payload = await storageAdapter?.openLocalSession?.();
-          if (!payload) throw new Error("Local session adapter is unavailable.");
-          openViewer(payload);
-          patchState({ feedback: { tone: "neutral", text: "Local session loaded." } });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to open local session.") } });
-        } finally {
-          updateViewer((next) => {
-            next.isOpening = false;
-          });
-        }
-      })();
-    },
-    importZip: () => {
-      void (async () => {
-        if (!bridge || viewerStateRef.current.isOpening) return;
-        updateViewer((next) => {
-          next.isOpening = true;
-        });
-        patchState({ feedback: { tone: "neutral", text: "Opening ZIP file picker…" } });
-        try {
-          const payload = await storageAdapter?.importZipSession?.();
-          if (!payload) throw new Error("ZIP import adapter is unavailable.");
-          openViewer(payload);
-          patchState({ feedback: { tone: "neutral", text: "ZIP session loaded." } });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to import ZIP session.") } });
-        } finally {
-          updateViewer((next) => {
-            next.isOpening = false;
-          });
-        }
-      })();
-    },
-    viewSession: (sessionId) => {
-      void (async () => {
-        if (!bridge || viewerStateRef.current.isOpening) return;
-        updateViewer((next) => {
-          next.isOpening = true;
-        });
-        patchState({ feedback: { tone: "neutral", text: "Loading session…" } });
-        try {
-          const payload = await storageAdapter?.loadLibrarySession?.(sessionId);
-          if (!payload) throw new Error("Library session adapter is unavailable.");
-          openViewer(payload);
-          patchState({ feedback: { tone: "neutral", text: "Session loaded." } });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to load session.") } });
-        } finally {
-          updateViewer((next) => {
-            next.isOpening = false;
-          });
-        }
-      })();
-    },
-    openSessionFolder: (sessionId) => {
-      if (!bridge) return;
-      const session = stateRef.current.sessions.find((candidate) => candidate.sessionId === sessionId);
-      if (!session) return;
-      void bridge.rpc.request.openPath({ path: session.sessionFolder });
-    },
-    exportSessionZip: (sessionId) => {
-      void (async () => {
-        if (!bridge) return;
-        patchState({ feedback: { tone: "neutral", text: "Exporting session ZIP…" } });
-        try {
-          const exportResult = await storageAdapter?.exportSessionZip?.(sessionId);
-          if (!exportResult) throw new Error("ZIP export adapter is unavailable.");
-          patchState({ feedback: { tone: "success", text: `ZIP exported → ${exportResult.savedPath}` } });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to export session ZIP.") } });
-        }
-      })();
-    },
-    deleteSessionClick: (sessionId) => {
-      if (stateRef.current.pendingDeleteId === sessionId) {
-        if (pendingDeleteTimerRef.current !== null) {
-          clearTimeout(pendingDeleteTimerRef.current);
-          pendingDeleteTimerRef.current = null;
-        }
-        patchState({ pendingDeleteId: null });
-        void (async () => {
-          if (!bridge) return;
-          try {
-            await bridge.rpc.request.deleteSession({ sessionId });
-            patchState((previous) => ({
-              ...previous,
-              sessions: previous.sessions.filter((session) => session.sessionId !== sessionId),
-              feedback: { tone: "success", text: "Session deleted." }
-            }));
-          } catch (error) {
-            patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to delete the session.") } });
-          }
-        })();
-        return;
-      }
-
-      if (pendingDeleteTimerRef.current !== null) clearTimeout(pendingDeleteTimerRef.current);
-      patchState({ pendingDeleteId: sessionId });
-      pendingDeleteTimerRef.current = setTimeout(() => {
-        patchState({ pendingDeleteId: null });
-        pendingDeleteTimerRef.current = null;
-      }, 3_000);
-    },
-    startTagEdit: (sessionId) => patchState({ editingTagSessionId: sessionId, tagInputValue: "" }),
-    cancelTagEdit: () => patchState({ editingTagSessionId: null, tagInputValue: "" }),
-    setInlineTagDraft: (value) => patchState({ tagInputValue: value }),
-    addTagToSession: (sessionId, tag) => {
-      void (async () => {
-        if (!bridge) return;
-        const trimmed = tag.trim();
-        if (!trimmed) return;
-        try {
-          await bridge.rpc.request.addSessionTag({ sessionId, tag: trimmed });
-          const [sessions, allTags] = await Promise.all([
-            bridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => stateRef.current.sessions),
-            bridge.rpc.request.listAllTags(undefined).catch((): string[] => stateRef.current.allTags)
-          ]);
-          patchState({ sessions, allTags });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to add tag.") } });
-        } finally {
-          patchState({ editingTagSessionId: null, tagInputValue: "" });
-        }
-      })();
-    },
-    removeTagFromSession: (sessionId, tag) => {
-      void (async () => {
-        if (!bridge) return;
-        try {
-          await bridge.rpc.request.removeSessionTag({ sessionId, tag });
-          const [sessions, allTags] = await Promise.all([
-            bridge.rpc.request.listSessions(undefined).catch((): SessionRecord[] => stateRef.current.sessions),
-            bridge.rpc.request.listAllTags(undefined).catch((): string[] => stateRef.current.allTags)
-          ]);
-          patchState({ sessions, allTags });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to remove tag.") } });
-        }
-      })();
-    },
-    closeViewer,
-    setViewerNotesValue: (value) => {
-      updateViewer((next) => {
-        next.notesValue = value;
-        next.notesDirty = next.notesValue !== (next.payload?.notes ?? "");
-      });
-    },
-    saveViewerNotes: () => {
-      void (async () => {
-        updateViewer((next) => {
-          next.notesSaving = true;
-        });
-        try {
-          await persistViewerReviewState("Notes saved.");
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Failed to save notes.") } });
-        } finally {
-          updateViewer((next) => {
-            next.notesSaving = false;
-          });
-        }
-      })();
-    },
-    copyViewerValue: (value, label) => {
-      void (async () => {
-        try {
-          if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(value);
-          } else {
-            const textarea = document.createElement("textarea");
-            textarea.value = value;
-            textarea.setAttribute("readonly", "true");
-            textarea.style.position = "absolute";
-            textarea.style.opacity = "0";
-            document.body.append(textarea);
-            textarea.select();
-            document.execCommand("copy");
-            textarea.remove();
-          }
-          patchState({ feedback: { tone: "success", text: `Copied ${label}.` } });
-        } catch (error) {
-          patchState({ feedback: { tone: "error", text: formatErrorMessage(error, `Failed to copy ${label}.`) } });
-        }
-      })();
-    },
-    setViewerSection: (section) => {
-      updateViewer((next) => {
-        next.activeSection = section;
-        next.networkDetailIndex = null;
-      });
-    },
-    setViewerSubtype: (value) => {
-      updateViewer((next) => {
-        next.networkSubtypeFilter = value;
-        next.networkDetailIndex = null;
-      });
-    },
-    setViewerSearch: (value) => {
-      updateViewer((next) => {
-        next.networkSearchQuery = value;
-        next.networkDetailIndex = null;
-      });
-    },
-    clickTimelineItem: (itemId, offsetMs, event) => {
-      const current = viewerStateRef.current;
-      const video = viewerVideoRef.current;
-      if (video) video.currentTime = Math.max(0, offsetMs / 1000);
-      updateViewer((next) => {
-        next.autoFollow = false;
-        if (next.activeSection === "actions" && next.payload) {
-          if (event.metaKey || event.ctrlKey) {
-            const selection = toggleActionSelection(
-              { selectedActionIds: next.selectedActionIds, anchorActionId: next.anchorActionId },
-              itemId
-            );
-            next.selectedActionIds = selection.selectedActionIds;
-            next.anchorActionId = selection.anchorActionId;
-          } else if (event.shiftKey && next.anchorActionId) {
-            const selection = selectActionRange(
-              next.payload.archive,
-              next.mergeGroups,
-              { selectedActionIds: next.selectedActionIds, anchorActionId: next.anchorActionId },
-              itemId
-            );
-            if (selection.selectedActionIds.size > 0) next.selectedActionIds = selection.selectedActionIds;
-          } else {
-            const selection = selectSingleAction(itemId);
-            next.selectedActionIds = selection.selectedActionIds;
-            next.anchorActionId = selection.anchorActionId;
-          }
-        } else {
-          const fullTimelineIndex = current.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
-          if (fullTimelineIndex !== -1) {
-            const timelineItem = current.timeline[fullTimelineIndex];
-            next.networkDetailIndex =
-              timelineItem?.kind === "network" && current.networkDetailIndex !== fullTimelineIndex
-                ? fullTimelineIndex
-                : null;
-          }
-        }
-      });
-    },
-    openTimelineContext: (itemId, event) => {
-      const current = viewerStateRef.current;
-      if (current.activeSection !== "actions" || !current.payload || !bridge) return;
-      event.preventDefault();
-      contextTargetIdRef.current = itemId;
-      updateViewer((next) => {
-        if (!next.selectedActionIds.has(itemId)) {
-          const selection = selectSingleAction(itemId);
-          next.selectedActionIds = selection.selectedActionIds;
-          next.anchorActionId = selection.anchorActionId;
-        }
-      });
-      const isMerged = Boolean(current.mergeGroups.find((group) => group.id === itemId));
-      const selectedActionIds = getSelectedActionEntryIds();
-      const canMerge = !isMerged && selectedActionIds.length >= 2;
-      const canUnmerge = isMerged;
-      if (!canMerge && !canUnmerge) return;
-      const menu: import("../rpc").ContextMenuItem[] = [];
-      if (canMerge) menu.push({ label: "Merge Actions…", action: "merge" });
-      if (canUnmerge) menu.push({ label: "Un-merge", action: "unmerge" });
-      void bridge.rpc.request.showContextMenu({ menu });
-    },
-    focusViewerTimeline: () => {
-      updateViewer((next) => {
-        next.autoFollow = true;
-      });
-    },
-    closeNetworkDetail: () => {
-      updateViewer((next) => {
-        next.networkDetailIndex = null;
-      });
-    },
-    updateTimelineHighlight: () => {
-      const current = viewerStateRef.current;
-      const payload = current.payload;
-      const video = viewerVideoRef.current;
-      if (!payload || !video) return;
-      const items = deriveSectionTimeline(payload.archive, current.activeSection, current.networkSubtypeFilter, current.networkSearchQuery);
-      const activeIndex = findActiveIndex(items, video.currentTime * 1000);
-      updateViewer((next) => {
-        next.activeIndex = activeIndex;
-      });
-      if (!current.autoFollow || isAutoScrollingRef.current) return;
-      isAutoScrollingRef.current = true;
-      requestAnimationFrame(() => {
-        const activeRow = viewerReactRootRef.current?.querySelector<HTMLElement>(".viewer-timeline .timeline-item[data-active='true']");
-        activeRow?.scrollIntoView({ block: "nearest" });
-        isAutoScrollingRef.current = false;
-      });
-    },
-    handleViewerVideoError: () => {
-      const video = viewerVideoRef.current;
-      if (!video) return;
-      const diagnostics = collectViewerVideoDiagnostics(video, viewerVideoStateRef.current, "error-event");
-      console.error("[jittle-lamp][viewer-video] playback failed", diagnostics);
-      patchState({
-        feedback: {
-          tone: "error",
-          text: `Unable to play the evidence video (${diagnostics.error.codeLabel}). Full media diagnostics logged.`
-        }
-      });
-    },
-    setMergeValue: (value) => {
-      updateViewer((next) => {
-        next.mergeDialogValue = value;
-        next.mergeDialogError = null;
-      });
-    },
-    submitMergeDialog: () => {
-      const validation = validateMergeDialog(viewerStateRef.current);
-      if (!validation.ok) {
-        updateViewer((next) => {
-          next.mergeDialogError = validation.error;
-        });
-        return;
-      }
-      const group = createMergeGroup({
-        id: `mg-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        label: validation.label,
-        selectedActionIds: validation.selectedActionIds
-      });
-      updateViewer((next) => {
-        next.mergeGroups = [...next.mergeGroups, group];
-        next.selectedActionIds = new Set();
-        closeMergeDialogState(next);
-      });
-      void persistViewerReviewState("Merged actions.");
-    },
-    closeMergeDialog: () => {
-      updateViewer((next) => closeMergeDialogState(next));
-    }
-  };
-}
-
-function buildTimelineRows(viewerState: ViewerState): TimelineRow[] {
+function buildTimelineRows(desktop: DesktopController): TimelineRow[] {
+  const viewerState = desktop.viewerState;
   const payload = viewerState.payload;
   if (!payload) return [];
-
   const section = viewerState.activeSection;
   const items = deriveSectionTimeline(payload.archive, section, viewerState.networkSubtypeFilter, viewerState.networkSearchQuery);
 
@@ -2220,7 +551,18 @@ const desktopRoutes: JittleRouteObject[] = [
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <LibraryPage /> },
+      { index: true, element: <LibraryRoute /> },
+      { path: "cloud", element: <CloudPage /> },
+      { path: "organisations", element: <OrganisationPage /> },
+      {
+        path: "account",
+        element: <AccountLayout />,
+        children: [
+          { index: true, element: <AccountPage /> },
+          { path: "companion", element: <SettingsRoute /> }
+        ]
+      },
+      { path: "settings", element: <Navigate to="/account/companion" replace /> },
       { path: "*", element: <Navigate to={homePath} replace /> }
     ]
   }
@@ -2236,15 +578,17 @@ if (!root) throw new Error("Desktop main view root element was not found.");
 
 createRoot(root).render(
   <MemoryRouter>
-    {clerkPublishableKey ? (
-      <DesktopClerkProvider>
-        <DesktopAuthProvider>
-          <DesktopRoutes />
-        </DesktopAuthProvider>
-      </DesktopClerkProvider>
-    ) : (
-      <MissingClerkConfigPage />
-    )}
-    <Analytics />
+    <ToastProvider>
+      {clerkPublishableKey ? (
+        <DesktopClerkProvider>
+          <DesktopAuthProvider>
+            <DesktopRoutes />
+          </DesktopAuthProvider>
+        </DesktopClerkProvider>
+      ) : (
+        <MissingClerkConfigPage />
+      )}
+      <Analytics />
+    </ToastProvider>
   </MemoryRouter>
 );

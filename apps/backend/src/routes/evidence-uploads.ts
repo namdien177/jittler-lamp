@@ -1,7 +1,9 @@
+import { Buffer } from "node:buffer";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import {
+	desktopRecordingSessions,
 	evidenceArtifactKindSchema,
 	evidenceArtifacts,
 	evidences,
@@ -34,6 +36,24 @@ const startUploadBodySchema = t.Object({
 	orgId: t.Optional(t.String()),
 });
 
+const startDesktopSessionSyncBodySchema = t.Object({
+	sessionId: t.String({ minLength: 1 }),
+	title: t.String({ minLength: 1 }),
+	sourceMetadata: t.Optional(t.String()),
+	artifacts: t.Array(
+		t.Object({
+			key: t.Union([t.Literal("recording"), t.Literal("archive")]),
+			kind: t.Union(
+				evidenceArtifactKindSchema.options.map((value) => t.Literal(value)),
+			),
+			mimeType: t.String({ minLength: 1 }),
+			bytes: t.Number({ minimum: 0 }),
+			checksum: t.String({ minLength: 1 }),
+		}),
+		{ minItems: 2, maxItems: 2 },
+	),
+});
+
 const completeUploadBodySchema = t.Object({
 	bytes: t.Number({ minimum: 0 }),
 	checksum: t.String({ minLength: 1 }),
@@ -42,6 +62,11 @@ const completeUploadBodySchema = t.Object({
 
 const uploadParamsSchema = t.Object({
 	uploadId: t.String({ minLength: 1 }),
+});
+
+const artifactReadUrlParamsSchema = t.Object({
+	id: t.String({ minLength: 1 }),
+	artifactId: t.String({ minLength: 1 }),
 });
 
 const startUploadResponseSchema = t.Object({
@@ -59,6 +84,24 @@ const startUploadResponseSchema = t.Object({
 	}),
 });
 
+const uploadSessionSchema = t.Object({
+	key: t.String({ minLength: 1 }),
+	uploadId: t.String({ minLength: 1 }),
+	expiresAt: t.Number(),
+	uploadUrl: t.String({ format: "uri" }),
+	method: t.Literal("PUT"),
+	headers: t.Object({
+		"content-type": t.String({ minLength: 1 }),
+	}),
+	storageKey: t.String({ minLength: 1 }),
+});
+
+const startDesktopSessionSyncResponseSchema = t.Object({
+	evidenceId: t.String({ minLength: 1 }),
+	organizationId: t.String({ minLength: 1 }),
+	uploadSessions: t.Array(uploadSessionSchema),
+});
+
 const completeUploadResponseSchema = t.Object({
 	uploadId: t.String({ minLength: 1 }),
 	evidenceId: t.String({ minLength: 1 }),
@@ -74,7 +117,21 @@ const evidenceSummarySchema = t.Object({
 	orgId: t.String({ minLength: 1 }),
 	title: t.String({ minLength: 1 }),
 	sourceType: t.String({ minLength: 1 }),
+	sourceExternalId: t.Nullable(t.String()),
+	sourceMetadata: t.Nullable(t.String()),
 	createdBy: t.String({ minLength: 1 }),
+	createdAt: t.Number(),
+	updatedAt: t.Number(),
+});
+
+const evidenceArtifactSummarySchema = t.Object({
+	id: t.String({ minLength: 1 }),
+	evidenceId: t.String({ minLength: 1 }),
+	kind: t.String({ minLength: 1 }),
+	mimeType: t.String({ minLength: 1 }),
+	bytes: t.Number(),
+	checksum: t.String({ minLength: 1 }),
+	uploadStatus: t.String({ minLength: 1 }),
 	createdAt: t.Number(),
 	updatedAt: t.Number(),
 });
@@ -86,6 +143,16 @@ const listEvidencesResponseSchema = t.Object({
 
 const loadEvidenceResponseSchema = t.Object({
 	evidence: evidenceSummarySchema,
+});
+
+const listEvidenceArtifactsResponseSchema = t.Object({
+	artifacts: t.Array(evidenceArtifactSummarySchema),
+});
+
+const artifactReadUrlResponseSchema = t.Object({
+	url: t.String({ minLength: 1 }),
+	expiresAt: t.Number(),
+	renewAfterMs: t.Number(),
 });
 
 type UploadedBlobMetadata = {
@@ -102,6 +169,13 @@ const encodeSha256 = async (payload: ArrayBuffer): Promise<string> => {
 	return Array.from(new Uint8Array(digest))
 		.map((value) => value.toString(16).padStart(2, "0"))
 		.join("");
+};
+
+const sha256HexToBase64 = (hex: string): string => {
+	const bytes = new Uint8Array(
+		hex.match(/.{1,2}/g)?.map((part) => Number.parseInt(part, 16)) ?? [],
+	);
+	return Buffer.from(bytes).toString("base64");
 };
 
 const checksumMatches = (
@@ -201,6 +275,149 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 		.guard({ auth: true }, (app) =>
 			app
 				.post(
+					"/evidences/desktop-sessions/sync/start",
+					async ({ authContext, body, db, request, requestId, set }) => {
+						if (!db) {
+							set.status = 503;
+							return createDbUnavailableError(requestId);
+						}
+
+						const workspace = resolveActiveWorkspace(
+							authContext.activeOrgId,
+							authContext.localUserId,
+						);
+						if (!workspace) {
+							set.status = 403;
+							return createApiError(
+								requestId,
+								"ORG_CONTEXT_UNRESOLVED",
+								"No active organization found for current user",
+								403,
+							);
+						}
+
+						const artifactKeys = new Set(
+							body.artifacts.map((artifact) => artifact.key),
+						);
+						if (
+							!artifactKeys.has("recording") ||
+							!artifactKeys.has("archive")
+						) {
+							set.status = 400;
+							return createApiError(
+								requestId,
+								"DESKTOP_SESSION_ARTIFACTS_REQUIRED",
+								"Desktop session sync requires recording and archive artifacts",
+								400,
+							);
+						}
+
+						const now = Date.now();
+						const created = await db.transaction(async (tx) => {
+							const [evidence] = await tx
+								.insert(evidences)
+								.values({
+									orgId: workspace.activeOrgId,
+									createdBy: workspace.localUserId,
+									title: body.title,
+									sourceType: "desktop-session",
+									sourceExternalId: body.sessionId,
+									sourceMetadata: body.sourceMetadata,
+									scopeType: "organization",
+									scopeId: workspace.activeOrgId,
+									updatedAt: now,
+								})
+								.returning({ id: evidences.id, orgId: evidences.orgId });
+
+							if (!evidence) {
+								throw new Error("Failed to create desktop session evidence");
+							}
+
+							await tx
+								.insert(desktopRecordingSessions)
+								.values({
+									sessionId: body.sessionId,
+									evidenceId: evidence.id,
+									orgId: evidence.orgId,
+									createdBy: workspace.localUserId,
+									sourceMetadata: body.sourceMetadata,
+									updatedAt: now,
+								})
+								.onConflictDoUpdate({
+									target: [
+										desktopRecordingSessions.orgId,
+										desktopRecordingSessions.sessionId,
+									],
+									set: {
+										evidenceId: evidence.id,
+										sourceMetadata: body.sourceMetadata,
+										updatedAt: now,
+									},
+								});
+
+							const uploadSessions = [];
+							for (const artifactInput of body.artifacts) {
+								const [artifact] = await tx
+									.insert(evidenceArtifacts)
+									.values({
+										evidenceId: evidence.id,
+										kind: artifactInput.kind,
+										s3Key: `uploads/${workspace.activeOrgId}/${evidence.id}/${artifactInput.key}-${crypto.randomUUID()}`,
+										mimeType: artifactInput.mimeType,
+										bytes: Math.trunc(artifactInput.bytes),
+										checksum: artifactInput.checksum,
+										uploadStatus: "uploading",
+										updatedAt: now,
+									})
+									.returning({
+										id: evidenceArtifacts.id,
+										s3Key: evidenceArtifacts.s3Key,
+									});
+
+								if (!artifact) {
+									throw new Error("Failed to create desktop session artifact");
+								}
+
+								uploadSessions.push({
+									key: artifactInput.key,
+									uploadId: artifact.id,
+									expiresAt: now + UPLOAD_SESSION_TTL_MS,
+									uploadUrl: `${new URL(request.url).origin}/evidences/uploads/${artifact.id}/blob`,
+									method: "PUT" as const,
+									headers: {
+										"content-type": artifactInput.mimeType,
+									},
+									storageKey: artifact.s3Key,
+								});
+							}
+
+							return {
+								evidenceId: evidence.id,
+								organizationId: evidence.orgId,
+								uploadSessions,
+							};
+						});
+
+						return created;
+					},
+					{
+						body: startDesktopSessionSyncBodySchema,
+						detail: {
+							tags: ["evidences"],
+							summary:
+								"Starts a desktop recording session sync with separate recording and archive artifacts",
+						},
+						response: {
+							200: startDesktopSessionSyncResponseSchema,
+							400: apiErrorSchema,
+							401: apiErrorSchema,
+							403: apiErrorSchema,
+							500: apiErrorSchema,
+							503: apiErrorSchema,
+						},
+					},
+				)
+				.post(
 					"/evidences/uploads/start",
 					async ({ authContext, body, db, request, requestId, set }) => {
 						if (body.orgId) {
@@ -277,6 +494,33 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 								throw new Error("Failed to create upload artifact");
 							}
 
+							if (
+								body.sourceType === "desktop-session" &&
+								body.sourceExternalId
+							) {
+								await tx
+									.insert(desktopRecordingSessions)
+									.values({
+										sessionId: body.sourceExternalId,
+										evidenceId: evidence.id,
+										orgId: evidence.orgId,
+										createdBy: workspace.localUserId,
+										sourceMetadata: body.sourceMetadata,
+										updatedAt: now,
+									})
+									.onConflictDoUpdate({
+										target: [
+											desktopRecordingSessions.orgId,
+											desktopRecordingSessions.sessionId,
+										],
+										set: {
+											evidenceId: evidence.id,
+											sourceMetadata: body.sourceMetadata,
+											updatedAt: now,
+										},
+									});
+							}
+
 							return {
 								evidenceId: evidence.id,
 								uploadId: artifact.id,
@@ -342,6 +586,8 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 								orgId: true,
 								title: true,
 								sourceType: true,
+								sourceExternalId: true,
+								sourceMetadata: true,
 								createdBy: true,
 								createdAt: true,
 								updatedAt: true,
@@ -399,6 +645,8 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 								orgId: true,
 								title: true,
 								sourceType: true,
+								sourceExternalId: true,
+								sourceMetadata: true,
 								createdBy: true,
 								createdAt: true,
 								updatedAt: true,
@@ -436,9 +684,193 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 						},
 					},
 				)
+				.get(
+					"/evidences/:id/artifacts",
+					async ({ authContext, db, params, query, requestId, set }) => {
+						if (!db) {
+							set.status = 503;
+							return createDbUnavailableError(requestId);
+						}
+
+						const resolvedOrg = await resolveRequestedOrgId({
+							authContext,
+							db,
+							requestedOrgId: query.orgId,
+							requestId,
+							set,
+						});
+						if (!resolvedOrg.ok) {
+							return resolvedOrg.error;
+						}
+
+						const evidence = await db.query.evidences.findFirst({
+							where: and(
+								eq(evidences.id, params.id),
+								eq(evidences.orgId, resolvedOrg.orgId),
+							),
+							columns: { id: true },
+						});
+						if (!evidence) {
+							set.status = 404;
+							return createApiError(
+								requestId,
+								"EVIDENCE_NOT_FOUND",
+								"Evidence not found",
+								404,
+							);
+						}
+
+						const artifacts = await db.query.evidenceArtifacts.findMany({
+							where: eq(evidenceArtifacts.evidenceId, evidence.id),
+							columns: {
+								id: true,
+								evidenceId: true,
+								kind: true,
+								mimeType: true,
+								bytes: true,
+								checksum: true,
+								uploadStatus: true,
+								createdAt: true,
+								updatedAt: true,
+							},
+							orderBy: desc(evidenceArtifacts.createdAt),
+						});
+
+						return { artifacts };
+					},
+					{
+						params: t.Object({
+							id: t.String({ minLength: 1 }),
+						}),
+						query: evidenceQuerySchema,
+						detail: {
+							tags: ["evidences"],
+							summary: "Lists artifacts for an evidence",
+						},
+						response: {
+							200: listEvidenceArtifactsResponseSchema,
+							401: apiErrorSchema,
+							403: apiErrorSchema,
+							404: apiErrorSchema,
+							500: apiErrorSchema,
+							503: apiErrorSchema,
+						},
+					},
+				)
+				.get(
+					"/evidences/:id/artifacts/:artifactId/read-url",
+					async ({
+						artifactStorage,
+						authContext,
+						db,
+						params,
+						query,
+						requestId,
+						set,
+					}) => {
+						if (!db) {
+							set.status = 503;
+							return createDbUnavailableError(requestId);
+						}
+
+						if (artifactStorage.mode !== "s3") {
+							set.status = 503;
+							return createApiError(
+								requestId,
+								"ARTIFACT_STORAGE_NOT_CONFIGURED",
+								"S3 artifact storage is not configured",
+								503,
+							);
+						}
+
+						const resolvedOrg = await resolveRequestedOrgId({
+							authContext,
+							db,
+							requestedOrgId: query.orgId,
+							requestId,
+							set,
+						});
+						if (!resolvedOrg.ok) {
+							return resolvedOrg.error;
+						}
+
+						const artifact = await db.query.evidenceArtifacts.findFirst({
+							where: and(
+								eq(evidenceArtifacts.id, params.artifactId),
+								eq(evidenceArtifacts.evidenceId, params.id),
+							),
+							columns: {
+								id: true,
+								s3Key: true,
+								mimeType: true,
+								uploadStatus: true,
+							},
+							with: {
+								evidence: {
+									columns: { id: true, orgId: true },
+								},
+							},
+						});
+						if (!artifact || artifact.evidence.orgId !== resolvedOrg.orgId) {
+							set.status = 404;
+							return createApiError(
+								requestId,
+								"ARTIFACT_NOT_FOUND",
+								"Artifact not found",
+								404,
+							);
+						}
+
+						if (artifact.uploadStatus !== "uploaded") {
+							set.status = 409;
+							return createApiError(
+								requestId,
+								"ARTIFACT_NOT_READY",
+								"Artifact is not uploaded yet",
+								409,
+							);
+						}
+
+						const signed = await artifactStorage.createReadUrl({
+							key: artifact.s3Key,
+							responseContentType: artifact.mimeType,
+						});
+
+						return {
+							url: signed.url,
+							expiresAt: signed.expiresAt,
+							renewAfterMs: Math.max(30_000, signed.ttlSeconds * 1000 * 0.7),
+						};
+					},
+					{
+						params: artifactReadUrlParamsSchema,
+						query: evidenceQuerySchema,
+						detail: {
+							tags: ["evidences"],
+							summary: "Creates a short-lived signed read URL for an artifact",
+						},
+						response: {
+							200: artifactReadUrlResponseSchema,
+							401: apiErrorSchema,
+							403: apiErrorSchema,
+							404: apiErrorSchema,
+							409: apiErrorSchema,
+							500: apiErrorSchema,
+							503: apiErrorSchema,
+						},
+					},
+				)
 				.put(
 					"/evidences/uploads/:uploadId/blob",
-					async ({ authContext, db, params, request, requestId, set }) => {
+					async ({
+						artifactStorage,
+						authContext,
+						db,
+						params,
+						request,
+						requestId,
+						set,
+					}) => {
 						if (!db) {
 							set.status = 503;
 							return createDbUnavailableError(requestId);
@@ -462,6 +894,7 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 							where: eq(evidenceArtifacts.id, params.uploadId),
 							columns: {
 								id: true,
+								s3Key: true,
 								mimeType: true,
 								uploadStatus: true,
 								createdAt: true,
@@ -544,6 +977,13 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 							checksum: await encodeSha256(payload),
 							mimeType: artifact.mimeType,
 						};
+
+						await artifactStorage.putObject({
+							key: artifact.s3Key,
+							body: new Uint8Array(payload),
+							contentType: artifact.mimeType,
+							checksumSha256: sha256HexToBase64(uploadedBlob.checksum),
+						});
 
 						const updated = await db
 							.update(evidenceArtifacts)

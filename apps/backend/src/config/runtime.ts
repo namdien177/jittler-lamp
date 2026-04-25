@@ -19,6 +19,17 @@ export type RuntimeConfig = {
 	databaseUrl: string | undefined;
 	runDbMigrations: boolean;
 	tursoAuthToken: string | undefined;
+	s3:
+		| {
+				bucket: string;
+				region: string;
+				endpoint: string | undefined;
+				accessKeyId: string;
+				secretAccessKey: string;
+				forcePathStyle: boolean;
+				signedUrlTtlSeconds: number;
+		  }
+		| undefined;
 	logLevel: Exclude<NonNullable<AppEnv["LOG_LEVEL"]>, "silent">;
 	enableOpenApi: boolean;
 	clerkPublishableKey: string | undefined;
@@ -82,6 +93,21 @@ export const buildRuntimeConfig = (env: AppEnv): RuntimeConfig => {
 		databaseUrl: env.DATABASE_URL,
 		runDbMigrations: parseBooleanFlag(env.RUN_DB_MIGRATIONS, false),
 		tursoAuthToken: env.TURSO_AUTH_TOKEN,
+		s3:
+			env.S3_BUCKET &&
+			env.S3_REGION &&
+			env.S3_ACCESS_KEY_ID &&
+			env.S3_SECRET_ACCESS_KEY
+				? {
+						bucket: env.S3_BUCKET,
+						region: env.S3_REGION,
+						endpoint: env.S3_ENDPOINT,
+						accessKeyId: env.S3_ACCESS_KEY_ID,
+						secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+						forcePathStyle: parseBooleanFlag(env.S3_FORCE_PATH_STYLE, false),
+						signedUrlTtlSeconds: env.S3_SIGNED_URL_TTL_SECONDS ?? 900,
+					}
+				: undefined,
 		logLevel: resolvedLogLevel === "silent" ? "info" : resolvedLogLevel,
 		enableOpenApi: defaults.enableOpenApi,
 		clerkPublishableKey: env.CLERK_PUBLISHABLE_KEY,

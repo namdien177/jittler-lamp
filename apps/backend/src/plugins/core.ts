@@ -3,12 +3,14 @@ import type { Logger } from "pino";
 
 import type { RuntimeConfig } from "../config/runtime";
 import { createApiError } from "../http/api-error";
+import type { ArtifactStorage } from "../services/artifact-storage";
 import type { BackendDb } from "../services/user-provisioning";
 
 type CorePluginParams = {
 	runtime: RuntimeConfig;
 	db: BackendDb | null;
 	logger: Logger;
+	artifactStorage: ArtifactStorage;
 };
 
 const getRequestId = (
@@ -70,9 +72,14 @@ const applyCorsHeaders = (
 	set.headers.vary = "Origin";
 };
 
-export const createCorePlugin = ({ runtime, db, logger }: CorePluginParams) =>
+export const createCorePlugin = ({
+	runtime,
+	db,
+	logger,
+	artifactStorage,
+}: CorePluginParams) =>
 	new Elysia({ name: "backend-core" })
-		.decorate({ runtime, db, logger })
+		.decorate({ runtime, db, logger, artifactStorage })
 		.onRequest(({ request, set, logger, runtime }) => {
 			const requestId = getRequestId(request, set.headers["x-request-id"]);
 			set.headers["x-request-id"] = requestId;

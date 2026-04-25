@@ -4,6 +4,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  recordingFileName,
+  sessionArchiveFileName
+} from "@jittle-lamp/shared";
+
+import {
   app,
   BrowserWindow,
   dialog,
@@ -28,6 +33,7 @@ import {
   getSessionNotes,
   listAllTags,
   loadLibrarySession,
+  markSessionRemoteSynced,
   removeSessionTag,
   saveLibrarySessionReviewState,
   scanLibrarySessions,
@@ -121,6 +127,48 @@ const handlers: DesktopHandlerMap = {
     await writeFile(savedPath, zipBytes);
 
     return { savedPath };
+  },
+  prepareSessionUpload: async ({ sessionId }) => {
+    const config = await getCompanionConfigState();
+    const safeOutputDir = resolve(config.outputDir);
+    const sessionFolder = resolve(join(safeOutputDir, sessionId));
+
+    if (!sessionFolder.startsWith(`${safeOutputDir}/`) && sessionFolder !== safeOutputDir) {
+      throw new Error("Invalid sessionId: path traversal detected.");
+    }
+
+    const [recordingPayload, archivePayload] = await Promise.all([
+      readFile(join(sessionFolder, recordingFileName)),
+      readFile(join(sessionFolder, sessionArchiveFileName))
+    ]);
+    const recordingBytes = new Uint8Array(recordingPayload);
+    const archiveBytes = new Uint8Array(archivePayload);
+    return {
+      sessionId,
+      title: sessionId,
+      artifacts: [
+        {
+          key: "recording" as const,
+          kind: "recording" as const,
+          mimeType: "video/webm",
+          bytes: recordingBytes.byteLength,
+          checksum: `sha256:${await sha256Hex(recordingBytes)}`,
+          payload: recordingBytes
+        },
+        {
+          key: "archive" as const,
+          kind: "network-log" as const,
+          mimeType: "application/json",
+          bytes: archiveBytes.byteLength,
+          checksum: `sha256:${await sha256Hex(archiveBytes)}`,
+          payload: archiveBytes
+        }
+      ]
+    };
+  },
+  markSessionRemoteSynced: async ({ sessionId, evidenceId, orgId }) => {
+    markSessionRemoteSynced({ sessionId, evidenceId, orgId });
+    return { ok: true as const };
   },
   getCompanionConfig: async () => toDesktopCompanionConfigSnapshot(await refreshCompanionConfig()),
   getCompanionRuntime: async () => toDesktopCompanionRuntimeSnapshot(await getCompanionRuntimeState()),
@@ -283,6 +331,13 @@ function showOpenDialog(options: OpenDialogOptions): Promise<Electron.OpenDialog
   }
 
   return dialog.showOpenDialog(options);
+}
+
+async function sha256Hex(payload: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", payload.slice().buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((part) => part.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function showContextMenu(menu: ContextMenuItem[]): void {

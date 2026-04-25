@@ -43,3 +43,23 @@ export class WebSessionZipLoader implements SessionLoader<File, LoadedSession> {
 export async function loadSessionZip(file: File): Promise<LoadedSession> {
   return new WebSessionZipLoader().load(file);
 }
+
+export async function loadRemoteSessionArtifacts(input: {
+  archiveUrl: string;
+  videoUrl: string;
+}): Promise<LoadedSession> {
+  const response = await fetch(input.archiveUrl);
+  if (!response.ok) {
+    throw new Error(`Unable to load session archive (${response.status}).`);
+  }
+
+  const archive = parseSessionArchiveJson(await response.text());
+
+  return {
+    archive,
+    videoUrl: input.videoUrl,
+    recordingBytes: new Uint8Array(),
+    timeline: deriveTimeline(archive),
+    mergeGroups: getArchiveMergeGroups(archive)
+  };
+}

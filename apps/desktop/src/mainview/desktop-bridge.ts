@@ -43,6 +43,8 @@ const requestNames = [
   "openLocalSession",
   "openPath",
   "openExternalUrl",
+  "markSessionRemoteSynced",
+  "prepareSessionUpload",
   "removeSessionTag",
   "saveOutputDirectory",
   "saveSessionReviewState",
@@ -62,7 +64,7 @@ export function createDesktopBridge(): DesktopBridge | null {
       name,
       (params: DesktopRequestMap[typeof name]["params"]) => desktopApi.request(name, params)
     ])
-  ) as DesktopBridgeRequestApi;
+  ) as unknown as DesktopBridgeRequestApi;
 
   return {
     rpc: {

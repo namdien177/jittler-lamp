@@ -19,6 +19,8 @@
     "db:migrate": "bun x drizzle-kit migrate --config drizzle.config.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1037.0",
+    "@aws-sdk/s3-request-presigner": "^3.1037.0",
     "@clerk/backend": "3.2.13",
     "@elysiajs/openapi": "latest",
     "@libsql/client": "0.17.2",

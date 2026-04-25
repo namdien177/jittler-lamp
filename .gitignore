@@ -10,6 +10,7 @@ release-artifacts/
 .idea
 **/.env
 **/.env.*
+!**.env.sample
 *.pem
 *.key
 *.crt

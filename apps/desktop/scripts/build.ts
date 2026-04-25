@@ -32,6 +32,7 @@ function getFirstWorkspaceEnvValue(names: string[]): string {
 const browserDefines = {
   "process.env.CLERK_PUBLISHABLE_KEY": JSON.stringify(getWorkspaceEnvValue("CLERK_PUBLISHABLE_KEY")),
   "process.env.JITTLE_LAMP_API_ORIGIN": JSON.stringify(getWorkspaceEnvValue("JITTLE_LAMP_API_ORIGIN")),
+  "process.env.JITTLE_LAMP_WEB_ORIGIN": JSON.stringify(getWorkspaceEnvValue("JITTLE_LAMP_WEB_ORIGIN")),
   "process.env.REACT_APP_VERCEL_OBSERVABILITY_BASEPATH": JSON.stringify(getFirstWorkspaceEnvValue([
     "REACT_APP_VERCEL_OBSERVABILITY_BASEPATH",
     "VERCEL_OBSERVABILITY_BASEPATH"
