@@ -770,8 +770,9 @@ export function useDesktopController(): DesktopController {
           const fullTimelineIndex = current.timeline.findIndex((timelineItem) => timelineItem.id === itemId);
           if (fullTimelineIndex !== -1) {
             const timelineItem = current.timeline[fullTimelineIndex];
+            const drawerable = timelineItem?.kind === "network" || timelineItem?.kind === "console";
             next.networkDetailIndex =
-              timelineItem?.kind === "network" && current.networkDetailIndex !== fullTimelineIndex
+              drawerable && current.networkDetailIndex !== fullTimelineIndex
                 ? fullTimelineIndex
                 : null;
           }

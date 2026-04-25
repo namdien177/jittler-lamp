@@ -705,6 +705,115 @@ describe("routes", () => {
 		expect(storedArtifact?.uploadStatus).toBe("uploaded");
 	});
 
+	it("uses forwarded proxy origin when returning blob upload URLs", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_uploads_forwarded_origin",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_uploads_forwarded_origin" },
+		});
+
+		const { privateKey, jwtKey } = await getAuthFixture();
+		const token = await new SignJWT({ scope: "read write" })
+			.setProtectedHeader({ alg: "RS256" })
+			.setSubject("user_clerk_uploads_forwarded_origin")
+			.setAudience("test-audience")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(privateKey);
+
+		const { app } = createApp({
+			NODE_ENV: "development",
+			DATABASE_URL: databaseUrl,
+			APP_VERSION: "9.9.9",
+			APP_SECRET: TEST_APP_SECRET,
+			CLERK_JWT_KEY: jwtKey,
+			CLERK_AUDIENCE: "test-audience",
+		});
+
+		const startResponse = await app.handle(
+			new Request("http://internal-service/evidences/uploads/start", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`,
+					"x-forwarded-proto": "https",
+					"x-forwarded-host": "jl-api.monthlyparty.com",
+				},
+				body: JSON.stringify({
+					title: "Forwarded upload draft",
+					sourceType: "browser",
+					artifact: {
+						kind: "recording",
+						mimeType: "video/webm",
+						bytes: 11,
+						checksum: `sha256:${await sha256Hex("hello world")}`,
+					},
+				}),
+			}),
+		);
+		expect(startResponse.status).toBe(200);
+		const startPayload = (await startResponse.json()) as {
+			uploadSession: { uploadUrl: string };
+		};
+		expect(startPayload.uploadSession.uploadUrl).toStartWith(
+			"https://jl-api.monthlyparty.com/evidences/uploads/",
+		);
+
+		const syncResponse = await app.handle(
+			new Request(
+				"http://internal-service/evidences/desktop-sessions/sync/start",
+				{
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${token}`,
+						"x-forwarded-proto": "https",
+						"x-forwarded-host": "jl-api.monthlyparty.com",
+					},
+					body: JSON.stringify({
+						sessionId: "local-session-forwarded-origin",
+						title: "Forwarded desktop session",
+						artifacts: [
+							{
+								key: "recording",
+								kind: "recording",
+								mimeType: "video/webm",
+								bytes: 11,
+								checksum: `sha256:${await sha256Hex("hello world")}`,
+							},
+							{
+								key: "archive",
+								kind: "network-log",
+								mimeType: "application/json",
+								bytes: 2,
+								checksum: `sha256:${await sha256Hex("{}")}`,
+							},
+						],
+					}),
+				},
+			),
+		);
+		expect(syncResponse.status).toBe(200);
+		const syncPayload = (await syncResponse.json()) as {
+			uploadSessions: Array<{ uploadUrl: string }>;
+		};
+		expect(syncPayload.uploadSessions).toHaveLength(2);
+		for (const uploadSession of syncPayload.uploadSessions) {
+			expect(uploadSession.uploadUrl).toStartWith(
+				"https://jl-api.monthlyparty.com/evidences/uploads/",
+			);
+		}
+	});
+
 	it("does not allow completion before blob upload exists", async () => {
 		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
 		await applyMigrations(databaseUrl);

@@ -32,6 +32,9 @@
       "path": "../packages/viewer-core"
     },
     {
+      "path": "../packages/viewer-react"
+    },
+    {
       "path": "../apps/desktop"
     }
   ]

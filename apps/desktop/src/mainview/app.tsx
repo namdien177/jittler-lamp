@@ -1,10 +1,19 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
-import { formatOffset, type TimelineSection } from "@jittle-lamp/shared";
+import { formatOffset, type TimelineItem, type TimelineSection } from "@jittle-lamp/shared";
 import { deriveSectionTimeline } from "@jittle-lamp/viewer-core";
 import { MemoryRouter, Navigate, NavLink, Outlet, useLocation, useNavigate, useRoutes } from "react-router";
-import type { JittleRouteObject } from "@jittle-lamp/viewer-react";
+import {
+  ViewerModal,
+  buildCurl,
+  getResponseBodyString,
+  type JittleRouteObject,
+  type ViewerContextMenuState,
+  type ViewerModalFeedback,
+  type ViewerModalRow,
+  type ViewerSource as SharedViewerSource
+} from "@jittle-lamp/viewer-react";
 
 import {
   DesktopAuthProvider,
@@ -18,10 +27,8 @@ import { CloudPage } from "./pages/cloud-page";
 import { OrganisationPage } from "./pages/organisation-page";
 import { AccountPage } from "./pages/account-page";
 import { SettingsPage } from "./pages/settings-page";
-import { ToastProvider } from "./ui/toast";
-import { ViewerPane } from "./viewer-pane";
+import { ToastProvider, useToast } from "./ui/toast";
 import { createDesktopNotesAdapter } from "./adapters";
-import { getViewerSourceLabel } from "./viewer-source";
 import { formatRuntimeLabel } from "./catalog-view";
 import { getInitials } from "./utils";
 
@@ -347,24 +354,39 @@ function AccountLayout(): React.JSX.Element {
   );
 }
 
-function DesktopViewerOverlay(): React.JSX.Element {
+function DesktopViewerOverlay(): React.JSX.Element | null {
   const desktop = useDesktop();
+  const toast = useToast();
   const payload = desktop.viewerState.payload;
-  const notesAdapter = createDesktopNotesAdapter();
-  const readOnlyNotice = payload ? notesAdapter.getReadOnlyNotice(payload.source) : null;
-  const isReadOnly = payload ? !notesAdapter.canEdit(payload.source) : false;
-  const detailItem =
+  const notesAdapter = useMemo(() => createDesktopNotesAdapter(), []);
+  const [contextMenu, setContextMenu] = useState<ViewerContextMenuState>({
+    open: false,
+    x: 0,
+    y: 0,
+    rowId: null,
+    kind: "network",
+    canMerge: false,
+    canUnmerge: false
+  });
+  const [feedback, setFeedback] = useState<ViewerModalFeedback | null>(null);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+
+  if (!desktop.viewerState.open || !payload) return null;
+
+  const readOnlyNotice = notesAdapter.getReadOnlyNotice(payload.source);
+  const isReadOnly = !notesAdapter.canEdit(payload.source);
+
+  const sectionItems = deriveSectionTimeline(
+    payload.archive,
+    desktop.viewerState.activeSection,
+    desktop.viewerState.networkSubtypeFilter,
+    desktop.viewerState.networkSearchQuery
+  );
+  const drawerItem: TimelineItem | null =
     desktop.viewerState.networkDetailIndex === null
       ? null
       : desktop.viewerState.timeline[desktop.viewerState.networkDetailIndex] ?? null;
-  const sectionItems = payload
-    ? deriveSectionTimeline(
-        payload.archive,
-        desktop.viewerState.activeSection,
-        desktop.viewerState.networkSubtypeFilter,
-        desktop.viewerState.networkSearchQuery
-      )
-    : [];
+
   const activeItem = desktop.viewerState.activeIndex >= 0 ? sectionItems[desktop.viewerState.activeIndex] : null;
   const activeItemId = activeItem
     ? desktop.viewerState.activeSection === "actions"
@@ -372,97 +394,144 @@ function DesktopViewerOverlay(): React.JSX.Element {
       : activeItem.id
     : null;
 
-  if (!desktop.viewerState.open || !payload) {
-    return <div className="viewer-overlay" data-open="false" />;
-  }
+  const session = desktop.state.sessions.find(
+    (record) => record.sessionId === payload.archive.sessionId
+  );
+  const tags = session?.tags ?? [];
+  const isOwner = payload.source === "library";
+
+  const rows = buildTimelineRows(desktop).map((row) => mapToModalRow(row, sectionItems));
+
+  const onCopy = (value: string, label: string): void => {
+    void desktop.copyViewerValue(value, label);
+    setFeedback({ tone: "success", text: `Copied ${label}.` });
+  };
+
+  const findNetworkPayload = (rowId: string): TimelineItem | null => {
+    const item = desktop.viewerState.timeline.find((candidate) => candidate.id === rowId);
+    return item ?? null;
+  };
+
+  const downloadZip = async (): Promise<void> => {
+    if (downloadingZip) return;
+    setDownloadingZip(true);
+    try {
+      const result = await desktop.exportSessionZip(payload.archive.sessionId);
+      toast.success(`ZIP saved to ${result.savedPath}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to export ZIP.");
+    } finally {
+      setDownloadingZip(false);
+    }
+  };
 
   return (
-    <div
-      className="viewer-overlay"
-      data-open="true"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) desktop.closeViewer();
+    <ViewerModal
+      open
+      onClose={desktop.closeViewer}
+      title={payload.archive.name}
+      tags={tags}
+      source={mapDesktopSource(payload.source)}
+      isOwner={isOwner}
+      shareLinkUrl={null}
+      onDownloadZip={() => void downloadZip()}
+      downloadingZip={downloadingZip}
+      videoRef={desktop.viewerVideoRef}
+      notesValue={desktop.viewerState.notesValue}
+      notesReadOnly={isReadOnly}
+      notesSaving={desktop.viewerState.notesSaving}
+      notesDirty={desktop.viewerState.notesDirty}
+      notesNotice={readOnlyNotice}
+      onNotesChange={desktop.setViewerNotesValue}
+      onSaveNotes={desktop.saveViewerNotes}
+      onVideoTimeUpdate={desktop.updateTimelineHighlight}
+      onVideoError={desktop.handleViewerVideoError}
+      activeSection={desktop.viewerState.activeSection}
+      onSectionChange={(section: TimelineSection) => desktop.setViewerSection(section)}
+      searchQuery={desktop.viewerState.networkSearchQuery}
+      onSearchChange={desktop.setViewerSearch}
+      subtypeFilter={desktop.viewerState.networkSubtypeFilter}
+      onSubtypeFilterChange={desktop.setViewerSubtype}
+      rows={rows}
+      activeItemId={activeItemId}
+      autoFollow={desktop.viewerState.autoFollow}
+      onItemClick={(row, event) => {
+        desktop.clickTimelineItem(row.id, row.offsetMs, event);
       }}
-    >
-      <div className="viewer-modal">
-        <div className="viewer-header">
-          <div className="viewer-header-left">
-            <span className="viewer-title">{payload.archive.name}</span>
-            <span className="viewer-source-badge" data-source={payload.source}>
-              {getViewerSourceLabel(payload.source)}
-            </span>
-          </div>
-          <button className="viewer-close" type="button" aria-label="Close viewer" onClick={desktop.closeViewer}>
-            ✕
-          </button>
-        </div>
-        <div className="viewer-body">
-          <div className="viewer-left">
-            <div className="viewer-video-wrap">
-              <video
-                className="viewer-video"
-                ref={desktop.viewerVideoRef}
-                controls
-                onTimeUpdate={desktop.updateTimelineHighlight}
-                onError={desktop.handleViewerVideoError}
-              />
-            </div>
-            <div className="viewer-notes-section">
-              <span className="viewer-notes-label">Session notes</span>
-              {readOnlyNotice ? <div className="viewer-zip-notice">{readOnlyNotice}</div> : null}
-              <textarea
-                className="textarea viewer-notes-textarea"
-                placeholder="Add notes…"
-                value={desktop.viewerState.notesValue}
-                readOnly={isReadOnly}
-                onChange={(event) => desktop.setViewerNotesValue(event.currentTarget.value)}
-              />
-              {!isReadOnly ? (
-                <div className="viewer-notes-actions">
-                  <button
-                    className="button primary sm"
-                    type="button"
-                    disabled={!desktop.viewerState.notesDirty || desktop.viewerState.notesSaving}
-                    onClick={desktop.saveViewerNotes}
-                  >
-                    {desktop.viewerState.notesSaving ? "Saving…" : "Save notes"}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-          <div className="viewer-right" ref={desktop.viewerReactRootRef}>
-            <ViewerPane
-              activeSection={desktop.viewerState.activeSection}
-              networkSearchQuery={desktop.viewerState.networkSearchQuery}
-              networkSubtypeFilter={desktop.viewerState.networkSubtypeFilter}
-              timelineRows={buildTimelineRows(desktop)}
-              activeItemId={activeItemId}
-              autoFollow={desktop.viewerState.autoFollow}
-              focusVisible={!desktop.viewerState.autoFollow}
-              networkDetail={detailItem}
-              mergeDialog={{
-                open: desktop.viewerState.mergeDialogOpen,
-                value: desktop.viewerState.mergeDialogValue,
-                error: desktop.viewerState.mergeDialogError
-              }}
-              onSectionChange={(section: TimelineSection) => desktop.setViewerSection(section)}
-              onSubtypeChange={desktop.setViewerSubtype}
-              onSearchChange={desktop.setViewerSearch}
-              onTimelineClick={desktop.clickTimelineItem}
-              onTimelineContext={desktop.openTimelineContext}
-              onFocus={desktop.focusViewerTimeline}
-              onCloseDetail={desktop.closeNetworkDetail}
-              onCopy={(value, label) => void desktop.copyViewerValue(value, label)}
-              onMergeValueChange={desktop.setMergeValue}
-              onMergeConfirm={desktop.submitMergeDialog}
-              onMergeCancel={desktop.closeMergeDialog}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+      onItemContextMenu={(row, event) => {
+        if (desktop.viewerState.activeSection === "actions") {
+          desktop.openTimelineContext(row.id, event);
+          return;
+        }
+        if (desktop.viewerState.activeSection === "network") {
+          setContextMenu({
+            open: true,
+            x: event.clientX,
+            y: event.clientY,
+            rowId: row.id,
+            kind: "network",
+            canMerge: false,
+            canUnmerge: false
+          });
+        }
+      }}
+      onAutoFollowToggle={desktop.focusViewerTimeline}
+      timelineRef={desktop.viewerReactRootRef}
+      drawerItem={drawerItem}
+      onDrawerClose={desktop.closeNetworkDetail}
+      onCopy={onCopy}
+      contextMenu={contextMenu}
+      onContextMenuClose={() => setContextMenu((prev) => ({ ...prev, open: false }))}
+      onCopyCurl={(rowId) => {
+        const item = findNetworkPayload(rowId);
+        if (item && item.payload.kind === "network") {
+          onCopy(buildCurl(item.payload), "cURL command");
+        }
+      }}
+      onCopyResponse={(rowId) => {
+        const item = findNetworkPayload(rowId);
+        if (item && item.payload.kind === "network") {
+          onCopy(getResponseBodyString(item.payload), "response body");
+        }
+      }}
+      mergeDialog={{
+        open: desktop.viewerState.mergeDialogOpen,
+        value: desktop.viewerState.mergeDialogValue,
+        error: desktop.viewerState.mergeDialogError
+      }}
+      onMergeValueChange={desktop.setMergeValue}
+      onMergeConfirm={desktop.submitMergeDialog}
+      onMergeCancel={desktop.closeMergeDialog}
+      feedback={feedback}
+      onFeedbackDismiss={() => setFeedback(null)}
+    />
   );
+}
+
+function mapDesktopSource(source: "library" | "zip" | "local"): SharedViewerSource {
+  if (source === "library") return "local";
+  if (source === "zip") return "zip";
+  return "local";
+}
+
+function mapToModalRow(row: TimelineRow, items: ReadonlyArray<TimelineItem>): ViewerModalRow {
+  const item = items.find((candidate) => candidate.id === row.id);
+  const status =
+    item && item.payload.kind === "network" ? item.payload.status ?? null : null;
+  const subtype = item?.kind === "network" ? item.subtype ?? null : null;
+  const base: ViewerModalRow = {
+    id: row.id,
+    offsetMs: row.offsetMs,
+    section: row.section,
+    label: row.label,
+    kind: row.kind,
+    selected: row.selected,
+    merged: row.merged,
+    tags: row.tags,
+    statusCode: status,
+    subtype
+  };
+  return row.mergedRange !== undefined ? { ...base, mergedRange: row.mergedRange } : base;
 }
 
 type TimelineRow = {

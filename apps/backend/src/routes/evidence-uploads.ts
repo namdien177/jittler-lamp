@@ -164,6 +164,44 @@ type UploadedBlobMetadata = {
 const UPLOAD_SESSION_TTL_MS = 5 * 60 * 1000;
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
+const firstHeaderValue = (value: string | null): string | undefined =>
+	value?.split(",")[0]?.trim().replace(/^"|"$/g, "") || undefined;
+
+const forwardedHeaderValue = (
+	forwarded: string | null,
+	key: "host" | "proto",
+): string | undefined => {
+	const firstForwarded = firstHeaderValue(forwarded);
+	if (!firstForwarded) {
+		return undefined;
+	}
+
+	for (const part of firstForwarded.split(";")) {
+		const [name, rawValue] = part.split("=");
+		if (name?.trim().toLowerCase() === key && rawValue) {
+			return rawValue.trim().replace(/^"|"$/g, "");
+		}
+	}
+
+	return undefined;
+};
+
+const resolveExternalRequestOrigin = (request: Request): string => {
+	const requestUrl = new URL(request.url);
+	const forwarded = request.headers.get("forwarded");
+	const protocol =
+		firstHeaderValue(request.headers.get("x-forwarded-proto")) ??
+		forwardedHeaderValue(forwarded, "proto") ??
+		requestUrl.protocol.replace(/:$/, "");
+	const host =
+		firstHeaderValue(request.headers.get("x-forwarded-host")) ??
+		forwardedHeaderValue(forwarded, "host") ??
+		request.headers.get("host") ??
+		requestUrl.host;
+
+	return `${protocol}://${host}`;
+};
+
 const encodeSha256 = async (payload: ArrayBuffer): Promise<string> => {
 	const digest = await crypto.subtle.digest("SHA-256", payload);
 	return Array.from(new Uint8Array(digest))
@@ -382,7 +420,7 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 									key: artifactInput.key,
 									uploadId: artifact.id,
 									expiresAt: now + UPLOAD_SESSION_TTL_MS,
-									uploadUrl: `${new URL(request.url).origin}/evidences/uploads/${artifact.id}/blob`,
+									uploadUrl: `${resolveExternalRequestOrigin(request)}/evidences/uploads/${artifact.id}/blob`,
 									method: "PUT" as const,
 									headers: {
 										"content-type": artifactInput.mimeType,
@@ -535,7 +573,7 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 							organizationId: created.organizationId,
 							uploadSession: {
 								expiresAt: now + UPLOAD_SESSION_TTL_MS,
-								uploadUrl: `${new URL(request.url).origin}/evidences/uploads/${created.uploadId}/blob`,
+								uploadUrl: `${resolveExternalRequestOrigin(request)}/evidences/uploads/${created.uploadId}/blob`,
 								method: "PUT",
 								headers: {
 									"content-type": body.artifact.mimeType,

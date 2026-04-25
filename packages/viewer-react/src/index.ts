@@ -27,3 +27,12 @@ export type {
   JittleRouteObject,
   JittleRouterMode
 } from "./routing";
+
+export { ViewerModal, buildCurl, getResponseBodyString } from "./viewer-modal";
+export type {
+  ViewerModalProps,
+  ViewerModalRow,
+  ViewerSource,
+  ViewerModalFeedback,
+  ViewerContextMenuState
+} from "./viewer-modal";
