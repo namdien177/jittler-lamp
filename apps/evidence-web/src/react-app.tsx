@@ -825,6 +825,71 @@ function RestrictedShareScreen(props: { orgName: string | null }): React.JSX.Ele
   );
 }
 
+function PrivacyPage(): React.JSX.Element {
+  return (
+    <main className="legal-page">
+      <article className="legal-panel">
+        <p className="legal-eyebrow">Jittle Lamp</p>
+        <h1>Privacy Policy</h1>
+        <p className="legal-updated">Last updated: April 27, 2026</p>
+
+        <section>
+          <h2>Overview</h2>
+          <p>
+            Jittle Lamp is a local browser recording and evidence review tool. The extension
+            records browser activity only when you start a capture, and recorded sessions are
+            intended to stay on your machine unless you choose to export or share them.
+          </p>
+        </section>
+
+        <section>
+          <h2>Data We Handle</h2>
+          <p>
+            A recording can include the page URL, screen recording, network request and response
+            details, console output, and other diagnostic events from the captured browser session.
+            This data may include personal or sensitive information if it appears in the pages,
+            requests, or responses you record.
+          </p>
+        </section>
+
+        <section>
+          <h2>How Data Is Used</h2>
+          <p>
+            Captured data is used to help you replay, review, debug, and share browser sessions.
+            We do not sell your data. We do not use captured session data for advertising.
+          </p>
+        </section>
+
+        <section>
+          <h2>Sharing</h2>
+          <p>
+            Session files remain under your control. If you export, upload, or share a session,
+            the people or services you share it with may be able to view the included recording
+            and diagnostic data.
+          </p>
+        </section>
+
+        <section>
+          <h2>Retention</h2>
+          <p>
+            Locally saved sessions remain on your device until you delete them. Shared or uploaded
+            sessions are retained only as needed to provide the sharing or review functionality you
+            selected.
+          </p>
+        </section>
+
+        <section>
+          <h2>Contact</h2>
+          <p>
+            For privacy questions, contact the Jittle Lamp maintainer through the support channel
+            listed in the Chrome Web Store listing.
+          </p>
+        </section>
+      </article>
+    </main>
+  );
+}
+
 function SharedEvidenceAuthGate(): React.JSX.Element {
   const currentUrl = window.location.href;
   return (
@@ -901,6 +966,10 @@ const evidenceWebRoutes: JittleRouteObject[] = [
   {
     path: "/join",
     element: <JoinOrganizationPage />
+  },
+  {
+    path: "/privacy",
+    element: <PrivacyPage />
   }
 ];
 
