@@ -359,6 +359,11 @@ async function downloadBlob(blob: Blob, filename: string, mimeType: string): Pro
   const objectUrl = URL.createObjectURL(typedBlob);
 
   try {
+    if (!canUseChromeDownloadsApi()) {
+      await triggerAnchorDownload(objectUrl, filename);
+      return;
+    }
+
     const downloadId = await chrome.downloads.download({
       url: objectUrl,
       filename,
@@ -374,6 +379,27 @@ async function downloadBlob(blob: Blob, filename: string, mimeType: string): Pro
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+function canUseChromeDownloadsApi(): boolean {
+  return (
+    typeof chrome !== "undefined" &&
+    typeof chrome.downloads?.download === "function" &&
+    typeof chrome.downloads?.onChanged?.addListener === "function" &&
+    typeof chrome.downloads?.onChanged?.removeListener === "function"
+  );
+}
+
+async function triggerAnchorDownload(url: string, filename: string): Promise<void> {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
 async function waitForDownload(downloadId: number): Promise<void> {

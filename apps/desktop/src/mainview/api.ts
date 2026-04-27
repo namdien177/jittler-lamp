@@ -34,6 +34,10 @@ export type ApiMember = {
   membershipId: string;
   userId: string;
   clerkUserId: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string;
+  email: string | null;
   role: string;
   joinedAt: number;
 };

@@ -370,7 +370,7 @@ describe("routes", () => {
 		expect(payload.activeOrgId).toBe(teamOrganization.id);
 		expect(payload.organizations).toContainEqual({
 			id: provisioned.organizationId,
-			name: "user_clerk_settings_profile Personal",
+			name: "My Space",
 			role: "owner",
 			isPersonal: true,
 			isActive: false,

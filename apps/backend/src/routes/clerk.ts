@@ -6,6 +6,7 @@ import {
 	createDbUnavailableError,
 } from "../http/api-error";
 import type { ClerkAuthPlugin } from "../plugins/clerk-auth";
+import { resolveClerkUserProfile } from "../services/clerk-user-profile";
 import {
 	ensureUserAndPersonalOrganization,
 	retryFailedProvisioning,
@@ -30,7 +31,7 @@ export const createClerkRoutes = (auth: ClerkAuthPlugin) =>
 		app
 			.post(
 				"/clerk/callback",
-				async ({ authContext, db, requestId, set }) => {
+				async ({ authContext, db, requestId, requestLogger, runtime, set }) => {
 					if (!db) {
 						set.status = 503;
 						return createApiError(
@@ -41,9 +42,21 @@ export const createClerkRoutes = (auth: ClerkAuthPlugin) =>
 						);
 					}
 
+					const userProfile = await resolveClerkUserProfile(
+						runtime,
+						authContext.userId,
+					).catch((error) => {
+						requestLogger.warn(
+							{ err: error, clerkUserId: authContext.userId },
+							"failed to resolve Clerk user profile during callback provisioning",
+						);
+						return null;
+					});
+
 					const provisioned = await ensureUserAndPersonalOrganization(db, {
 						clerkUserId: authContext.userId,
 						source: "clerk-callback",
+						userProfile,
 						rawPayload: {
 							userId: authContext.userId,
 							orgId: authContext.orgId,

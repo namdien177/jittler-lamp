@@ -6,6 +6,7 @@ const statusBadge = requireElement<HTMLSpanElement>("[data-role='status-badge']"
 const companionStatus = requireElement<HTMLElement>("[data-role='companion-status']");
 const companionRoute = requireElement<HTMLParagraphElement>("[data-role='companion-route']");
 const companionPill = requireElement<HTMLSpanElement>("[data-role='companion-pill']");
+const companionDownload = requireElement<HTMLAnchorElement>("[data-role='companion-download']");
 const titleValue = requireElement<HTMLSpanElement>("[data-role='title-value']");
 const urlValue = requireElement<HTMLSpanElement>("[data-role='url-value']");
 const sessionValue = requireElement<HTMLSpanElement>("[data-role='session-value']");
@@ -102,6 +103,7 @@ function renderState(state: PopupState, error?: string): void {
       : `${state.companion.origin} unavailable`;
   companionRoute.textContent = companionRouteText;
   companionRoute.title = companionRouteText;
+  companionDownload.hidden = state.companion.status === "online";
   companionPill.textContent = state.companion.status;
   companionPill.dataset.status = state.companion.status;
 
@@ -144,6 +146,8 @@ function renderState(state: PopupState, error?: string): void {
 
   startButton.disabled = requestInFlight || !state.canStart;
   stopButton.disabled = requestInFlight || !state.canStop;
+  startButton.hidden = !state.canStart;
+  stopButton.hidden = !state.canStop;
 }
 
 function setButtonsDisabled(disabled: boolean): void {

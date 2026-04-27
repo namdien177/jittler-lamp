@@ -3,6 +3,7 @@ import { Elysia, status } from "elysia";
 import type { RuntimeConfig } from "../config/runtime";
 import { apiErrorSchema, createApiError } from "../http/api-error";
 import { resolveActiveOrganizationForClerkUser } from "../services/active-organization";
+import { resolveClerkUserProfile } from "../services/clerk-user-profile";
 import { verifyDesktopAuthSessionToken } from "../services/desktop-auth";
 import { ensureUserAndPersonalOrganization } from "../services/user-provisioning";
 import type { CorePlugin } from "./core";
@@ -304,9 +305,21 @@ export const createClerkAuthPlugin = (core: CorePlugin) =>
 						return { authContext };
 					}
 
+					const userProfile = await resolveClerkUserProfile(
+						runtime,
+						authContext.userId,
+					).catch((error) => {
+						requestLogger.warn(
+							{ err: error, clerkUserId: authContext.userId },
+							"failed to resolve Clerk user profile during provisioning",
+						);
+						return null;
+					});
+
 					const provisioned = await ensureUserAndPersonalOrganization(db, {
 						clerkUserId: authContext.userId,
 						source: "auth-middleware",
+						userProfile,
 						rawPayload: {
 							userId: authContext.userId,
 							orgId: authContext.orgId,

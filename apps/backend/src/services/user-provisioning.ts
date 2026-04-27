@@ -13,6 +13,10 @@ import {
 	provisioningReplaySchema,
 	users,
 } from "../db/schema";
+import {
+	buildPersonalOrganizationName,
+	type ClerkUserProfile,
+} from "./clerk-user-profile";
 
 export type BackendDb = LibSQLDatabase<typeof appSchema>;
 
@@ -22,10 +26,11 @@ type ProvisioningInput = {
 	clerkUserId: string;
 	source: ProvisioningSource;
 	rawPayload: Record<string, unknown>;
+	userProfile?: Pick<
+		ClerkUserProfile,
+		"firstName" | "username" | "email"
+	> | null;
 };
-
-const buildPersonalOrganizationName = (clerkUserId: string) =>
-	`${clerkUserId} Personal`;
 
 const findAlreadyProvisioned = async (db: BackendDb, clerkUserId: string) =>
 	db.query.users.findFirst({
@@ -50,7 +55,10 @@ const writeProvisioningEvent = async (
 	const parsed = createProvisioningEventSchema.parse({
 		clerkUserId: input.clerkUserId,
 		source: input.source,
-		rawPayload: JSON.stringify(input.rawPayload),
+		rawPayload: JSON.stringify({
+			...input.rawPayload,
+			userProfile: input.userProfile ?? null,
+		}),
 	});
 
 	const [created] = await db
@@ -67,6 +75,22 @@ const writeProvisioningEvent = async (
 	}
 
 	return created.id;
+};
+
+const parseProvisioningUserProfile = (
+	rawPayload: string,
+): Pick<ClerkUserProfile, "firstName" | "username" | "email"> | null => {
+	const payload = JSON.parse(rawPayload) as { userProfile?: unknown };
+	if (!payload.userProfile || typeof payload.userProfile !== "object") {
+		return null;
+	}
+
+	const profile = payload.userProfile as Record<string, unknown>;
+	return {
+		firstName: typeof profile.firstName === "string" ? profile.firstName : null,
+		username: typeof profile.username === "string" ? profile.username : null,
+		email: typeof profile.email === "string" ? profile.email : null,
+	};
 };
 
 export const processProvisioningEvent = async (
@@ -157,7 +181,9 @@ export const processProvisioningEvent = async (
 
 			if (!organizationId) {
 				const personalOrg = createOrganizationInputSchema.parse({
-					name: buildPersonalOrganizationName(localUser.clerkUserId),
+					name: buildPersonalOrganizationName(
+						parseProvisioningUserProfile(event.rawPayload),
+					),
 					isPersonal: true,
 					personalOwnerUserId: localUser.id,
 				});

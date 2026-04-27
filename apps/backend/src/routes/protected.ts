@@ -1,10 +1,14 @@
-import { createClerkClient } from "@clerk/backend";
 import { and, eq, isNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import { organizationMembers } from "../db/schema";
 import { apiErrorSchema } from "../http/api-error";
 import type { ClerkAuthPlugin } from "../plugins/clerk-auth";
+import {
+	fallbackClerkUserProfile,
+	formatClerkDisplayName,
+	resolveClerkUserProfile,
+} from "../services/clerk-user-profile";
 
 type ClerkUserSummary = {
 	id: string;
@@ -38,49 +42,25 @@ const protectedMeResponseSchema = t.Object({
 	organizations: t.Array(organizationSummarySchema),
 });
 
-const formatClerkDisplayName = (input: {
-	clerkUserId: string;
-	firstName?: string | null;
-	lastName?: string | null;
-	username?: string | null;
-	email?: string | null;
-}) => {
-	const fullName = [input.firstName, input.lastName].filter(Boolean).join(" ");
-	return fullName || input.username || input.email || input.clerkUserId;
-};
-
 const resolveClerkUserSummary = async (
 	runtime: { clerkSecretKey: string | undefined },
 	clerkUserId: string,
 ): Promise<ClerkUserSummary> => {
-	if (!runtime.clerkSecretKey) {
-		return {
-			id: clerkUserId,
-			displayName: clerkUserId,
-			email: null,
-			imageUrl: null,
-		};
-	}
-
-	const clerkClient = createClerkClient({ secretKey: runtime.clerkSecretKey });
-	const user = await clerkClient.users.getUser(clerkUserId);
-	const primaryEmail =
-		user.emailAddresses.find((email) => email.id === user.primaryEmailAddressId)
-			?.emailAddress ??
-		user.emailAddresses[0]?.emailAddress ??
-		null;
+	const profile = runtime.clerkSecretKey
+		? await resolveClerkUserProfile(runtime, clerkUserId)
+		: fallbackClerkUserProfile(clerkUserId);
 
 	return {
-		id: user.id,
+		id: profile.id,
 		displayName: formatClerkDisplayName({
 			clerkUserId,
-			firstName: user.firstName,
-			lastName: user.lastName,
-			username: user.username,
-			email: primaryEmail,
+			firstName: profile.firstName,
+			lastName: profile.lastName,
+			username: profile.username,
+			email: profile.email,
 		}),
-		email: primaryEmail,
-		imageUrl: user.imageUrl || null,
+		email: profile.email,
+		imageUrl: profile.imageUrl,
 	};
 };
 

@@ -5,12 +5,22 @@ import {
   type ApiCreatedInvitation,
   type ApiInvitation,
   type ApiMember,
-  type ApiOrgSummary
+  type ApiOrgSummary,
+  webOrigin
 } from "../api";
 import { useDesktopAuth } from "../auth-context";
 import { Dialog } from "../ui/dialog";
 import { useToast } from "../ui/toast";
 import { copyToClipboard, formatRelativeTime, getInitials } from "../utils";
+
+function getInviteUrl(token: string): string {
+  return `${webOrigin}/join?code=${encodeURIComponent(token)}`;
+}
+
+function getMemberPrimaryText(member: ApiMember): string {
+  const fullName = [member.firstName, member.lastName].filter(Boolean).join(" ").trim();
+  return fullName || member.displayName || member.email || "Unknown user";
+}
 
 export function OrganisationPage(): React.JSX.Element {
   const auth = useDesktopAuth();
@@ -400,9 +410,12 @@ function OrganisationDetailDialog(props: {
                   <td>
                     <div className="row" style={{ gap: 8 }}>
                       <div className="sidebar-account-avatar" style={{ width: 28, height: 28, fontSize: 10 }}>
-                        {getInitials(member.clerkUserId)}
+                        {getInitials(getMemberPrimaryText(member))}
                       </div>
-                      <span className="mono" style={{ fontSize: 11 }}>{member.clerkUserId}</span>
+                      <div className="column" style={{ gap: 2 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 650 }}>{getMemberPrimaryText(member)}</span>
+                        <span className="muted" style={{ fontSize: 11 }}>{member.email ?? "No email available"}</span>
+                      </div>
                     </div>
                   </td>
                   <td>
@@ -464,6 +477,18 @@ function OrganisationDetailDialog(props: {
                   }}
                 >
                   Copy token
+                </button>
+                <button
+                  className="button ghost xs icon"
+                  type="button"
+                  aria-label="Copy invite URL"
+                  title="Copy invite URL"
+                  onClick={async () => {
+                    await copyToClipboard(getInviteUrl(createdInvitation.token));
+                    toast.success("Invite URL copied");
+                  }}
+                >
+                  🔗
                 </button>
                 <button className="button ghost xs" type="button" onClick={() => setCreatedInvitation(null)}>
                   Done

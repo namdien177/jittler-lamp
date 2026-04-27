@@ -26,7 +26,7 @@ function JoinOrganizationForm(): React.JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectPath = safeRedirectPath(searchParams.get("redirect"));
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(searchParams.get("code") ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

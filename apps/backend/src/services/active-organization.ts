@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { organizationMembers, organizations, users } from "../db/schema";
 import type { BackendDb } from "./user-provisioning";
@@ -39,7 +39,15 @@ export const resolveActiveOrganizationForClerkUser = async (
 	);
 
 	if (requestedOrganizationId) {
-		if (!membershipByOrganizationId.has(requestedOrganizationId)) {
+		const orgScopeMembership = await db.query.organizationMembers.findFirst({
+			where: and(
+				eq(organizationMembers.organizationId, requestedOrganizationId),
+				eq(organizationMembers.userId, localUser.id),
+				isNull(organizationMembers.teamId),
+			),
+			columns: { id: true },
+		});
+		if (!orgScopeMembership) {
 			return null;
 		}
 		return {

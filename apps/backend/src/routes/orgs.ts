@@ -44,6 +44,10 @@ const memberSummarySchema = t.Object({
 	membershipId: t.String({ minLength: 1 }),
 	userId: t.String({ minLength: 1 }),
 	clerkUserId: t.String({ minLength: 1 }),
+	firstName: t.Union([t.String({ minLength: 1 }), t.Null()]),
+	lastName: t.Union([t.String({ minLength: 1 }), t.Null()]),
+	displayName: t.String({ minLength: 1 }),
+	email: t.Union([t.String({ minLength: 1 }), t.Null()]),
 	role: t.String({ minLength: 1 }),
 	joinedAt: t.Number(),
 });
@@ -239,7 +243,7 @@ export const createOrganizationRoutes = (auth: ClerkAuthPlugin) =>
 				)
 				.get(
 					"/orgs/:orgId/members",
-					async ({ authContext, db, params, requestId, set }) => {
+					async ({ authContext, db, params, requestId, runtime, set }) => {
 						if (!db) {
 							set.status = 503;
 							return createDbUnavailableError(requestId);
@@ -270,7 +274,7 @@ export const createOrganizationRoutes = (auth: ClerkAuthPlugin) =>
 						}
 
 						return {
-							members: await listOrganizationMembers(db, params.orgId),
+							members: await listOrganizationMembers(db, params.orgId, runtime),
 						};
 					},
 					{

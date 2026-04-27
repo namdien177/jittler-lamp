@@ -68,6 +68,18 @@ export type ArtifactReadUrl = {
   renewAfterMs: number;
 };
 
+export type ApiEvidenceSummary = {
+  id: string;
+  orgId: string;
+  title: string;
+  sourceType: string;
+  sourceExternalId?: string | null;
+  sourceMetadata?: string | null;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type ResolveShareLinkResponse = {
   shareLink: {
     id: string;
@@ -87,6 +99,12 @@ export const api = {
     authedFetch<ResolveShareLinkResponse>(
       getToken,
       `/share-links/${encodeURIComponent(token)}/resolve`
+    ),
+
+  listEvidences: (getToken: FetchToken, orgId?: string) =>
+    authedFetch<{ evidences: ApiEvidenceSummary[]; orgId: string }>(
+      getToken,
+      orgId ? `/evidences?orgId=${encodeURIComponent(orgId)}` : "/evidences"
     ),
 
   listEvidenceArtifacts: (getToken: FetchToken, evidenceId: string, orgId?: string) =>

@@ -188,6 +188,18 @@ h1 {
   white-space: nowrap;
 }
 
+.companion-download {
+  width: fit-content;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.companion-download:hover {
+  opacity: 0.85;
+}
+
 .companion-pill[data-status="online"] {
   background: var(--accent-dim);
   color: var(--accent);
@@ -299,6 +311,11 @@ h1 {
 .button:disabled {
   opacity: 0.3;
   cursor: default;
+}
+
+.button[hidden],
+.companion-download[hidden] {
+  display: none;
 }
 
 .primary {

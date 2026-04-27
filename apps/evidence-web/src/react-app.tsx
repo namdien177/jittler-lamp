@@ -49,6 +49,7 @@ import { buildReviewedZipBlob, createWebNotesAdapter, createWebPlaybackAdapter, 
 import { api, type ArtifactReadUrl, type EvidenceArtifact, type FetchToken } from "./api";
 import { DesktopAuthApprovalPage } from "./desktop-auth-page";
 import { clerkPublishableKey } from "./env";
+import { HomePage } from "./home-page";
 import { JoinOrganizationPage } from "./join-org-page";
 import { loadRemoteSessionArtifacts } from "./loader";
 import { useWebFileAdapter } from "./web-adapter";
@@ -88,9 +89,13 @@ function initialState(): AppState {
 
 function EvidenceViewerPage(props: {
   shareToken?: string | undefined;
+  remoteEvidenceId?: string | undefined;
   auth?: ReturnType<typeof useAuth> | undefined;
 }): React.JSX.Element {
   const shareToken = props.shareToken;
+  const remoteEvidenceId = props.remoteEvidenceId;
+  const isRemote = Boolean(shareToken || remoteEvidenceId);
+  const navigate = useNavigate();
   const [state, setState] = useState<AppState>(() => initialState());
   const [contextMenu, setContextMenu] = useState<ViewerContextMenuState>({
     open: false,
@@ -135,13 +140,13 @@ function EvidenceViewerPage(props: {
   };
 
   useEffect(() => {
-    if (!shareToken) return;
+    if (!isRemote) return;
     if (!authIsLoaded) return;
     if (!authIsSignedIn) {
       setState((prev) => ({
         ...prev,
         phase: "error",
-        error: "Sign in to view this shared evidence."
+        error: "Sign in to view this evidence."
       }));
       return;
     }
@@ -150,31 +155,41 @@ function EvidenceViewerPage(props: {
     setState((prev) => ({ ...prev, phase: "loading", error: null, restrictedOrgName: null }));
     void (async () => {
       try {
-        const resolved = await api.resolveShareLink(stableGetToken, shareToken);
-        if (cancelled) return;
-        if (resolved.shareLink.access === "denied") {
-          setState((prev) => ({
-            ...prev,
-            phase: "idle",
-            error: null,
-            restrictedOrgName: resolved.organization.name
-          }));
+        let evidenceId: string;
+        let orgId: string | undefined;
+        if (shareToken) {
+          const resolved = await api.resolveShareLink(stableGetToken, shareToken);
+          if (cancelled) return;
+          if (resolved.shareLink.access === "denied") {
+            setState((prev) => ({
+              ...prev,
+              phase: "idle",
+              error: null,
+              restrictedOrgName: resolved.organization.name
+            }));
+            return;
+          }
+          evidenceId = resolved.shareLink.evidenceId;
+          orgId = resolved.shareLink.orgId;
+        } else if (remoteEvidenceId) {
+          evidenceId = remoteEvidenceId;
+        } else {
           return;
         }
         const artifactResult = await api.listEvidenceArtifacts(
           stableGetToken,
-          resolved.shareLink.evidenceId,
-          resolved.shareLink.orgId
+          evidenceId,
+          orgId
         );
         const recordingArtifact = artifactResult.artifacts.find((artifact) => artifact.kind === "recording");
         const archiveArtifact = artifactResult.artifacts.find((artifact) => artifact.kind === "network-log");
         if (!recordingArtifact || !archiveArtifact) {
-          throw new Error("Shared evidence is missing recording or archive artifacts.");
+          throw new Error("Evidence is missing recording or archive artifacts.");
         }
 
         const [videoReadUrl, archiveReadUrl] = await Promise.all([
-          api.createArtifactReadUrl(stableGetToken, resolved.shareLink.evidenceId, recordingArtifact.id, resolved.shareLink.orgId),
-          api.createArtifactReadUrl(stableGetToken, resolved.shareLink.evidenceId, archiveArtifact.id, resolved.shareLink.orgId)
+          api.createArtifactReadUrl(stableGetToken, evidenceId, recordingArtifact.id, orgId),
+          api.createArtifactReadUrl(stableGetToken, evidenceId, archiveArtifact.id, orgId)
         ]);
         const loaded = await loadRemoteSessionArtifacts({
           archiveUrl: archiveReadUrl.url,
@@ -182,8 +197,8 @@ function EvidenceViewerPage(props: {
         });
         if (cancelled) return;
         remoteSessionRef.current = {
-          evidenceId: resolved.shareLink.evidenceId,
-          orgId: resolved.shareLink.orgId,
+          evidenceId,
+          orgId: orgId ?? "",
           recordingArtifact,
           archiveArtifact,
           videoReadUrl,
@@ -218,10 +233,10 @@ function EvidenceViewerPage(props: {
     return () => {
       cancelled = true;
     };
-  }, [shareToken, authIsLoaded, authIsSignedIn, stableGetToken]);
+  }, [shareToken, remoteEvidenceId, isRemote, authIsLoaded, authIsSignedIn, stableGetToken]);
 
   useEffect(() => {
-    if (!shareToken || state.phase !== "viewing") return;
+    if (!isRemote || state.phase !== "viewing") return;
     const remote = remoteSessionRef.current;
     if (!remote || !authIsSignedIn) return;
 
@@ -247,7 +262,7 @@ function EvidenceViewerPage(props: {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [shareToken, state.phase, authIsSignedIn, stableGetToken]);
+  }, [isRemote, state.phase, authIsSignedIn, stableGetToken]);
 
   const applyMergeGroup = (validation: ReturnType<typeof validateMergeDialog> & { ok: true }): void => {
     const newGroup = createMergeGroup({
@@ -506,6 +521,10 @@ function EvidenceViewerPage(props: {
   };
 
   const closeViewer = (): void => {
+    if (isRemote) {
+      navigate("/");
+      return;
+    }
     setState((prev) => {
       if (prev.videoUrl) playbackAdapter.releaseSource?.({ videoPath: prev.videoUrl });
       const next = initialState();
@@ -519,21 +538,21 @@ function EvidenceViewerPage(props: {
   }
 
   if (state.phase !== "viewing" || !state.archive) {
-    if (shareToken && state.phase === "loading") {
+    if (isRemote && state.phase === "loading") {
       return (
         <main className="desktop-auth-page">
           <section className="desktop-auth-panel" aria-live="polite">
-            <h1>Loading shared evidence</h1>
-            <p>Validating the share link…</p>
+            <h1>Loading evidence</h1>
+            <p>{shareToken ? "Validating the share link…" : "Fetching evidence artifacts…"}</p>
           </section>
         </main>
       );
     }
-    if (shareToken && state.phase === "error") {
+    if (isRemote && state.phase === "error") {
       return (
         <main className="desktop-auth-page">
           <section className="desktop-auth-panel" aria-live="polite">
-            <h1>Unable to load shared evidence</h1>
+            <h1>Unable to load evidence</h1>
             <p>{state.error ?? "Unknown error"}</p>
           </section>
         </main>
@@ -943,10 +962,78 @@ function SharedEvidenceViewerPage(): React.JSX.Element {
   return <EvidenceViewerPage shareToken={shareToken} auth={auth} />;
 }
 
+function RemoteEvidenceAuthGate(): React.JSX.Element {
+  const currentUrl = window.location.href;
+  return (
+    <>
+      <ClerkFailed>
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel">
+            <h1>Unable to load sign-in</h1>
+            <p>Check the Clerk publishable key and network access.</p>
+          </section>
+        </main>
+      </ClerkFailed>
+      <ClerkDegraded>
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel">
+            <h1>Unable to load sign-in</h1>
+            <p>Check the Clerk publishable key and network access.</p>
+          </section>
+        </main>
+      </ClerkDegraded>
+      <ClerkLoading>
+        <main className="desktop-auth-page">
+          <section className="desktop-auth-panel">
+            <h1>Loading sign-in</h1>
+          </section>
+        </main>
+      </ClerkLoading>
+      <ClerkLoaded>
+        <SignedOut>
+          <main className="desktop-auth-page">
+            <SignIn
+              routing="hash"
+              forceRedirectUrl={currentUrl}
+              fallbackRedirectUrl={currentUrl}
+              signUpForceRedirectUrl={currentUrl}
+              signUpFallbackRedirectUrl={currentUrl}
+            />
+          </main>
+        </SignedOut>
+        <SignedIn>
+          <RemoteEvidenceViewerPage />
+        </SignedIn>
+      </ClerkLoaded>
+    </>
+  );
+}
+
+function RemoteEvidenceViewerPage(): React.JSX.Element {
+  const { evidenceId } = useParams();
+  const auth = useAuth();
+  return <EvidenceViewerPage remoteEvidenceId={evidenceId} auth={auth} />;
+}
+
 const evidenceWebRoutes: JittleRouteObject[] = [
   {
     path: "/",
+    element: clerkPublishableKey ? <HomePage /> : <EvidenceViewerPage />
+  },
+  {
+    path: "/quick-view",
     element: <EvidenceViewerPage />
+  },
+  {
+    path: "/evidence/:evidenceId",
+    element: clerkPublishableKey ? (
+      <RemoteEvidenceAuthGate />
+    ) : (
+      <div className="viewer-empty" role="alert">
+        <h2>Clerk is not configured</h2>
+        <p>Set CLERK_PUBLISHABLE_KEY before opening cloud evidence.</p>
+      </div>
+    )
   },
   {
     path: "/share/:shareToken",

@@ -10,6 +10,11 @@ import {
 	organizations,
 	users,
 } from "../db/schema";
+import {
+	fallbackClerkUserProfile,
+	formatClerkDisplayName,
+	resolveClerkUserProfile,
+} from "./clerk-user-profile";
 import type { BackendDb } from "./user-provisioning";
 
 export type OrganizationSummary = {
@@ -25,6 +30,10 @@ export type OrganizationMemberSummary = {
 	membershipId: string;
 	userId: string;
 	clerkUserId: string;
+	firstName: string | null;
+	lastName: string | null;
+	displayName: string;
+	email: string | null;
 	role: string;
 	joinedAt: number;
 };
@@ -193,6 +202,7 @@ export const ensureOrganizationMember = async (
 export const listOrganizationMembers = async (
 	db: BackendDb,
 	organizationId: string,
+	runtime: { clerkSecretKey: string | undefined },
 ): Promise<OrganizationMemberSummary[]> => {
 	const memberships = await db.query.organizationMembers.findMany({
 		where: and(
@@ -212,15 +222,34 @@ export const listOrganizationMembers = async (
 		},
 	});
 
-	return memberships
-		.map((membership) => ({
-			membershipId: membership.id,
-			userId: membership.userId,
-			clerkUserId: membership.user.clerkUserId,
-			role: membership.role,
-			joinedAt: membership.createdAt,
-		}))
-		.sort((a, b) => a.joinedAt - b.joinedAt);
+	const summaries = await Promise.all(
+		memberships.map(async (membership) => {
+			const profile = await resolveClerkUserProfile(
+				runtime,
+				membership.user.clerkUserId,
+			).catch(() => fallbackClerkUserProfile(membership.user.clerkUserId));
+
+			return {
+				membershipId: membership.id,
+				userId: membership.userId,
+				clerkUserId: membership.user.clerkUserId,
+				firstName: profile.firstName,
+				lastName: profile.lastName,
+				displayName: formatClerkDisplayName({
+					clerkUserId: membership.user.clerkUserId,
+					firstName: profile.firstName,
+					lastName: profile.lastName,
+					username: profile.username,
+					email: profile.email,
+				}),
+				email: profile.email,
+				role: membership.role,
+				joinedAt: membership.createdAt,
+			};
+		}),
+	);
+
+	return summaries.sort((a, b) => a.joinedAt - b.joinedAt);
 };
 
 const summarizeInvitation = (row: {
