@@ -374,15 +374,6 @@ export const createEvidenceUploadRoutes = (auth: ClerkAuthPlugin) =>
 									},
 								})
 							: null;
-						if (body.replaceEvidenceId && !existingEvidence) {
-							set.status = 404;
-							return createApiError(
-								requestId,
-								"EVIDENCE_NOT_FOUND",
-								"Evidence not found for active organization",
-								404,
-							);
-						}
 						if (
 							existingEvidence &&
 							(existingEvidence.sourceType !== "desktop-session" ||

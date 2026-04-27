@@ -948,6 +948,51 @@ describe("routes", () => {
 		expect(
 			artifacts.every((artifact) => artifact.uploadStatus === "uploading"),
 		).toBe(true);
+
+		const staleReplaceEvidenceId = crypto.randomUUID();
+		const staleReplaceResponse = await startDesktopSync({
+			sessionId: "local-session-stale-replace",
+			title: "Stale replacement desktop session",
+			sourceMetadata: "stale-replacement",
+			replaceEvidenceId: staleReplaceEvidenceId,
+			artifacts: [
+				{
+					key: "recording",
+					kind: "recording",
+					mimeType: "video/webm",
+					bytes: 14,
+					checksum: `sha256:${await sha256Hex("fresh recording")}`,
+				},
+				{
+					key: "archive",
+					kind: "network-log",
+					mimeType: "application/json",
+					bytes: 15,
+					checksum: `sha256:${await sha256Hex('{"fresh":true}')}`,
+				},
+			],
+		});
+		expect(staleReplaceResponse.status).toBe(200);
+		const staleReplacePayload = (await staleReplaceResponse.json()) as {
+			evidenceId: string;
+			organizationId: string;
+		};
+		expect(staleReplacePayload.evidenceId).not.toBe(staleReplaceEvidenceId);
+		expect(staleReplacePayload.organizationId).toBe(
+			initialPayload.organizationId,
+		);
+
+		const sessionRows = await db.query.desktopRecordingSessions.findMany({
+			columns: { sessionId: true, evidenceId: true, orgId: true },
+		});
+		expect(
+			sessionRows.some(
+				(row) =>
+					row.sessionId === "local-session-stale-replace" &&
+					row.evidenceId === staleReplacePayload.evidenceId &&
+					row.orgId === initialPayload.organizationId,
+			),
+		).toBe(true);
 	});
 
 	it("does not allow completion before blob upload exists", async () => {

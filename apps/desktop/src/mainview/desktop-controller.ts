@@ -594,7 +594,7 @@ export function useDesktopController(): DesktopController {
         if (!bridge || stateRef.current.update?.status !== "downloaded") return;
         patchState({
           isInstallingUpdate: true,
-          feedback: { tone: "neutral", text: "Restarting to install the update…" }
+          feedback: { tone: "neutral", text: "Opening the desktop update installer…" }
         });
         try {
           await bridge.rpc.request.installDesktopUpdate(undefined);

@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import {
   recordingFileName,
@@ -75,6 +77,9 @@ const currentFile = fileURLToPath(import.meta.url);
 const currentDir = dirname(currentFile);
 const preloadPath = join(currentDir, "preload.js");
 const mainViewPath = join(currentDir, "..", "views", "mainview", "index.html");
+const macosDesktopInstallScriptUrl =
+  "https://raw.githubusercontent.com/namdien177/jittle-lamp/main/scripts/release/install-macos-desktop.sh";
+const execFileAsync = promisify(execFile);
 
 let mainWindow: BrowserWindow | null = null;
 const { autoUpdater } = electronUpdater;
@@ -182,6 +187,16 @@ const handlers: DesktopHandlerMap = {
   installDesktopUpdate: async () => {
     if (desktopUpdateState.status !== "downloaded") {
       throw new Error("No downloaded update is ready to install.");
+    }
+
+    if (process.platform === "darwin") {
+      await launchMacosInstallerInTerminal(desktopUpdateState.availableVersion);
+
+      queueMicrotask(() => {
+        app.quit();
+      });
+
+      return { ok: true as const };
     }
 
     queueMicrotask(() => {
@@ -455,7 +470,7 @@ function patchDesktopUpdateState(update: Partial<DesktopUpdateState>): DesktopUp
 
 function configureAutoUpdater(): void {
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = process.platform !== "darwin";
 
   autoUpdater.on("checking-for-update", () => {
     patchDesktopUpdateState({
@@ -548,4 +563,31 @@ function toDesktopUpdateAvailableState(
     lastCheckedAt: new Date().toISOString(),
     error: null
   };
+}
+
+async function launchMacosInstallerInTerminal(version: string | null): Promise<void> {
+  const command = buildMacosInstallerCommand(version);
+  await execFileAsync("osascript", [
+    "-e",
+    "tell application \"Terminal\" to activate",
+    "-e",
+    `tell application "Terminal" to do script ${JSON.stringify(command)}`
+  ]);
+}
+
+function buildMacosInstallerCommand(version: string | null): string {
+  const tag = normalizeReleaseTag(version);
+  const versionPrefix = tag ? `JITTLE_LAMP_VERSION=${shellQuote(tag)} ` : "";
+  const installAndReopenCommand = `curl -fsSL ${macosDesktopInstallScriptUrl} | bash && open -a ${shellQuote("Jittle Lamp")}`;
+  return `${versionPrefix}bash -lc ${shellQuote(installAndReopenCommand)}`;
+}
+
+function normalizeReleaseTag(version: string | null): string | null {
+  const trimmed = version?.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("v") ? trimmed : `v${trimmed}`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

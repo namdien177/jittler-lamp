@@ -138,7 +138,7 @@ export function SettingsPage(props: { desktop: DesktopController }): React.JSX.E
               disabled={hasBridgeError || !canInstallUpdate || desktop.state.isInstallingUpdate}
               onClick={desktop.installUpdate}
             >
-              {desktop.state.isInstallingUpdate ? "Restarting…" : "Restart and install"}
+              {desktop.state.isInstallingUpdate ? "Opening installer…" : "Install update"}
             </button>
           </div>
         </div>
