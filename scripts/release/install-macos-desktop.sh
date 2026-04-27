@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="namdien177/jittler-lamp"
+repo="namdien177/jittle-lamp"
 app_name="Jittle Lamp.app"
 install_dir="/Applications"
 tag="${JITTLE_LAMP_VERSION:-}"

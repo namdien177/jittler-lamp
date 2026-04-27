@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ClerkDegraded,
   ClerkFailed,
@@ -6,12 +6,11 @@ import {
   ClerkLoading,
   SignedIn,
   SignedOut,
-  UserButton,
-  useAuth
+  UserButton
 } from "@clerk/clerk-react";
 import { Navigate, NavLink, useNavigate } from "react-router";
 
-import { api, type ApiAccountProfile, type ApiEvidenceSummary } from "./api";
+import { useAccountProfile, useEvidences } from "./queries";
 
 function formatRelativeTime(value: number | string): string {
   const ms = typeof value === "string" ? Date.parse(value) : value;
@@ -63,51 +62,34 @@ export function HomePage(): React.JSX.Element {
 }
 
 function AuthenticatedHome(): React.JSX.Element {
-  const auth = useAuth();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState<ApiAccountProfile | null>(null);
-  const [evidences, setEvidences] = useState<ApiEvidenceSummary[]>([]);
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const profileQuery = useAccountProfile();
+  const evidencesQuery = useEvidences();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const getToken = useCallback(() => auth.getToken(), [auth]);
-
-  const reload = useCallback(async (): Promise<void> => {
-    if (!auth.isSignedIn) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [profileResult, evidenceResult] = await Promise.all([
-        api.fetchAccountProfile(getToken),
-        api.listEvidences(getToken)
-      ]);
-      setProfile(profileResult);
-      setEvidences(evidenceResult.evidences);
-      setOrgId(evidenceResult.orgId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load evidences.");
-    } finally {
-      setLoading(false);
-    }
-  }, [auth.isSignedIn, getToken]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const evidences = evidencesQuery.data?.evidences ?? [];
+  const orgId = evidencesQuery.data?.orgId ?? null;
+  const profile = profileQuery.data ?? null;
+  const activeOrg = profile?.organizations.find((org) => org.isActive) ?? null;
+  const accountLabel = profile?.user.displayName ?? profile?.user.email ?? "Signed in";
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return evidences;
     return evidences.filter((evidence) =>
-      [evidence.title, evidence.sourceType, evidence.id].some((field) => field.toLowerCase().includes(query))
+      [evidence.title, evidence.sourceType, evidence.id].some((field) =>
+        field.toLowerCase().includes(query)
+      )
     );
   }, [evidences, search]);
 
-  const activeOrg = profile?.organizations.find((org) => org.isActive) ?? null;
-  const accountLabel =
-    profile?.user.displayName ?? profile?.user.email ?? "Signed in";
+  const loading = profileQuery.isFetching || evidencesQuery.isFetching;
+  const error =
+    profileQuery.error instanceof Error
+      ? profileQuery.error.message
+      : evidencesQuery.error instanceof Error
+        ? evidencesQuery.error.message
+        : null;
 
   return (
     <div className="auth-shell">
@@ -163,7 +145,7 @@ function AuthenticatedHome(): React.JSX.Element {
             <button
               type="button"
               className="auth-button ghost"
-              onClick={() => void reload()}
+              onClick={() => void evidencesQuery.refetch()}
               disabled={loading}
             >
               {loading ? "Refreshing…" : "Refresh"}

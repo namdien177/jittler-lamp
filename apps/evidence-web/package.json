@@ -12,6 +12,7 @@
     "@jittle-lamp/shared": "workspace:*",
     "@jittle-lamp/viewer-core": "workspace:*",
     "@jittle-lamp/viewer-react": "workspace:*",
+    "@tanstack/react-query": "^5.100.5",
     "@vercel/analytics": "^2.0.1",
     "fflate": "0.8.2",
     "react": "19.2.0",

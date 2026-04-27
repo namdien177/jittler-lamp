@@ -6,14 +6,13 @@ import {
   ClerkLoading,
   SignIn,
   SignedIn,
-  SignedOut,
-  useAuth
+  SignedOut
 } from "@clerk/clerk-react";
 import { useNavigate, useSearchParams } from "react-router";
 
-import { api } from "./api";
 import { AppHeader } from "./app-header";
 import { clerkPublishableKey } from "./env";
+import { useAcceptInvitation } from "./queries";
 
 function safeRedirectPath(input: string | null): string {
   if (!input) return "/";
@@ -22,30 +21,26 @@ function safeRedirectPath(input: string | null): string {
 }
 
 function JoinOrganizationForm(): React.JSX.Element {
-  const auth = useAuth();
   const navigate = useNavigate();
+  const acceptMutation = useAcceptInvitation();
   const [searchParams] = useSearchParams();
   const redirectPath = safeRedirectPath(searchParams.get("redirect"));
   const [token, setToken] = useState(searchParams.get("code") ?? "");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busy = acceptMutation.isPending;
 
-  const submit = async (): Promise<void> => {
+  const submit = (): void => {
     const trimmed = token.trim();
     if (!trimmed) {
       setError("Paste the invitation code.");
       return;
     }
-    setBusy(true);
     setError(null);
-    try {
-      await api.acceptInvitation(auth.getToken, trimmed);
-      navigate(redirectPath, { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to accept invitation.");
-    } finally {
-      setBusy(false);
-    }
+    acceptMutation.mutate(trimmed, {
+      onSuccess: () => navigate(redirectPath, { replace: true }),
+      onError: (err) =>
+        setError(err instanceof Error ? err.message : "Unable to accept invitation.")
+    });
   };
 
   return (
@@ -59,7 +54,7 @@ function JoinOrganizationForm(): React.JSX.Element {
             className="join-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void submit();
+              submit();
             }}
           >
             <input

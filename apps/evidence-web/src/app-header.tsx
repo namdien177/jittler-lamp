@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from "@clerk/clerk-react";
+import React, { useEffect, useRef, useState } from "react";
+import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/clerk-react";
 import { Link, useNavigate } from "react-router";
 
-import { api, type ApiOrganization } from "./api";
 import { clerkPublishableKey } from "./env";
+import { useAccountProfile, useSelectActiveOrganization } from "./queries";
 
 export function AppHeader(): React.JSX.Element | null {
   if (!clerkPublishableKey) return null;
@@ -30,34 +30,11 @@ export function AppHeader(): React.JSX.Element | null {
 }
 
 function OrganisationMenu(): React.JSX.Element {
-  const auth = useAuth();
   const navigate = useNavigate();
+  const profileQuery = useAccountProfile();
+  const selectOrgMutation = useSelectActiveOrganization();
   const [open, setOpen] = useState(false);
-  const [orgs, setOrgs] = useState<ApiOrganization[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busyOrgId, setBusyOrgId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const getToken = useCallback(() => auth.getToken(), [auth]);
-
-  const reload = useCallback(async (): Promise<void> => {
-    if (!auth.isSignedIn) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const profile = await api.fetchAccountProfile(getToken);
-      setOrgs(profile.organizations);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load organisations.");
-    } finally {
-      setLoading(false);
-    }
-  }, [auth.isSignedIn, getToken]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
 
   useEffect(() => {
     if (!open) return;
@@ -75,18 +52,20 @@ function OrganisationMenu(): React.JSX.Element {
     };
   }, [open]);
 
-  const handleSwitch = async (orgId: string): Promise<void> => {
-    setBusyOrgId(orgId);
-    setError(null);
-    try {
-      await api.selectActiveOrganization(getToken, orgId);
-      setOrgs((prev) => prev.map((org) => ({ ...org, isActive: org.id === orgId })));
-      setOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to switch workspace.");
-    } finally {
-      setBusyOrgId(null);
-    }
+  const orgs = profileQuery.data?.organizations ?? [];
+  const loading = profileQuery.isFetching;
+  const error =
+    profileQuery.error instanceof Error
+      ? profileQuery.error.message
+      : selectOrgMutation.error instanceof Error
+        ? selectOrgMutation.error.message
+        : null;
+  const busyOrgId = selectOrgMutation.isPending ? selectOrgMutation.variables ?? null : null;
+
+  const handleSwitch = (orgId: string): void => {
+    selectOrgMutation.mutate(orgId, {
+      onSuccess: () => setOpen(false)
+    });
   };
 
   const goToJoin = (): void => {
@@ -102,11 +81,7 @@ function OrganisationMenu(): React.JSX.Element {
       <button
         type="button"
         className="btn-ghost btn-sm org-menu-trigger"
-        onClick={() => {
-          const next = !open;
-          setOpen(next);
-          if (next) void reload();
-        }}
+        onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -129,7 +104,7 @@ function OrganisationMenu(): React.JSX.Element {
                     className="org-menu-item"
                     data-active={org.isActive ? "true" : "false"}
                     disabled={busyOrgId !== null}
-                    onClick={() => void handleSwitch(org.id)}
+                    onClick={() => handleSwitch(org.id)}
                   >
                     <span className="org-menu-item-name">{org.name}</span>
                     <span className="org-menu-item-meta">

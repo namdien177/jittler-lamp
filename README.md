@@ -9,13 +9,13 @@
 For macOS arm64, install the latest desktop release from Terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittle-lamp/main/scripts/release/install-macos-desktop.sh | bash
 ```
 
 To install a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | JITTLE_LAMP_VERSION=vX.Y.Z bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittle-lamp/main/scripts/release/install-macos-desktop.sh | JITTLE_LAMP_VERSION=vX.Y.Z bash
 ```
 
 The same command can also replace an existing install with the latest release. For unsigned/ad-hoc builds, use this terminal installer for upgrades too; the macOS in-app updater requires Developer ID signed/notarized builds to pass update signature validation reliably.
@@ -204,13 +204,13 @@ This means a no-cost Apple account is enough for local development, but it is no
 Unsigned macOS releases may still be blocked by Gatekeeper after browser download. For internal installs, use the terminal installer so the DMG is downloaded and copied to `/Applications` without browser quarantine metadata:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittle-lamp/main/scripts/release/install-macos-desktop.sh | bash
 ```
 
 To install a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/namdien177/jittler-lamp/main/scripts/release/install-macos-desktop.sh | JITTLE_LAMP_VERSION=vX.Y.Z bash
+curl -fsSL https://raw.githubusercontent.com/namdien177/jittle-lamp/main/scripts/release/install-macos-desktop.sh | JITTLE_LAMP_VERSION=vX.Y.Z bash
 ```
 
 The same terminal installer can be rerun later to replace an existing app with the latest release. The in-app updater downloads update artifacts from inside the packaged desktop app, so it does not go through the browser quarantine path. However, macOS still validates the replacement app through ShipIt/Squirrel. For unsigned/ad-hoc builds that validation can fail because each release has a different ad-hoc code requirement. Use the terminal installer for ad-hoc upgrades, and reserve in-app updates for Developer ID signed/notarized releases.
