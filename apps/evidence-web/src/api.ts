@@ -107,6 +107,13 @@ export const api = {
       orgId ? `/evidences?orgId=${encodeURIComponent(orgId)}` : "/evidences"
     ),
 
+  deleteEvidence: (getToken: FetchToken, evidenceId: string) =>
+    authedFetch<{ evidence: { id: string; orgId: string } }>(
+      getToken,
+      `/evidences/${encodeURIComponent(evidenceId)}`,
+      { method: "DELETE" }
+    ),
+
   listEvidenceArtifacts: (getToken: FetchToken, evidenceId: string, orgId?: string) =>
     authedFetch<{ artifacts: EvidenceArtifact[] }>(
       getToken,

@@ -321,14 +321,8 @@ a:hover {
 .sidebar-brand-mark {
   width: 28px;
   height: 28px;
+  object-fit: cover;
   border-radius: var(--radius-sm);
-  background: var(--accent);
-  display: grid;
-  place-items: center;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 13px;
-  color: #06120a;
 }
 
 .sidebar-brand-name {

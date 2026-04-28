@@ -58,6 +58,24 @@ export function useEvidences() {
   });
 }
 
+export function useDeleteEvidence() {
+  const getToken = useAuthToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (evidenceId: string) => api.deleteEvidence(getToken, evidenceId),
+    onSuccess: (_data, evidenceId) => {
+      queryClient.setQueryData<{ evidences: ApiEvidenceSummary[]; orgId: string } | undefined>(
+        queryKeys.evidences(),
+        (previous) =>
+          previous
+            ? { ...previous, evidences: previous.evidences.filter((evidence) => evidence.id !== evidenceId) }
+            : previous
+      );
+      queryClient.removeQueries({ queryKey: queryKeys.remoteEvidence({ remoteEvidenceId: evidenceId }) });
+    }
+  });
+}
+
 export function useSelectActiveOrganization() {
   const getToken = useAuthToken();
   const queryClient = useQueryClient();

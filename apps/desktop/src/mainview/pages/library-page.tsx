@@ -5,6 +5,7 @@ import { api, webOrigin, type ApiEvidenceSummary } from "../api";
 import { useDesktopAuth } from "../auth-context";
 import { filterSessions, groupSessionsByDate, type DatePreset, type SessionSortKey } from "../catalog-view";
 import type { DesktopController } from "../desktop-controller";
+import { syncDesktopSessionToServer } from "../session-sync";
 import { ConfirmDialog } from "../ui/dialog";
 import { useToast } from "../ui/toast";
 import { formatBytes, formatRelativeTime } from "../utils";
@@ -328,58 +329,14 @@ function SessionCard(props: {
     }
     setSyncing(true);
     try {
-      const upload = await desktop.prepareSessionUpload(session.sessionId);
-      const sourceMetadata = JSON.stringify({
-        localSessionId: upload.sessionId,
-        artifactFormat: "split",
-        artifacts: upload.artifacts.map((artifact) => ({
-          key: artifact.key,
-          kind: artifact.kind,
-          mimeType: artifact.mimeType,
-          bytes: artifact.bytes,
-          checksum: artifact.checksum
-        }))
-      });
       const replaceEvidenceId = session.remoteEvidenceId;
-      const started = await api.startDesktopSessionSync(auth.getToken, {
-        sessionId: upload.sessionId,
-        title: upload.title,
-        sourceMetadata,
-        ...(replaceEvidenceId ? { replaceEvidenceId } : {}),
-        artifacts: upload.artifacts.map((artifact) => ({
-          key: artifact.key,
-          kind: artifact.kind,
-          mimeType: artifact.mimeType,
-          bytes: artifact.bytes,
-          checksum: artifact.checksum
-        }))
-      });
-      for (const artifact of upload.artifacts) {
-        const uploadSession = started.uploadSessions.find((candidate) => candidate.key === artifact.key);
-        if (!uploadSession) throw new Error(`Missing upload session for ${artifact.key}`);
-        await api.uploadEvidenceBlob(auth.getToken, uploadSession.uploadUrl, artifact.payload, artifact.mimeType);
-        await api.completeEvidenceUpload(auth.getToken, uploadSession.uploadId, {
-          bytes: artifact.bytes,
-          checksum: artifact.checksum,
-          mimeType: artifact.mimeType
-        });
-      }
-      await desktop.markSessionRemoteSynced({
+      const evidence = await syncDesktopSessionToServer({
+        getToken: auth.getToken,
         sessionId: session.sessionId,
-        evidenceId: started.evidenceId,
-        orgId: started.organizationId
+        ...(replaceEvidenceId ? { replaceEvidenceId } : {}),
+        prepareSessionUpload: desktop.prepareSessionUpload,
+        markSessionRemoteSynced: desktop.markSessionRemoteSynced
       });
-      const evidence: ApiEvidenceSummary = {
-        id: started.evidenceId,
-        orgId: started.organizationId,
-        title: upload.title,
-        sourceType: "desktop-session",
-        sourceExternalId: upload.sessionId,
-        sourceMetadata,
-        createdBy: "",
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
       onRemoteSynced(evidence);
       toast.success(
         replaceEvidenceId ? "Resynced to server" : "Synced to server",
@@ -425,6 +382,8 @@ function SessionCard(props: {
       setSharing(false);
     }
   };
+
+  const syncActionLabel = hasLocalRecord && hasRemoteRecord ? "Resync" : hasRemoteRecord ? "Download" : "Sync";
 
   return (
     <article className="session-card">
@@ -494,9 +453,15 @@ function SessionCard(props: {
         <button className="button ghost sm" type="button" onClick={() => desktop.openSessionFolder(session.sessionId)} disabled={!hasLocalRecord}>
           Open folder
         </button>
-        {hasLocalRecord ? (
-          <button className="button secondary sm" type="button" onClick={() => void syncToServer()} disabled={!hasLocalRecord || syncing}>
-            {syncing ? "Syncing…" : "Sync"}
+        {hasLocalRecord || hasRemoteRecord ? (
+          <button
+            className="button secondary sm"
+            type="button"
+            onClick={() => (hasLocalRecord ? void syncToServer() : undefined)}
+            disabled={!hasLocalRecord || syncing}
+            title={!hasLocalRecord ? "Remote download is not available in the desktop app yet." : undefined}
+          >
+            {syncing ? "Syncing…" : syncActionLabel}
           </button>
         ) : null}
         <div className="share-menu-wrap" ref={shareRef}>

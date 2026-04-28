@@ -9,6 +9,7 @@ import type {
   SessionRecord,
   ViewerPayload
 } from "../rpc";
+import type { FetchToken } from "./api";
 import { createDesktopBridge, type DesktopBridge } from "./desktop-bridge";
 import { createDesktopNotesAdapter, createDesktopStorageAdapter } from "./adapters";
 import {
@@ -22,6 +23,7 @@ import {
 import { applyViewerPayload, createViewerState, resetViewerState, type ViewerState } from "./viewer-state";
 import { shouldClearViewerTempSession } from "./viewer-source";
 import { reportDesktopViewerTelemetry } from "./viewer-rollout";
+import { syncDesktopSessionToServer } from "./session-sync";
 import { findActiveIndex } from "@jittle-lamp/shared";
 import {
   createMergeGroup,
@@ -167,7 +169,14 @@ function cloneViewerState(state: ViewerState): ViewerState {
   };
 }
 
-export function useDesktopController(): DesktopController {
+function hasUploadableLocalRecord(session: SessionRecord): boolean {
+  return (
+    session.artifacts.some((artifact) => artifact.artifactName === "recording.webm") &&
+    session.artifacts.some((artifact) => artifact.artifactName === "session.archive.json")
+  );
+}
+
+export function useDesktopController(options: { authStatus?: string; getAuthToken?: FetchToken } = {}): DesktopController {
   const bridge = useMemo(() => createDesktopBridge(), []);
   const [state, setState] = useState<ViewState>(() => initialViewState());
   const [viewerState, setViewerState] = useState<ViewerState>(() => createViewerState());
@@ -179,6 +188,8 @@ export function useDesktopController(): DesktopController {
   const contextTargetIdRef = useRef<string | null>(null);
   const hasReportedViewerBootRef = useRef(false);
   const isAutoScrollingRef = useRef(false);
+  const autoSyncInFlightRef = useRef<Set<string>>(new Set());
+  const autoSyncAttemptedRef = useRef<Set<string>>(new Set());
   const storageAdapter = useMemo(() => (bridge ? createDesktopStorageAdapter(bridge) : null), [bridge]);
   const notesAdapter = useMemo(() => createDesktopNotesAdapter(), []);
 
@@ -394,6 +405,47 @@ export function useDesktopController(): DesktopController {
 
     return () => clearInterval(interval);
   }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge || options.authStatus !== "signed-in" || !options.getAuthToken) return;
+
+    const candidates = state.sessions
+      .filter((session) => hasUploadableLocalRecord(session))
+      .filter((session) => !session.remoteEvidenceId)
+      .filter((session) => !autoSyncInFlightRef.current.has(session.sessionId))
+      .filter((session) => !autoSyncAttemptedRef.current.has(session.sessionId))
+      .slice(0, 2);
+
+    for (const session of candidates) {
+      autoSyncInFlightRef.current.add(session.sessionId);
+      autoSyncAttemptedRef.current.add(session.sessionId);
+      void syncDesktopSessionToServer({
+        getToken: options.getAuthToken,
+        sessionId: session.sessionId,
+        prepareSessionUpload: (sessionId) => bridge.rpc.request.prepareSessionUpload({ sessionId }),
+        markSessionRemoteSynced: async (input) => {
+          await bridge.rpc.request.markSessionRemoteSynced(input);
+        }
+      })
+        .then(async () => {
+          patchState({
+            feedback: { tone: "success", text: "New companion recording synced to cloud." }
+          });
+          await reloadCatalog();
+        })
+        .catch((error) => {
+          patchState({
+            feedback: {
+              tone: "error",
+              text: formatErrorMessage(error, "Automatic cloud sync failed.")
+            }
+          });
+        })
+        .finally(() => {
+          autoSyncInFlightRef.current.delete(session.sessionId);
+        });
+    }
+  }, [bridge, options.authStatus, options.getAuthToken, state.sessions]);
 
   useEffect(() => {
     if (!bridge) return;

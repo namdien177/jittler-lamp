@@ -52,7 +52,7 @@ if (buildEnv === "stable") {
   if (missing.length > 0) {
     throw new Error(
       `Missing required stable desktop build environment: ${missing.join(", ")}. ` +
-        "Set these in the shell, the workspace .env for local packaging, or GitHub Actions variables/secrets for release builds."
+        "Set these in the shell, the workspace .env for local packaging, or GitHub Actions environment secrets for release builds."
     );
   }
 }
@@ -134,6 +134,10 @@ await Promise.all([
   Bun.write(
     new URL("index.css", viewsRoot),
     Bun.file(new URL("../src/mainview/index.css", import.meta.url))
+  ),
+  Bun.write(
+    new URL("logo.jpg", viewsRoot),
+    Bun.file(new URL("../../../assets/jittle-lamp-logo.jpg", import.meta.url))
   )
 ]);
 

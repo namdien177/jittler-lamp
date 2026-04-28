@@ -42,6 +42,10 @@ await Promise.all([
   Bun.write(
     new URL("offscreen.html", outdir),
     Bun.file(new URL("../src/offscreen.html", import.meta.url))
+  ),
+  Bun.write(
+    new URL("icon.jpeg", outdir),
+    Bun.file(new URL("../../../assets/jittle-lamp-extension-icon.jpg", import.meta.url))
   )
 ]);
 

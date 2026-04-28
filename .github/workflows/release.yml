@@ -109,6 +109,7 @@ jobs:
   build-desktop:
     needs: validate-tag
     runs-on: macos-14
+    environment: production
 
     steps:
       - name: Check out repository
@@ -148,9 +149,9 @@ jobs:
 
       - name: Package macOS desktop release
         env:
-          CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY || secrets.CLERK_PUBLISHABLE_KEY }}
-          JITTLE_LAMP_API_ORIGIN: ${{ vars.JITTLE_LAMP_API_ORIGIN || secrets.JITTLE_LAMP_API_ORIGIN }}
-          JITTLE_LAMP_WEB_ORIGIN: ${{ vars.JITTLE_LAMP_WEB_ORIGIN || secrets.JITTLE_LAMP_WEB_ORIGIN }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          JITTLE_LAMP_API_ORIGIN: ${{ secrets.JITTLE_LAMP_API_ORIGIN }}
+          JITTLE_LAMP_WEB_ORIGIN: ${{ secrets.JITTLE_LAMP_WEB_ORIGIN }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.signing.outputs.signed == 'true' && 'true' || 'false' }}
           CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
@@ -236,3 +237,45 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release create "${{ github.ref_name }}" release-artifacts/* --title "${{ github.ref_name }}" --generate-notes
+
+  publish-chrome-extension:
+    needs:
+      - build-extension
+      - build-desktop
+      - validate-tag
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.15"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download extension asset
+        uses: actions/download-artifact@v4
+        with:
+          name: release-extension
+          path: release-artifacts
+
+      - name: Publish Chrome Web Store extension
+        env:
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_PUBLISH_TYPE: ${{ secrets.CHROME_PUBLISH_TYPE || 'DEFAULT_PUBLISH' }}
+          CHROME_DEPLOY_PERCENTAGE: ${{ secrets.CHROME_DEPLOY_PERCENTAGE }}
+        run: bun run release:publish-chrome "release-artifacts/jittle-lamp-extension-v${{ needs.validate-tag.outputs.version }}.zip"

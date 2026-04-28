@@ -8,7 +8,19 @@ export const extensionManifest = {
   minimum_chrome_version: "123",
   action: {
     default_title: "jittle-lamp",
-    default_popup: "popup.html"
+    default_popup: "popup.html",
+    default_icon: {
+      "16": "icon.jpeg",
+      "32": "icon.jpeg",
+      "48": "icon.jpeg",
+      "128": "icon.jpeg"
+    }
+  },
+  icons: {
+    "16": "icon.jpeg",
+    "32": "icon.jpeg",
+    "48": "icon.jpeg",
+    "128": "icon.jpeg"
   },
   background: {
     service_worker: "background.js",

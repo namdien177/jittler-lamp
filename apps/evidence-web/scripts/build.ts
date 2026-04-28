@@ -100,6 +100,10 @@ await Promise.all([
   Bun.write(
     new URL("img-prev.png", distRoot),
     Bun.file(new URL("../assets/img-prev.png", import.meta.url))
+  ),
+  Bun.write(
+    new URL("logo.jpg", distRoot),
+    Bun.file(new URL("../../../assets/jittle-lamp-logo.jpg", import.meta.url))
   )
 ]);
 

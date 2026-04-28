@@ -145,11 +145,15 @@ The release workflow builds the extension from `apps/extension/dist` and publish
 
 - `jittle-lamp-extension-vX.Y.Z.zip`
 
-This ZIP is for **extract + Load unpacked** usage in Chromium-based browsers. It is not:
+The same tag workflow also submits that ZIP to the Chrome Web Store after the desktop artifact build succeeds. Configure these GitHub Actions environment secrets in the `production` environment before tagging a release:
 
-- a signed Chrome Web Store package
-- a `.crx` package
-- a Chrome Web Store publish flow
+- `CHROME_CLIENT_ID`
+- `CHROME_CLIENT_SECRET`
+- `CHROME_REFRESH_TOKEN`
+- `CHROME_PUBLISHER_ID`
+- `CHROME_EXTENSION_ID`
+
+The workflow uses the Chrome Web Store v2 publish API. `CHROME_PUBLISH_TYPE` may be set to `STAGED_PUBLISH`; otherwise the workflow uses `DEFAULT_PUBLISH`. `CHROME_DEPLOY_PERCENTAGE` may be set to an integer from `0` to `100` when you want a staged rollout percentage.
 
 Local build commands remain:
 
@@ -244,7 +248,7 @@ bun run --cwd apps/desktop package:ci
 
 Use `package:local` on a developer machine; it loads the workspace `.env` before invoking Electron Builder so local signing/notarization credentials are available. Use `package:ci` in CI/CD; it only uses the environment variables injected by the workflow.
 
-The desktop renderer receives auth/API configuration at build time. Release builds require these GitHub Actions variables or secrets to be available before the tag workflow runs:
+The desktop renderer receives auth/API configuration at build time. Release builds require these GitHub Actions environment secrets in the `production` environment before the tag workflow runs:
 
 - `CLERK_PUBLISHABLE_KEY`
 - `JITTLE_LAMP_API_ORIGIN`

@@ -200,7 +200,7 @@ function Sidebar(): React.JSX.Element {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="sidebar-brand-mark">JL</div>
+        <img className="sidebar-brand-mark" src="./logo.jpg" alt="" aria-hidden="true" />
         <div className="column" style={{ gap: 2 }}>
           <span className="sidebar-brand-name">Jittle Lamp</span>
           <span className="sidebar-brand-version">v0.1.6 · desktop</span>
@@ -306,7 +306,8 @@ function MainHeader(): React.JSX.Element {
 }
 
 function DesktopAppLayout(): React.JSX.Element {
-  const desktop = useDesktopController();
+  const auth = useDesktopAuth();
+  const desktop = useDesktopController({ authStatus: auth.state.status, getAuthToken: auth.getToken });
 
   return (
     <DesktopControllerContext.Provider value={desktop}>

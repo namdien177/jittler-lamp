@@ -17,6 +17,7 @@
     "release:check-version": "bun run ./scripts/release/check-version-sync.ts",
     "release:set-version": "bun run ./scripts/release/set-version.ts",
     "release:package-extension": "bun run ./scripts/release/package-extension.ts",
+    "release:publish-chrome": "bun run ./scripts/release/publish-chrome-extension.ts",
     "release:collect-desktop": "bun run ./scripts/release/collect-desktop-artifact.ts",
     "typecheck": "bun x tsc --noEmit -p tsconfig.typecheck.json",
     "test": "bun test",

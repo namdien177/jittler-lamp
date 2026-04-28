@@ -10,7 +10,7 @@ import {
 } from "@clerk/clerk-react";
 import { Navigate, NavLink, useNavigate } from "react-router";
 
-import { useAccountProfile, useEvidences } from "./queries";
+import { useAccountProfile, useDeleteEvidence, useEvidences } from "./queries";
 
 function formatRelativeTime(value: number | string): string {
   const ms = typeof value === "string" ? Date.parse(value) : value;
@@ -65,6 +65,7 @@ function AuthenticatedHome(): React.JSX.Element {
   const navigate = useNavigate();
   const profileQuery = useAccountProfile();
   const evidencesQuery = useEvidences();
+  const deleteEvidence = useDeleteEvidence();
   const [search, setSearch] = useState("");
 
   const evidences = evidencesQuery.data?.evidences ?? [];
@@ -84,18 +85,21 @@ function AuthenticatedHome(): React.JSX.Element {
   }, [evidences, search]);
 
   const loading = profileQuery.isFetching || evidencesQuery.isFetching;
+  const deletingId = deleteEvidence.variables ?? null;
   const error =
     profileQuery.error instanceof Error
       ? profileQuery.error.message
       : evidencesQuery.error instanceof Error
         ? evidencesQuery.error.message
+        : deleteEvidence.error instanceof Error
+          ? deleteEvidence.error.message
         : null;
 
   return (
     <div className="auth-shell">
       <aside className="auth-sidebar">
         <div className="auth-sidebar-brand">
-          <div className="auth-sidebar-brand-mark">JL</div>
+          <img className="auth-sidebar-brand-mark" src="/logo.jpg" alt="" aria-hidden="true" />
           <div className="column auth-sidebar-brand-text">
             <span className="auth-sidebar-brand-name">Jittle Lamp</span>
             <span className="auth-sidebar-brand-version">web evidence</span>
@@ -203,6 +207,19 @@ function AuthenticatedHome(): React.JSX.Element {
                       onClick={() => navigate(`/evidence/${encodeURIComponent(evidence.id)}`)}
                     >
                       View
+                    </button>
+                    <button
+                      type="button"
+                      className="auth-button danger"
+                      disabled={deleteEvidence.isPending}
+                      onClick={() => {
+                        if (!window.confirm(`Delete ${evidence.title}? This removes the cloud evidence and share links.`)) {
+                          return;
+                        }
+                        deleteEvidence.mutate(evidence.id);
+                      }}
+                    >
+                      {deletingId === evidence.id ? "Deleting…" : "Delete"}
                     </button>
                   </div>
                 </article>
