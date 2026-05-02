@@ -45,6 +45,7 @@ export type ApiOrgSummary = {
   isPersonal: boolean;
   memberCount: number;
   createdAt: number;
+  joinedAt: number;
 };
 
 export type ApiMember = {
@@ -58,6 +59,13 @@ export type ApiMember = {
   role: string;
   joinedAt: number;
   guestExpiresAt: number | null;
+};
+
+export type ApiMembersResponse = {
+  members: ApiMember[];
+  total: number;
+  page: number;
+  limit: number;
 };
 
 export type ApiInvitation = {
@@ -217,6 +225,11 @@ export const api = {
       { method: "POST" }
     ),
 
+  leaveOrganization: (getToken: FetchToken, orgId: string) =>
+    authedFetch<{ ok: true }>(getToken, `/orgs/${encodeURIComponent(orgId)}/leave`, {
+      method: "POST"
+    }),
+
   listOrganizations: (getToken: FetchToken) =>
     authedFetch<{ organizations: ApiOrgSummary[] }>(getToken, "/orgs"),
 
@@ -232,8 +245,19 @@ export const api = {
       body: JSON.stringify({ name })
     }),
 
-  listMembers: (getToken: FetchToken, orgId: string) =>
-    authedFetch<{ members: ApiMember[] }>(getToken, `/orgs/${encodeURIComponent(orgId)}/members`),
+  listMembers: (
+    getToken: FetchToken,
+    orgId: string,
+    options: { search?: string | undefined; role?: "all" | "owner" | "moderator" | "member"; page?: number; limit?: number } = {}
+  ) => {
+    const query = new URLSearchParams();
+    if (options.search) query.set("search", options.search);
+    if (options.role && options.role !== "all") query.set("role", options.role);
+    if (options.page) query.set("page", String(options.page));
+    if (options.limit) query.set("limit", String(options.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return authedFetch<ApiMembersResponse>(getToken, `/orgs/${encodeURIComponent(orgId)}/members${suffix}`);
+  },
 
   listInvitations: (getToken: FetchToken, orgId: string) =>
     authedFetch<{ invitations: ApiInvitation[]; codes: ApiInvitationCode[] }>(

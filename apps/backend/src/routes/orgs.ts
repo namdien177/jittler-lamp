@@ -20,6 +20,7 @@ import {
 	ensureOrganizationManager,
 	ensureOrganizationMember,
 	ensureOrganizationOwner,
+	leaveOrganization,
 	listOrganizationInvitationCodes,
 	listOrganizationInvitations,
 	listOrganizationMembers,
@@ -45,6 +46,7 @@ const organizationSummarySchema = t.Object({
 	isPersonal: t.Boolean(),
 	memberCount: t.Number({ minimum: 0 }),
 	createdAt: t.Number(),
+	joinedAt: t.Number(),
 });
 
 const memberSummarySchema = t.Object({
@@ -283,9 +285,59 @@ export const createOrganizationRoutes = (auth: ClerkAuthPlugin) =>
 						},
 					},
 				)
+				.post(
+					"/orgs/:orgId/leave",
+					async ({ authContext, db, params, requestId, set }) => {
+						if (!db) {
+							set.status = 503;
+							return createDbUnavailableError(requestId);
+						}
+						const localUserId = requireLocalUser(
+							authContext.localUserId,
+							requestId,
+							set,
+						);
+						if (typeof localUserId !== "string") return localUserId;
+						try {
+							await leaveOrganization(db, {
+								organizationId: params.orgId,
+								localUserId,
+							});
+							return { ok: true };
+						} catch (error) {
+							set.status = 400;
+							return createApiError(
+								requestId,
+								"ORG_LEAVE_FAILED",
+								error instanceof Error
+									? error.message
+									: "Unable to leave organization",
+								400,
+							);
+						}
+					},
+					{
+						params: t.Object({ orgId: t.String({ minLength: 1 }) }),
+						response: {
+							200: t.Object({ ok: t.Boolean() }),
+							400: apiErrorSchema,
+							401: apiErrorSchema,
+							403: apiErrorSchema,
+							503: apiErrorSchema,
+						},
+					},
+				)
 				.get(
 					"/orgs/:orgId/members",
-					async ({ authContext, db, params, requestId, runtime, set }) => {
+					async ({
+						authContext,
+						db,
+						params,
+						query,
+						requestId,
+						runtime,
+						set,
+					}) => {
 						if (!db) {
 							set.status = 503;
 							return createDbUnavailableError(requestId);
@@ -310,14 +362,38 @@ export const createOrganizationRoutes = (auth: ClerkAuthPlugin) =>
 								403,
 							);
 						}
-						return {
-							members: await listOrganizationMembers(db, params.orgId, runtime),
-						};
+						return await listOrganizationMembers(db, {
+							organizationId: params.orgId,
+							runtime,
+							currentLocalUserId: localUserId,
+							search: query.search,
+							role: query.role ?? "all",
+							page: query.page,
+							limit: query.limit,
+						});
 					},
 					{
 						params: t.Object({ orgId: t.String({ minLength: 1 }) }),
+						query: t.Object({
+							search: t.Optional(t.String()),
+							role: t.Optional(
+								t.Union([
+									t.Literal("all"),
+									t.Literal("owner"),
+									t.Literal("moderator"),
+									t.Literal("member"),
+								]),
+							),
+							page: t.Optional(t.Number({ minimum: 1 })),
+							limit: t.Optional(t.Number({ minimum: 1, maximum: 100 })),
+						}),
 						response: {
-							200: t.Object({ members: t.Array(memberSummarySchema) }),
+							200: t.Object({
+								members: t.Array(memberSummarySchema),
+								total: t.Number({ minimum: 0 }),
+								page: t.Number({ minimum: 1 }),
+								limit: t.Number({ minimum: 1 }),
+							}),
 							401: apiErrorSchema,
 							403: apiErrorSchema,
 							500: apiErrorSchema,

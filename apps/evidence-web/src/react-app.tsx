@@ -492,6 +492,16 @@ const evidenceWebRoutes: JittleRouteObject[] = [
       <StatusScreen title="Clerk is not configured" detail="Set CLERK_PUBLISHABLE_KEY before managing organisations." />
     )
   },
+  {
+    path: "/organisations/:orgId",
+    element: clerkPublishableKey ? (
+      <ClerkAuthGate>
+        <OrganisationsPage />
+      </ClerkAuthGate>
+    ) : (
+      <StatusScreen title="Clerk is not configured" detail="Set CLERK_PUBLISHABLE_KEY before managing organisations." />
+    )
+  },
   { path: "/join", element: <JoinOrganizationPage /> },
   { path: "/privacy", element: <PrivacyPage /> }
 ];

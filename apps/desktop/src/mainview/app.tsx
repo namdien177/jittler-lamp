@@ -626,6 +626,7 @@ const desktopRoutes: JittleRouteObject[] = [
       { index: true, element: <LibraryRoute /> },
       { path: "cloud", element: <CloudPage /> },
       { path: "organisations", element: <OrganisationPage /> },
+      { path: "organisations/:orgId", element: <OrganisationPage /> },
       {
         path: "account",
         element: <AccountLayout />,

@@ -2,18 +2,31 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { z } from "zod/v4";
 
 import {
   api,
   type ApiCreatedInvitationCode,
+  type ApiEvidenceSummary,
+  type ApiInvitation,
   type ApiInvitationCode,
   type ApiMember,
+  type ApiMembersResponse,
   type ApiOrgSummary
 } from "./api";
 
+type DetailTab = "members" | "invitations" | "library" | "options";
+type SortKey = "name" | "joinedAt" | "role";
+type RoleFilter = "all" | "owner" | "moderator" | "member";
+
 const createOrgSchema = z.object({
   name: z.string().trim().min(1, "Organisation name is required.").max(100)
+});
+
+const acceptInvitationSchema = z.object({
+  token: z.string().trim().min(1, "Invitation code is required."),
+  password: z.string().optional()
 });
 
 const codeSchema = z.object({
@@ -30,12 +43,20 @@ const codeSchema = z.object({
 });
 
 type CreateOrgValues = z.infer<typeof createOrgSchema>;
+type AcceptInvitationValues = z.infer<typeof acceptInvitationSchema>;
 type CodeValues = z.infer<typeof codeSchema>;
+
+const tabs: Array<{ id: DetailTab; label: string }> = [
+  { id: "members", label: "Members" },
+  { id: "invitations", label: "Invitations" },
+  { id: "library", label: "Library" },
+  { id: "options", label: "Options" }
+];
 
 function formatRelativeTime(value: number): string {
   const diff = Date.now() - value;
   const day = 24 * 60 * 60 * 1000;
-  if (Math.abs(diff) < day) return diff >= 0 ? "today" : "today";
+  if (Math.abs(diff) < day) return "today";
   const days = Math.round(Math.abs(diff) / day);
   return diff >= 0 ? `${days}d ago` : `in ${days}d`;
 }
@@ -45,69 +66,63 @@ function memberName(member: ApiMember): string {
   return fullName || member.displayName || member.email || "Unknown user";
 }
 
+function sortOrganizations(orgs: ApiOrgSummary[], activeOrgId: string | null, sort: SortKey): ApiOrgSummary[] {
+  return [...orgs].sort((a, b) => {
+    if (a.id === activeOrgId) return -1;
+    if (b.id === activeOrgId) return 1;
+    if (sort === "name") return a.name.localeCompare(b.name);
+    if (sort === "role") return a.role.localeCompare(b.role) || a.name.localeCompare(b.name);
+    return a.joinedAt - b.joinedAt;
+  });
+}
+
+function currentTab(value: string | null): DetailTab {
+  return value === "invitations" || value === "library" || value === "options" ? value : "members";
+}
+
 export function OrganisationsPage(): React.JSX.Element {
+  const { orgId } = useParams();
+  return orgId ? <OrganisationDetailPage orgId={orgId} /> : <OrganisationListPage />;
+}
+
+function OrganisationListPage(): React.JSX.Element {
   const auth = useAuth();
-  const createForm = useForm<CreateOrgValues>({
-    resolver: zodResolver(createOrgSchema),
-    defaultValues: { name: "" }
-  });
-  const codeForm = useForm<CodeValues>({
-    resolver: zodResolver(codeSchema),
-    defaultValues: {
-      label: "Team onboarding",
-      role: "member",
-      password: "",
-      emailDomain: "",
-      expiresDays: "",
-      guestDays: ""
-    }
-  });
+  const navigate = useNavigate();
+  const createForm = useForm<CreateOrgValues>({ resolver: zodResolver(createOrgSchema), defaultValues: { name: "" } });
+  const acceptForm = useForm<AcceptInvitationValues>({ resolver: zodResolver(acceptInvitationSchema), defaultValues: { token: "", password: "" } });
   const [orgs, setOrgs] = useState<ApiOrgSummary[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
-  const [members, setMembers] = useState<ApiMember[]>([]);
-  const [codes, setCodes] = useState<ApiInvitationCode[]>([]);
-  const [createdCode, setCreatedCode] = useState<ApiCreatedInvitationCode | null>(null);
-  const [search, setSearch] = useState("");
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortKey>("name");
+  const [requiresPassword, setRequiresPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
   const getToken = () => auth.getToken();
-  const selectedOrg = orgs.find((org) => org.id === selectedOrgId) ?? null;
-  const canManage = selectedOrg?.role === "owner" || selectedOrg?.role === "moderator";
-  const isOwner = selectedOrg?.role === "owner";
 
-  const loadOrgs = async (): Promise<void> => {
-    const result = await api.listOrganizations(getToken);
-    setOrgs(result.organizations);
-    setSelectedOrgId((current) => current ?? result.organizations[0]?.id ?? null);
-  };
-
-  const loadDetails = async (orgId: string): Promise<void> => {
-    const [memberResult, inviteResult] = await Promise.all([
-      api.listMembers(getToken, orgId),
-      api.listInvitations(getToken, orgId).catch(() => ({ invitations: [], codes: [] }))
-    ]);
-    setMembers(memberResult.members);
-    setCodes(inviteResult.codes);
+  const load = async (): Promise<void> => {
+    const [profile, list] = await Promise.all([api.fetchAccountProfile(getToken), api.listOrganizations(getToken)]);
+    setActiveOrgId(profile.activeOrgId);
+    setOrgs(list.organizations);
   };
 
   useEffect(() => {
     if (!auth.isLoaded || !auth.isSignedIn) return;
-    void loadOrgs().catch((err) => setError(err instanceof Error ? err.message : "Unable to load organisations."));
+    void load().catch((err) => setError(err instanceof Error ? err.message : "Unable to load organisations."));
   }, [auth.isLoaded, auth.isSignedIn]);
 
-  useEffect(() => {
-    if (!selectedOrgId) return;
-    void loadDetails(selectedOrgId).catch((err) => setError(err instanceof Error ? err.message : "Unable to load organisation details."));
-  }, [selectedOrgId]);
+  const orderedOrgs = useMemo(() => sortOrganizations(orgs, activeOrgId, sort), [activeOrgId, orgs, sort]);
 
-  const filteredMembers = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return members;
-    return members.filter((member) =>
-      [memberName(member), member.email ?? "", member.role].some((value) => value.toLowerCase().includes(query))
-    );
-  }, [members, search]);
+  const activate = async (id: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.selectActiveOrganization(getToken, id);
+      setActiveOrgId(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to change active organisation.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const createOrg = async (values: CreateOrgValues): Promise<void> => {
     setBusy(true);
@@ -115,8 +130,8 @@ export function OrganisationsPage(): React.JSX.Element {
     try {
       const result = await api.createOrganization(getToken, values.name);
       createForm.reset();
-      await loadOrgs();
-      setSelectedOrgId(result.organization.id);
+      await load();
+      navigate(`/organisations/${result.organization.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create organisation.");
     } finally {
@@ -124,46 +139,26 @@ export function OrganisationsPage(): React.JSX.Element {
     }
   };
 
-  const createCode = async (values: CodeValues): Promise<void> => {
-    if (!selectedOrg) return;
+  const acceptInvite = async (values: AcceptInvitationValues): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.createInvitationCode(getToken, selectedOrg.id, {
-        label: values.label,
-        role: values.role,
-        emailDomain: values.emailDomain || null,
-        expiresAt: values.expiresDays ? Date.now() + Number(values.expiresDays) * 24 * 60 * 60 * 1000 : null,
-        guestExpiresAfterDays: values.guestDays ? Number(values.guestDays) : null,
-        ...(values.password?.trim() ? { password: values.password.trim() } : {})
-      });
-      setCreatedCode(result.code);
-      codeForm.setValue("password", "");
-      await loadDetails(selectedOrg.id);
+      if (!requiresPassword) {
+        const lookup = await api.lookupInvitation(getToken, values.token.trim());
+        if (lookup.code.requiresPassword) {
+          setRequiresPassword(true);
+          setError("This invitation code requires a password.");
+          return;
+        }
+      }
+      const result = await api.acceptInvitationWithPassword(getToken, values.token.trim(), requiresPassword ? values.password : undefined);
+      await load();
+      navigate(`/organisations/${result.organizationId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to create invitation code.");
+      setError(err instanceof Error ? err.message : "Unable to accept invitation.");
     } finally {
       setBusy(false);
     }
-  };
-
-  const setRole = async (member: ApiMember, role: "moderator" | "member"): Promise<void> => {
-    if (!selectedOrg) return;
-    await api.updateMemberRole(getToken, selectedOrg.id, member.membershipId, role);
-    await loadDetails(selectedOrg.id);
-  };
-
-  const removeMember = async (member: ApiMember): Promise<void> => {
-    if (!selectedOrg) return;
-    await api.removeMember(getToken, selectedOrg.id, member.membershipId);
-    await loadDetails(selectedOrg.id);
-    await loadOrgs();
-  };
-
-  const toggleCode = async (code: ApiInvitationCode): Promise<void> => {
-    if (!selectedOrg) return;
-    await api.setInvitationCodeLocked(getToken, selectedOrg.id, code.id, !code.lockedAt);
-    await loadDetails(selectedOrg.id);
   };
 
   return (
@@ -172,91 +167,404 @@ export function OrganisationsPage(): React.JSX.Element {
         <header className="auth-main-header">
           <div>
             <h1 className="auth-page-title">Organisations</h1>
-            <p className="auth-page-subtitle">Manage members, moderators, and reusable invitation codes.</p>
+            <p className="auth-page-subtitle">Workspaces you belong to, with the active organisation always first.</p>
           </div>
-          <form className="org-web-create" onSubmit={createForm.handleSubmit(createOrg)}>
+          <form className="org-web-inline-form" onSubmit={createForm.handleSubmit(createOrg)}>
             <input className="auth-search" placeholder="New organisation name" {...createForm.register("name")} />
             <button className="auth-button primary" type="submit" disabled={busy}>Create</button>
           </form>
         </header>
 
-        <div className="auth-main-content org-web-grid">
+        <div className="auth-main-content org-web-stack">
           {error ? <div className="auth-error-banner">{error}</div> : null}
-          <aside className="org-web-list">
-            {orgs.map((org) => (
-              <button key={org.id} className="org-web-list-item" data-active={org.id === selectedOrgId} type="button" onClick={() => setSelectedOrgId(org.id)}>
-                <strong>{org.name}</strong>
-                <span>{org.role} · {org.memberCount} members</span>
-              </button>
-            ))}
-          </aside>
+          <div className="org-web-toolbar">
+            <form className="org-web-inline-form" onSubmit={acceptForm.handleSubmit(acceptInvite)}>
+              <input className="auth-search" placeholder="Invitation code" {...acceptForm.register("token")} />
+              {requiresPassword ? <input className="auth-search" type="password" placeholder="Password" {...acceptForm.register("password")} /> : null}
+              <button className="auth-button ghost" type="submit" disabled={busy}>Join</button>
+            </form>
+            <label className="org-web-sort">
+              <span>Order by</span>
+              <select value={sort} onChange={(event) => setSort(event.currentTarget.value as SortKey)}>
+                <option value="name">Name</option>
+                <option value="joinedAt">Date joining</option>
+                <option value="role">Role</option>
+              </select>
+            </label>
+          </div>
 
-          <section className="org-web-detail">
-            {selectedOrg ? (
-              <>
-                <div className="auth-toolbar">
-                  <input className="auth-search" placeholder="Search members" value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
-                  <span className="auth-muted">{filteredMembers.length} members</span>
-                </div>
-                <table className="org-web-table">
-                  <thead><tr><th>User</th><th>Role</th><th>Joined</th><th>Guest until</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    {filteredMembers.map((member) => {
-                      const editable = canManage && member.role !== "owner" && (isOwner || member.role === "member");
-                      return (
-                        <tr key={member.membershipId}>
-                          <td><strong>{memberName(member)}</strong><span>{member.email ?? "No email"}</span></td>
-                          <td>{member.role}</td>
-                          <td>{formatRelativeTime(member.joinedAt)}</td>
-                          <td>{member.guestExpiresAt ? formatRelativeTime(member.guestExpiresAt) : "Permanent"}</td>
-                          <td>
-                            {editable && isOwner ? (
-                              <select value={member.role === "moderator" ? "moderator" : "member"} onChange={(event) => void setRole(member, event.currentTarget.value as "moderator" | "member")}>
-                                <option value="member">Member</option>
-                                <option value="moderator">Moderator</option>
-                              </select>
-                            ) : null}
-                            {editable ? <button className="auth-button ghost" type="button" onClick={() => void removeMember(member)}>Remove</button> : null}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                {canManage ? (
-                  <form className="org-web-code-form" onSubmit={codeForm.handleSubmit(createCode)}>
-                    <input className="auth-search" placeholder="Code label" {...codeForm.register("label")} />
-                    <select {...codeForm.register("role")}><option value="member">Member</option><option value="moderator">Moderator</option></select>
-                    <input className="auth-search" type="password" placeholder="Password optional" {...codeForm.register("password")} />
-                    <input className="auth-search" placeholder="Email domain optional" {...codeForm.register("emailDomain")} />
-                    <input className="auth-search" type="number" min="1" placeholder="Expires days" {...codeForm.register("expiresDays")} />
-                    <select {...codeForm.register("guestDays")}><option value="">Permanent</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select>
-                    <button className="auth-button primary" type="submit" disabled={busy || codes.length >= 3}>Create code</button>
-                  </form>
-                ) : null}
-                {createdCode ? <div className="auth-error-banner">New code: {createdCode.code}</div> : null}
-                <table className="org-web-table">
-                  <thead><tr><th>Code</th><th>Restrictions</th><th>Guest</th><th>Status</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    {codes.map((code) => (
-                      <tr key={code.id}>
-                        <td><strong>{code.label}</strong><span>{code.role}</span></td>
-                        <td>{[code.hasPassword ? "password" : null, code.emailDomain ? `@${code.emailDomain}` : null].filter(Boolean).join(" · ") || "None"}</td>
-                        <td>{code.guestExpiresAfterDays ? `${code.guestExpiresAfterDays} days` : "Permanent"}</td>
-                        <td>{code.lockedAt ? "Locked" : "Active"}</td>
-                        <td>{isOwner ? <button className="auth-button ghost" type="button" onClick={() => void toggleCode(code)}>{code.lockedAt ? "Unlock" : "Lock"}</button> : null}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            ) : (
-              <div className="auth-empty"><h3>No organisation selected</h3></div>
-            )}
+          <section className="org-web-panel">
+            <table className="org-web-table">
+              <thead><tr><th>Organisation</th><th>Role</th><th>Joined</th><th>Members</th><th>Actions</th></tr></thead>
+              <tbody>
+                {orderedOrgs.map((org) => (
+                  <tr key={org.id} data-active={org.id === activeOrgId}>
+                    <td><strong>{org.name}</strong><span>{org.isPersonal ? "Personal workspace" : "Organisation workspace"}</span></td>
+                    <td><span className="auth-chip">{org.role}</span></td>
+                    <td>{formatRelativeTime(org.joinedAt)}</td>
+                    <td>{org.memberCount}</td>
+                    <td>
+                      <div className="org-web-actions">
+                        <button className={org.id === activeOrgId ? "auth-button" : "auth-button primary"} type="button" disabled={busy || org.id === activeOrgId} onClick={() => void activate(org.id)}>Active</button>
+                        <button className="auth-button ghost" type="button" onClick={() => navigate(`/organisations/${org.id}`)}>Manage</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {orderedOrgs.length === 0 ? <tr><td colSpan={5}>No organisations yet.</td></tr> : null}
+              </tbody>
+            </table>
           </section>
         </div>
       </main>
     </div>
+  );
+}
+
+function OrganisationDetailPage(props: { orgId: string }): React.JSX.Element {
+  const { orgId } = props;
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = currentTab(searchParams.get("tab"));
+  const [orgs, setOrgs] = useState<ApiOrgSummary[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [membersResult, setMembersResult] = useState<ApiMembersResponse>({ members: [], total: 0, page: 1, limit: 20 });
+  const [memberSearch, setMemberSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  const [memberPage, setMemberPage] = useState(1);
+  const [invitations, setInvitations] = useState<ApiInvitation[]>([]);
+  const [codes, setCodes] = useState<ApiInvitationCode[]>([]);
+  const [createdCode, setCreatedCode] = useState<ApiCreatedInvitationCode | null>(null);
+  const [evidences, setEvidences] = useState<ApiEvidenceSummary[]>([]);
+  const [creatorMembers, setCreatorMembers] = useState<ApiMember[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const getToken = () => auth.getToken();
+  const org = orgs.find((candidate) => candidate.id === orgId) ?? null;
+  const canManage = org?.role === "owner" || org?.role === "moderator";
+  const isOwner = org?.role === "owner";
+  const pages = Math.max(1, Math.ceil(membersResult.total / membersResult.limit));
+  const creatorByUserId = useMemo(() => new Map(creatorMembers.map((member) => [member.userId, memberName(member)])), [creatorMembers]);
+
+  const loadShell = async (): Promise<void> => {
+    const [profile, list] = await Promise.all([api.fetchAccountProfile(getToken), api.listOrganizations(getToken)]);
+    setActiveOrgId(profile.activeOrgId);
+    setOrgs(list.organizations);
+    if (!list.organizations.some((candidate) => candidate.id === orgId)) navigate("/organisations");
+  };
+
+  const loadMembers = async (): Promise<void> => {
+    const result = await api.listMembers(getToken, orgId, {
+      search: memberSearch.trim() || undefined,
+      role: roleFilter,
+      page: memberPage,
+      limit: 20
+    });
+    setMembersResult(result);
+  };
+
+  const loadInvitations = async (): Promise<void> => {
+    const result = await api.listInvitations(getToken, orgId);
+    setInvitations(result.invitations);
+    setCodes(result.codes);
+  };
+
+  useEffect(() => {
+    if (!auth.isLoaded || !auth.isSignedIn) return;
+    void loadShell().catch((err) => setError(err instanceof Error ? err.message : "Unable to load organisation."));
+  }, [auth.isLoaded, auth.isSignedIn, orgId]);
+
+  useEffect(() => {
+    if (tab !== "members" || !auth.isSignedIn) return;
+    void loadMembers().catch((err) => setError(err instanceof Error ? err.message : "Unable to load members."));
+  }, [auth.isSignedIn, orgId, tab, memberSearch, roleFilter, memberPage]);
+
+  useEffect(() => {
+    if (tab !== "invitations" || !canManage) return;
+    void loadInvitations().catch((err) => setError(err instanceof Error ? err.message : "Unable to load invitations."));
+  }, [canManage, orgId, tab]);
+
+  useEffect(() => {
+    if (tab !== "library" || !auth.isSignedIn) return;
+    void Promise.all([
+      api.listEvidences(getToken, orgId),
+      api.listMembers(getToken, orgId, { limit: 100 })
+    ]).then(([evidenceResult, memberResult]) => {
+      setEvidences(evidenceResult.evidences);
+      setCreatorMembers(memberResult.members);
+    }).catch((err) => setError(err instanceof Error ? err.message : "Unable to load organisation library."));
+  }, [auth.isSignedIn, orgId, tab]);
+
+  const setTab = (next: DetailTab): void => setSearchParams(next === "members" ? {} : { tab: next });
+
+  const updateRole = async (member: ApiMember, role: "moderator" | "member"): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateMemberRole(getToken, orgId, member.membershipId, role);
+      await loadMembers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update member.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeMember = async (member: ApiMember): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.removeMember(getToken, orgId, member.membershipId);
+      await loadMembers();
+      await loadShell();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to remove member.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const leave = async (): Promise<void> => {
+    if (!org || !window.confirm(`Leave ${org.name}?`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.leaveOrganization(getToken, org.id);
+      navigate("/organisations");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to leave organisation.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="auth-shell">
+      <main className="auth-main org-web-main">
+        <header className="auth-main-header">
+          <div>
+            <button className="auth-button ghost" type="button" onClick={() => navigate("/organisations")}>Back</button>
+            <h1 className="auth-page-title">{org?.name ?? "Organisation"}</h1>
+            <p className="auth-page-subtitle">{org ? `${org.memberCount} members · your role is ${org.role}` : "Loading organisation..."}</p>
+          </div>
+          {org?.id === activeOrgId ? <span className="auth-chip">active</span> : null}
+        </header>
+
+        <div className="auth-main-content org-web-stack">
+          <div className="org-web-tabs">{tabs.map((item) => <button key={item.id} type="button" data-active={tab === item.id} onClick={() => setTab(item.id)}>{item.label}</button>)}</div>
+          {error ? <div className="auth-error-banner">{error}</div> : null}
+
+          {tab === "members" ? (
+            <section className="org-web-panel">
+              <div className="org-web-toolbar">
+                <input className="auth-search" placeholder="Search members" value={memberSearch} onChange={(event) => { setMemberPage(1); setMemberSearch(event.currentTarget.value); }} />
+                <select value={roleFilter} onChange={(event) => { setMemberPage(1); setRoleFilter(event.currentTarget.value as RoleFilter); }}>
+                  <option value="all">All roles</option>
+                  <option value="owner">Owner</option>
+                  <option value="moderator">Moderator</option>
+                  <option value="member">Member</option>
+                </select>
+              </div>
+              <MembersTable members={membersResult.members} canManage={canManage} isOwner={isOwner} busy={busy} onRoleChange={updateRole} onRemove={removeMember} />
+              <Pagination page={memberPage} pages={pages} total={membersResult.total} onPage={setMemberPage} />
+            </section>
+          ) : null}
+
+          {tab === "invitations" && org ? (
+            <InvitationsPanel org={org} canManage={canManage} isOwner={isOwner} busy={busy} codes={codes} invitations={invitations} createdCode={createdCode} setBusy={setBusy} setCreatedCode={setCreatedCode} reload={loadInvitations} setError={setError} />
+          ) : null}
+
+          {tab === "library" ? (
+            <section className="org-web-panel">
+              <table className="org-web-table">
+                <thead><tr><th>Evidence</th><th>Creator</th><th>Type</th><th>Updated</th><th>Action</th></tr></thead>
+                <tbody>
+                  {evidences.map((evidence) => (
+                    <tr key={evidence.id}>
+                      <td><strong>{evidence.title}</strong><span>{evidence.id}</span></td>
+                      <td>{creatorByUserId.get(evidence.createdBy) ?? evidence.createdBy}</td>
+                      <td><span className="auth-chip">{evidence.sourceType}</span></td>
+                      <td>{formatRelativeTime(evidence.updatedAt)}</td>
+                      <td><button className="auth-button ghost" type="button" onClick={() => navigate(`/evidence/${encodeURIComponent(evidence.id)}`)}>Open</button></td>
+                    </tr>
+                  ))}
+                  {evidences.length === 0 ? <tr><td colSpan={5}>No organisation evidence yet.</td></tr> : null}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
+
+          {tab === "options" && org ? (
+            <section className="org-web-panel org-web-options">
+              <OptionRow title="Leave organisation" detail="Remove your membership from this organisation.">
+                <button className="auth-button danger" type="button" disabled={busy || org.isPersonal} onClick={() => void leave()}>Leave</button>
+              </OptionRow>
+              {isOwner ? (
+                <OptionRow title="Transfer organisation" detail="Transfer ownership to another member before stepping away.">
+                  <button className="auth-button ghost" type="button" disabled>Transfer</button>
+                </OptionRow>
+              ) : null}
+            </section>
+          ) : null}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function MembersTable(props: {
+  members: ApiMember[];
+  canManage: boolean;
+  isOwner: boolean;
+  busy: boolean;
+  onRoleChange: (member: ApiMember, role: "moderator" | "member") => Promise<void>;
+  onRemove: (member: ApiMember) => Promise<void>;
+}): React.JSX.Element {
+  return (
+    <table className="org-web-table">
+      <thead><tr><th>User</th><th>Role</th><th>Joined</th><th>Guest until</th><th>Actions</th></tr></thead>
+      <tbody>
+        {props.members.map((member) => {
+          const editable = props.canManage && member.role !== "owner" && (props.isOwner || member.role === "member");
+          return (
+            <tr key={member.membershipId}>
+              <td><strong>{memberName(member)}</strong><span>{member.email ?? "No email"}</span></td>
+              <td><span className="auth-chip">{member.role}</span></td>
+              <td>{formatRelativeTime(member.joinedAt)}</td>
+              <td>{member.guestExpiresAt ? formatRelativeTime(member.guestExpiresAt) : "Permanent"}</td>
+              <td><div className="org-web-actions">{editable && props.isOwner ? <select value={member.role === "moderator" ? "moderator" : "member"} disabled={props.busy} onChange={(event) => void props.onRoleChange(member, event.currentTarget.value as "moderator" | "member")}><option value="member">Member</option><option value="moderator">Moderator</option></select> : null}{editable ? <button className="auth-button ghost" type="button" disabled={props.busy} onClick={() => void props.onRemove(member)}>Remove</button> : null}</div></td>
+            </tr>
+          );
+        })}
+        {props.members.length === 0 ? <tr><td colSpan={5}>No members match this filter.</td></tr> : null}
+      </tbody>
+    </table>
+  );
+}
+
+function Pagination(props: { page: number; pages: number; total: number; onPage: (page: number) => void }): React.JSX.Element {
+  return (
+    <div className="org-web-pagination">
+      <span className="auth-muted">{props.total} member{props.total === 1 ? "" : "s"}</span>
+      <div className="org-web-actions">
+        <button className="auth-button ghost" type="button" disabled={props.page <= 1} onClick={() => props.onPage(props.page - 1)}>Previous</button>
+        <span className="auth-muted">Page {props.page} of {props.pages}</span>
+        <button className="auth-button ghost" type="button" disabled={props.page >= props.pages} onClick={() => props.onPage(props.page + 1)}>Next</button>
+      </div>
+    </div>
+  );
+}
+
+function OptionRow(props: { title: string; detail: string; children: React.ReactNode }): React.JSX.Element {
+  return <div className="org-web-option-row"><div><h3>{props.title}</h3><p>{props.detail}</p></div>{props.children}</div>;
+}
+
+function InvitationsPanel(props: {
+  org: ApiOrgSummary;
+  canManage: boolean;
+  isOwner: boolean;
+  busy: boolean;
+  codes: ApiInvitationCode[];
+  invitations: ApiInvitation[];
+  createdCode: ApiCreatedInvitationCode | null;
+  setBusy: (busy: boolean) => void;
+  setCreatedCode: (code: ApiCreatedInvitationCode | null) => void;
+  reload: () => Promise<void>;
+  setError: (error: string | null) => void;
+}): React.JSX.Element {
+  const auth = useAuth();
+  const form = useForm<CodeValues>({
+    resolver: zodResolver(codeSchema),
+    defaultValues: { label: "Team onboarding", role: "member", password: "", emailDomain: "", expiresDays: "", guestDays: "" }
+  });
+  const getToken = () => auth.getToken();
+
+  const createCode = async (values: CodeValues): Promise<void> => {
+    props.setBusy(true);
+    props.setError(null);
+    try {
+      const result = await api.createInvitationCode(getToken, props.org.id, {
+        label: values.label,
+        role: values.role,
+        emailDomain: values.emailDomain || null,
+        expiresAt: values.expiresDays ? Date.now() + Number(values.expiresDays) * 24 * 60 * 60 * 1000 : null,
+        guestExpiresAfterDays: values.guestDays ? Number(values.guestDays) : null,
+        ...(values.password?.trim() ? { password: values.password.trim() } : {})
+      });
+      props.setCreatedCode(result.code);
+      form.setValue("password", "");
+      await props.reload();
+    } catch (err) {
+      props.setError(err instanceof Error ? err.message : "Unable to create invitation code.");
+    } finally {
+      props.setBusy(false);
+    }
+  };
+
+  const toggleCode = async (code: ApiInvitationCode): Promise<void> => {
+    props.setBusy(true);
+    props.setError(null);
+    try {
+      await api.setInvitationCodeLocked(getToken, props.org.id, code.id, !code.lockedAt);
+      await props.reload();
+    } catch (err) {
+      props.setError(err instanceof Error ? err.message : "Unable to update invitation code.");
+    } finally {
+      props.setBusy(false);
+    }
+  };
+
+  const deleteCode = async (code: ApiInvitationCode): Promise<void> => {
+    props.setBusy(true);
+    props.setError(null);
+    try {
+      await api.deleteInvitationCode(getToken, props.org.id, code.id);
+      await props.reload();
+    } catch (err) {
+      props.setError(err instanceof Error ? err.message : "Unable to delete invitation code.");
+    } finally {
+      props.setBusy(false);
+    }
+  };
+
+  if (!props.canManage) {
+    return <div className="auth-empty"><h3>Member access</h3><p>Owners and moderators manage invitation codes.</p></div>;
+  }
+
+  return (
+    <section className="org-web-panel org-web-stack">
+      <form className="org-web-code-form" onSubmit={form.handleSubmit(createCode)}>
+        <input className="auth-search" placeholder="Code label" {...form.register("label")} />
+        <select {...form.register("role")}><option value="member">Member</option><option value="moderator">Moderator</option></select>
+        <input className="auth-search" type="password" placeholder="Password optional" {...form.register("password")} />
+        <input className="auth-search" placeholder="Email domain optional" {...form.register("emailDomain")} />
+        <input className="auth-search" type="number" min="1" placeholder="Expires days" {...form.register("expiresDays")} />
+        <select {...form.register("guestDays")}><option value="">Permanent</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select>
+        <button className="auth-button primary" type="submit" disabled={props.busy || props.codes.length >= 3}>Create code</button>
+      </form>
+      {props.createdCode ? <div className="auth-error-banner">New code: {props.createdCode.code}</div> : null}
+      <table className="org-web-table">
+        <thead><tr><th>Code</th><th>Restrictions</th><th>Guest</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {props.codes.map((code) => (
+            <tr key={code.id}>
+              <td><strong>{code.label}</strong><span>{code.role}</span></td>
+              <td>{[code.hasPassword ? "password" : null, code.emailDomain ? `@${code.emailDomain}` : null, code.expiresAt ? `expires ${formatRelativeTime(code.expiresAt)}` : null].filter(Boolean).join(" · ") || "None"}</td>
+              <td>{code.guestExpiresAfterDays ? `${code.guestExpiresAfterDays} days` : "Permanent"}</td>
+              <td><span className="auth-chip">{code.lockedAt ? "locked" : "active"}</span></td>
+              <td><div className="org-web-actions">{props.isOwner ? <button className="auth-button ghost" type="button" disabled={props.busy} onClick={() => void toggleCode(code)}>{code.lockedAt ? "Unlock" : "Lock"}</button> : null}<button className="auth-button ghost" type="button" disabled={props.busy} onClick={() => void deleteCode(code)}>Delete</button></div></td>
+            </tr>
+          ))}
+          {props.codes.length === 0 ? <tr><td colSpan={5}>No static codes yet.</td></tr> : null}
+        </tbody>
+      </table>
+      {props.invitations.length > 0 ? (
+        <table className="org-web-table">
+          <thead><tr><th>Direct invitation</th><th>Role</th><th>Status</th></tr></thead>
+          <tbody>{props.invitations.map((invitation) => <tr key={invitation.id}><td>{invitation.email}</td><td>{invitation.role}</td><td>{invitation.status}</td></tr>)}</tbody>
+        </table>
+      ) : null}
+    </section>
   );
 }

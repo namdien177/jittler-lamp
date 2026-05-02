@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, ne } from "drizzle-orm";
 import type { z } from "zod/v4";
 import {
 	createOrganizationInputSchema,
@@ -27,6 +27,7 @@ export type OrganizationSummary = {
 	isPersonal: boolean;
 	memberCount: number;
 	createdAt: number;
+	joinedAt: number;
 };
 
 export type OrganizationMemberSummary = {
@@ -40,6 +41,13 @@ export type OrganizationMemberSummary = {
 	role: string;
 	joinedAt: number;
 	guestExpiresAt: number | null;
+};
+
+export type OrganizationMemberList = {
+	members: OrganizationMemberSummary[];
+	total: number;
+	page: number;
+	limit: number;
 };
 
 export type InvitationSummary = {
@@ -154,6 +162,7 @@ export const createOrganization = async (
 			isPersonal: organization.isPersonal,
 			memberCount: 1,
 			createdAt: organization.createdAt,
+			joinedAt: Date.now(),
 		};
 	});
 };
@@ -167,7 +176,7 @@ export const listOrganizationsForUser = async (
 			eq(organizationMembers.userId, localUserId),
 			isNull(organizationMembers.teamId),
 		),
-		columns: { organizationId: true, role: true },
+		columns: { organizationId: true, role: true, createdAt: true },
 		with: {
 			organization: {
 				columns: {
@@ -199,6 +208,7 @@ export const listOrganizationsForUser = async (
 		isPersonal: membership.organization.isPersonal,
 		memberCount: counts.get(membership.organizationId) ?? 1,
 		createdAt: membership.organization.createdAt,
+		joinedAt: membership.createdAt,
 	}));
 };
 
@@ -237,12 +247,21 @@ export const ensureOrganizationMember = async (
 
 export const listOrganizationMembers = async (
 	db: BackendDb,
-	organizationId: string,
-	runtime: { clerkSecretKey: string | undefined },
-): Promise<OrganizationMemberSummary[]> => {
+	args: {
+		organizationId: string;
+		runtime: { clerkSecretKey: string | undefined };
+		currentLocalUserId: string;
+		search?: string | undefined;
+		role?: "all" | "owner" | "moderator" | "member";
+		page?: number | undefined;
+		limit?: number | undefined;
+	},
+): Promise<OrganizationMemberList> => {
+	const page = Math.max(1, args.page ?? 1);
+	const limit = Math.min(100, Math.max(1, args.limit ?? 20));
 	const memberships = await db.query.organizationMembers.findMany({
 		where: and(
-			eq(organizationMembers.organizationId, organizationId),
+			eq(organizationMembers.organizationId, args.organizationId),
 			isNull(organizationMembers.teamId),
 		),
 		columns: {
@@ -262,7 +281,7 @@ export const listOrganizationMembers = async (
 	const summaries = await Promise.all(
 		memberships.map(async (membership) => {
 			const profile = await resolveClerkUserProfile(
-				runtime,
+				args.runtime,
 				membership.user.clerkUserId,
 			).catch(() => fallbackClerkUserProfile(membership.user.clerkUserId));
 
@@ -287,7 +306,37 @@ export const listOrganizationMembers = async (
 		}),
 	);
 
-	return summaries.sort((a, b) => a.joinedAt - b.joinedAt);
+	const search = args.search?.trim().toLowerCase() ?? "";
+	const filtered = summaries
+		.filter(
+			(member) =>
+				args.role === undefined ||
+				args.role === "all" ||
+				member.role === args.role,
+		)
+		.filter((member) => {
+			if (!search) return true;
+			return [
+				member.displayName,
+				member.email ?? "",
+				member.firstName ?? "",
+				member.lastName ?? "",
+				member.role,
+			].some((value) => value.toLowerCase().includes(search));
+		})
+		.sort((a, b) => {
+			if (a.userId === args.currentLocalUserId) return -1;
+			if (b.userId === args.currentLocalUserId) return 1;
+			return a.joinedAt - b.joinedAt;
+		});
+
+	const start = (page - 1) * limit;
+	return {
+		members: filtered.slice(start, start + limit),
+		total: filtered.length,
+		page,
+		limit,
+	};
 };
 
 export const renameOrganization = async (
@@ -371,6 +420,63 @@ export const removeOrganizationMember = async (
 	await db
 		.delete(organizationMembers)
 		.where(eq(organizationMembers.id, args.membershipId));
+};
+
+export const leaveOrganization = async (
+	db: BackendDb,
+	args: { organizationId: string; localUserId: string },
+): Promise<void> => {
+	const membership = await db.query.organizationMembers.findFirst({
+		where: and(
+			eq(organizationMembers.organizationId, args.organizationId),
+			eq(organizationMembers.userId, args.localUserId),
+			isNull(organizationMembers.teamId),
+		),
+		columns: { id: true, role: true },
+	});
+	if (!membership) throw new Error("Member not found.");
+	if (membership.role === "owner") {
+		const otherOwner = await db.query.organizationMembers.findFirst({
+			where: and(
+				eq(organizationMembers.organizationId, args.organizationId),
+				eq(organizationMembers.role, "owner"),
+				ne(organizationMembers.userId, args.localUserId),
+				isNull(organizationMembers.teamId),
+			),
+			columns: { id: true },
+		});
+		if (!otherOwner) {
+			throw new Error("Transfer ownership before leaving this organization.");
+		}
+	}
+
+	await db.transaction(async (tx) => {
+		await tx
+			.delete(organizationMembers)
+			.where(eq(organizationMembers.id, membership.id));
+
+		const user = await tx.query.users.findFirst({
+			where: eq(users.id, args.localUserId),
+			columns: { activeOrgId: true },
+		});
+		if (user?.activeOrgId !== args.organizationId) return;
+
+		const nextMembership = await tx.query.organizationMembers.findFirst({
+			where: and(
+				eq(organizationMembers.userId, args.localUserId),
+				isNull(organizationMembers.teamId),
+			),
+			columns: { organizationId: true },
+			orderBy: desc(organizationMembers.createdAt),
+		});
+		await tx
+			.update(users)
+			.set({
+				activeOrgId: nextMembership?.organizationId ?? null,
+				updatedAt: Date.now(),
+			})
+			.where(eq(users.id, args.localUserId));
+	});
 };
 
 const summarizeInvitation = (row: {
