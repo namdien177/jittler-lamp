@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
-import { api, type ApiEvidenceSummary, type ApiShareLinkSummary } from "../api";
-import { useDesktopAuth } from "../auth-context";
+import type { ApiEvidenceSummary } from "../api";
+import { useCreateShareLink, useEvidences, useRevokeShareLink, useShareLinks } from "../queries";
 import { Dialog } from "../ui/dialog";
 import { useToast } from "../ui/toast";
 import { copyToClipboard, formatRelativeTime } from "../utils";
@@ -14,33 +14,15 @@ const EXPIRY_OPTIONS = [
 ];
 
 export function CloudPage(): React.JSX.Element {
-  const auth = useDesktopAuth();
   const toast = useToast();
-  const [evidences, setEvidences] = useState<ApiEvidenceSummary[]>([]);
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const evidencesQuery = useEvidences();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<ApiEvidenceSummary | null>(null);
 
-  const reload = async (): Promise<void> => {
-    if (auth.state.status !== "signed-in") return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.listEvidences(auth.getToken);
-      setEvidences(result.evidences);
-      setOrgId(result.orgId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load evidences.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void reload();
-  }, [auth.state.status]);
+  const evidences = evidencesQuery.data?.evidences ?? [];
+  const orgId = evidencesQuery.data?.orgId ?? null;
+  const loading = evidencesQuery.isFetching;
+  const error = evidencesQuery.error instanceof Error ? evidencesQuery.error.message : null;
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -61,7 +43,7 @@ export function CloudPage(): React.JSX.Element {
           </p>
         </div>
         <div className="row">
-          <button className="button ghost sm" type="button" onClick={() => void reload()} disabled={loading}>
+          <button className="button ghost sm" type="button" onClick={() => void evidencesQuery.refetch()} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
@@ -159,57 +141,36 @@ function ShareDialog(props: {
   onMessage: (message: string, tone: "success" | "error" | "neutral") => void;
 }): React.JSX.Element {
   const { evidence, onClose, onMessage } = props;
-  const auth = useDesktopAuth();
-  const [shareLinks, setShareLinks] = useState<ApiShareLinkSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const shareLinksQuery = useShareLinks(evidence.id);
+  const createShareLink = useCreateShareLink();
+  const revokeShareLink = useRevokeShareLink();
   const [expiry, setExpiry] = useState<number>(EXPIRY_OPTIONS[2]?.value ?? 7 * 24 * 60 * 60 * 1000);
   const [createdToken, setCreatedToken] = useState<{ id: string; token: string; expiresAt: number } | null>(null);
 
-  const reload = async (): Promise<void> => {
-    setLoading(true);
-    try {
-      const response = await api.listShareLinks(auth.getToken, evidence.id);
-      setShareLinks(response.shareLinks);
-    } catch (error) {
-      onMessage(error instanceof Error ? error.message : "Unable to load share links.", "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void reload();
-  }, [evidence.id]);
+  const shareLinks = shareLinksQuery.data?.shareLinks ?? [];
+  const loading = shareLinksQuery.isFetching;
+  const busy = createShareLink.isPending || revokeShareLink.isPending;
 
   const handleCreate = async (): Promise<void> => {
-    setBusy(true);
     try {
-      const result = await api.createShareLink(auth.getToken, evidence.id, expiry);
+      const result = await createShareLink.mutateAsync({ evidenceId: evidence.id, expiresInMs: expiry });
       setCreatedToken({
         id: result.shareLink.id,
         token: result.shareLink.token,
         expiresAt: result.shareLink.expiresAt
       });
       onMessage("Share link created", "success");
-      await reload();
     } catch (error) {
       onMessage(error instanceof Error ? error.message : "Unable to create share link.", "error");
-    } finally {
-      setBusy(false);
     }
   };
 
   const handleRevoke = async (id: string): Promise<void> => {
-    setBusy(true);
     try {
-      await api.revokeShareLink(auth.getToken, id);
+      await revokeShareLink.mutateAsync({ evidenceId: evidence.id, shareLinkId: id });
       onMessage("Share link revoked", "success");
-      await reload();
     } catch (error) {
       onMessage(error instanceof Error ? error.message : "Unable to revoke share link.", "error");
-    } finally {
-      setBusy(false);
     }
   };
 

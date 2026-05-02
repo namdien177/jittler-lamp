@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { formatOffset, type TimelineItem, type TimelineSection } from "@jittle-lamp/shared";
 import { deriveSectionTimeline } from "@jittle-lamp/viewer-core";
 import { MemoryRouter, Navigate, NavLink, Outlet, useLocation, useNavigate, useRoutes } from "react-router";
@@ -30,6 +31,7 @@ import { SettingsPage } from "./pages/settings-page";
 import { ToastProvider, useToast } from "./ui/toast";
 import { createDesktopNotesAdapter } from "./adapters";
 import { formatRuntimeLabel } from "./catalog-view";
+import { createQueryClient } from "./queries";
 import { getInitials } from "./utils";
 
 const signInPath = "/sign-in";
@@ -646,19 +648,23 @@ function DesktopRoutes(): React.JSX.Element {
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("Desktop main view root element was not found.");
 
+const queryClient = createQueryClient();
+
 createRoot(root).render(
   <MemoryRouter>
-    <ToastProvider>
-      {clerkPublishableKey ? (
-        <DesktopClerkProvider>
-          <DesktopAuthProvider>
-            <DesktopRoutes />
-          </DesktopAuthProvider>
-        </DesktopClerkProvider>
-      ) : (
-        <MissingClerkConfigPage />
-      )}
-      <Analytics />
-    </ToastProvider>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        {clerkPublishableKey ? (
+          <DesktopClerkProvider>
+            <DesktopAuthProvider>
+              <DesktopRoutes />
+            </DesktopAuthProvider>
+          </DesktopClerkProvider>
+        ) : (
+          <MissingClerkConfigPage />
+        )}
+        <Analytics />
+      </ToastProvider>
+    </QueryClientProvider>
   </MemoryRouter>
 );

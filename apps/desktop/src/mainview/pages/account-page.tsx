@@ -1,32 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 
-import { api, type ApiAccountProfile } from "../api";
 import { getAccountDisplayLabel, useDesktopAuth } from "../auth-context";
+import { useAccountProfile } from "../queries";
 import { getInitials } from "../utils";
 
 export function AccountPage(): React.JSX.Element {
   const auth = useDesktopAuth();
-  const [profile, setProfile] = useState<ApiAccountProfile | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = async (): Promise<void> => {
-    if (auth.state.status !== "signed-in") return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.fetchAccountProfile(auth.getToken);
-      setProfile(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load profile.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void reload();
-  }, [auth.state.status]);
+  const profileQuery = useAccountProfile();
 
   if (auth.state.status !== "signed-in") {
     return (
@@ -39,6 +19,9 @@ export function AccountPage(): React.JSX.Element {
     );
   }
 
+  const profile = profileQuery.data ?? null;
+  const loading = profileQuery.isFetching;
+  const error = profileQuery.error instanceof Error ? profileQuery.error.message : null;
   const displayLabel = profile ? getAccountDisplayLabel(profile, auth.state.label) : auth.state.label;
   const activeOrg = profile?.organizations.find((org) => org.isActive) ?? null;
 
@@ -50,7 +33,7 @@ export function AccountPage(): React.JSX.Element {
           <p className="page-subtitle">Your signed-in identity and desktop session state.</p>
         </div>
         <div className="row">
-          <button className="button ghost sm" type="button" onClick={() => void reload()} disabled={loading}>
+          <button className="button ghost sm" type="button" onClick={() => void profileQuery.refetch()} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
           <button className="button danger sm" type="button" onClick={() => void auth.signOut()}>
