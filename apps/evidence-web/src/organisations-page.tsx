@@ -15,6 +15,7 @@ import {
   type ApiMembersResponse,
   type ApiOrgSummary
 } from "./api";
+import { AuthenticatedWebLayout } from "./auth-layout";
 
 type DetailTab = "members" | "invitations" | "library" | "options";
 type SortKey = "name" | "joinedAt" | "role";
@@ -163,7 +164,7 @@ function OrganisationListPage(): React.JSX.Element {
   };
 
   return (
-    <div className="auth-shell">
+    <AuthenticatedWebLayout>
       <main className="auth-main org-web-main">
         <header className="auth-main-header">
           <div>
@@ -218,7 +219,7 @@ function OrganisationListPage(): React.JSX.Element {
           </section>
         </div>
       </main>
-    </div>
+    </AuthenticatedWebLayout>
   );
 }
 
@@ -337,7 +338,7 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
   };
 
   return (
-    <div className="auth-shell">
+    <AuthenticatedWebLayout>
       <main className="auth-main org-web-main">
         <header className="auth-main-header">
           <div>
@@ -406,7 +407,7 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
           ) : null}
         </div>
       </main>
-    </div>
+    </AuthenticatedWebLayout>
   );
 }
 

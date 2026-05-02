@@ -5,11 +5,11 @@ import {
   ClerkLoaded,
   ClerkLoading,
   SignedIn,
-  SignedOut,
-  UserButton
+  SignedOut
 } from "@clerk/clerk-react";
-import { Navigate, NavLink, useNavigate } from "react-router";
+import { Navigate, useNavigate } from "react-router";
 
+import { AuthenticatedWebLayout } from "./auth-layout";
 import { useAccountProfile, useDeleteEvidence, useEvidences } from "./queries";
 
 function formatRelativeTime(value: number | string): string {
@@ -70,9 +70,6 @@ function AuthenticatedHome(): React.JSX.Element {
 
   const evidences = evidencesQuery.data?.evidences ?? [];
   const orgId = evidencesQuery.data?.orgId ?? null;
-  const profile = profileQuery.data ?? null;
-  const activeOrg = profile?.organizations.find((org) => org.isActive) ?? null;
-  const accountLabel = profile?.user.displayName ?? profile?.user.email ?? "Signed in";
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -96,52 +93,7 @@ function AuthenticatedHome(): React.JSX.Element {
         : null;
 
   return (
-    <div className="auth-shell">
-      <aside className="auth-sidebar">
-        <div className="auth-sidebar-brand">
-          <img className="auth-sidebar-brand-mark" src="/logo.jpg" alt="" aria-hidden="true" />
-          <div className="column auth-sidebar-brand-text">
-            <span className="auth-sidebar-brand-name">Jittle Lamp</span>
-            <span className="auth-sidebar-brand-version">web evidence</span>
-          </div>
-        </div>
-
-        <div className="auth-sidebar-section">
-          <span className="auth-sidebar-section-label">Workspace</span>
-          <NavLink to="/" end className={({ isActive }) => `auth-sidebar-link ${isActive ? "active" : ""}`}>
-            <span className="auth-sidebar-link-icon" aria-hidden>
-              ☁
-            </span>
-            <span>Cloud evidences</span>
-            <span className="auth-sidebar-link-count">{evidences.length}</span>
-          </NavLink>
-          <NavLink to="/quick-view" className={({ isActive }) => `auth-sidebar-link ${isActive ? "active" : ""}`}>
-            <span className="auth-sidebar-link-icon" aria-hidden>
-              ⇪
-            </span>
-            <span>Quick view ZIP</span>
-          </NavLink>
-          <NavLink to="/organisations" className={({ isActive }) => `auth-sidebar-link ${isActive ? "active" : ""}`}>
-            <span className="auth-sidebar-link-icon" aria-hidden>
-              ◫
-            </span>
-            <span>Organisations</span>
-          </NavLink>
-        </div>
-
-        <div className="auth-sidebar-footer">
-          <div className="auth-sidebar-account">
-            <UserButton />
-            <div className="auth-sidebar-account-meta">
-              <span className="auth-sidebar-account-name">{accountLabel}</span>
-              <span className="auth-sidebar-account-org">
-                {activeOrg ? activeOrg.name : "No active workspace"}
-              </span>
-            </div>
-          </div>
-        </div>
-      </aside>
-
+    <AuthenticatedWebLayout evidenceCount={evidences.length}>
       <div className="auth-main">
         <header className="auth-main-header">
           <div>
@@ -234,6 +186,6 @@ function AuthenticatedHome(): React.JSX.Element {
           )}
         </div>
       </div>
-    </div>
+    </AuthenticatedWebLayout>
   );
 }
