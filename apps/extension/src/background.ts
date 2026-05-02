@@ -31,6 +31,8 @@ const networkBodyCaptureByteLimit = 64 * 1024;
 const networkBodyFetchByteLimit = 512 * 1024;
 const pendingRecoveryTimeoutMs = 15_000;
 const pendingRecoveryAlarmPrefix = "jittle-lamp.pending-recovery.";
+const maxRecordingDurationMs = 5 * 60 * 1000;
+const maxRecordingDurationAlarmName = "jittle-lamp.recording-duration-limit";
 
 const networkRequestsByTab = new Map<number, Map<string, NetworkRequestState>>();
 const webRequestFallbackTabIds = new Set<number>();
@@ -265,7 +267,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  void queueDraftMutation(() => handlePendingRecoveryAlarm(alarm.name));
+  void queueDraftMutation(() => handleAlarm(alarm.name));
 });
 
 async function handleIncomingMessage(
@@ -362,6 +364,7 @@ async function startRecordingSession(): Promise<void> {
           : debuggerUnavailableDetail()
       )
     );
+    scheduleMaxRecordingDurationAlarm();
   } catch (error: unknown) {
     webRequestFallbackTabIds.delete(tab.id);
     networkRequestsByTab.delete(tab.id);
@@ -397,6 +400,7 @@ async function stopRecordingSession(detail: string): Promise<void> {
   const processingDraft = transitionDraftPhase(currentDraft, "processing", detail);
   clearPendingRecovery(tabId);
   await clearPendingRecoveryAlarm(tabId);
+  await clearMaxRecordingDurationAlarm();
   await saveDraft(processingDraft);
 
   try {
@@ -1286,12 +1290,46 @@ function schedulePendingRecoveryAlarm(recovery: PendingRecoveryState | null): vo
   });
 }
 
+function scheduleMaxRecordingDurationAlarm(): void {
+  chrome.alarms.create(maxRecordingDurationAlarmName, {
+    when: Date.now() + maxRecordingDurationMs
+  });
+}
+
 async function clearPendingRecoveryAlarm(tabId: number): Promise<void> {
   try {
     await chrome.alarms.clear(getPendingRecoveryAlarmName(tabId));
   } catch (error: unknown) {
     console.warn(errorMessage(error));
   }
+}
+
+async function clearMaxRecordingDurationAlarm(): Promise<void> {
+  try {
+    await chrome.alarms.clear(maxRecordingDurationAlarmName);
+  } catch (error: unknown) {
+    console.warn(errorMessage(error));
+  }
+}
+
+async function handleAlarm(alarmName: string): Promise<void> {
+  if (alarmName === maxRecordingDurationAlarmName) {
+    await handleMaxRecordingDurationAlarm();
+    return;
+  }
+
+  await handlePendingRecoveryAlarm(alarmName);
+}
+
+async function handleMaxRecordingDurationAlarm(): Promise<void> {
+  const draft = await readDraft();
+
+  if (!draft || (draft.phase !== "armed" && draft.phase !== "recording")) {
+    await clearMaxRecordingDurationAlarm();
+    return;
+  }
+
+  await stopRecordingSession("Stopped recording automatically after reaching the 5-minute limit.");
 }
 
 async function handlePendingRecoveryAlarm(alarmName: string): Promise<void> {
@@ -2540,6 +2578,7 @@ async function resetForTests(options?: { preserveStorage?: boolean }): Promise<v
 
   const recoveryTabId = activeRecoveryState?.tabId;
   activeRecoveryState = null;
+  await clearMaxRecordingDurationAlarm();
 
   if (typeof recoveryTabId === "number") {
     await clearPendingRecoveryAlarm(recoveryTabId);
@@ -2554,7 +2593,11 @@ export const __backgroundTest = {
   sessionStorageKey,
   sessionStorageMetaKey,
   pendingRecoveryTimeoutMs,
+  maxRecordingDurationMs,
+  maxRecordingDurationAlarmName,
   getPendingRecoveryAlarmName,
+  handleAlarm,
+  handleMaxRecordingDurationAlarm,
   handleDebuggerDetach,
   handleCompletedTabUpdate,
   handlePendingRecoveryAlarm,

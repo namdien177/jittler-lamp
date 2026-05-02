@@ -49,6 +49,7 @@ const requestNames = [
   "markSessionRemoteSynced",
   "prepareSessionUpload",
   "removeSessionTag",
+  "saveAutoSyncToCloud",
   "saveOutputDirectory",
   "saveSessionReviewState",
   "setSessionNotes",

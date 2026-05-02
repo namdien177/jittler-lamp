@@ -237,6 +237,7 @@ export function LibraryPage(props: { desktop: DesktopController }): React.JSX.El
                   desktop={desktop}
                   session={session}
                   onRemoteSynced={handleRemoteSynced}
+                  deleting={busyDelete && pendingDelete?.sessionId === session.sessionId}
                   onDelete={() => handleDelete(session)}
                 />
               ))}
@@ -251,6 +252,7 @@ export function LibraryPage(props: { desktop: DesktopController }): React.JSX.El
               desktop={desktop}
               session={session}
               onRemoteSynced={handleRemoteSynced}
+              deleting={busyDelete && pendingDelete?.sessionId === session.sessionId}
               onDelete={() => handleDelete(session)}
             />
           ))}
@@ -279,9 +281,10 @@ function SessionCard(props: {
   desktop: DesktopController;
   session: SessionRecord;
   onRemoteSynced: (evidence: ApiEvidenceSummary) => void;
+  deleting: boolean;
   onDelete: () => void;
 }): React.JSX.Element {
-  const { desktop, session, onDelete, onRemoteSynced } = props;
+  const { deleting, desktop, session, onDelete, onRemoteSynced } = props;
   const auth = useDesktopAuth();
   const toast = useToast();
   const isEditingTag = desktop.state.editingTagSessionId === session.sessionId;
@@ -289,7 +292,9 @@ function SessionCard(props: {
   const [syncing, setSyncing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const shareRef = useRef<HTMLDivElement | null>(null);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
 
   const hasWebm = session.artifacts.some((a) => a.artifactName === "recording.webm");
   const hasJson = session.artifacts.some((a) => a.artifactName === "session.archive.json");
@@ -310,13 +315,15 @@ function SessionCard(props: {
   };
 
   useEffect(() => {
-    if (!shareOpen) return;
+    if (!shareOpen && !actionsOpen) return;
     const onClickOutside = (event: MouseEvent): void => {
-      if (!shareRef.current?.contains(event.target as Node)) setShareOpen(false);
+      const target = event.target as Node;
+      if (!shareRef.current?.contains(target)) setShareOpen(false);
+      if (!actionsRef.current?.contains(target)) setActionsOpen(false);
     };
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [shareOpen]);
+  }, [actionsOpen, shareOpen]);
 
   const syncToServer = async (): Promise<ApiEvidenceSummary | null> => {
     if (auth.state.status !== "signed-in") {
@@ -353,11 +360,14 @@ function SessionCard(props: {
 
   const shareViaFile = async (): Promise<void> => {
     setShareOpen(false);
+    setSharing(true);
     try {
       await desktop.exportSessionZip(session.sessionId);
       toast.success("File exported", "Saved to the chosen folder.");
     } catch (error) {
       toast.error("Export failed", error instanceof Error ? error.message : undefined);
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -384,6 +394,7 @@ function SessionCard(props: {
   };
 
   const syncActionLabel = hasLocalRecord && hasRemoteRecord ? "Resync" : hasRemoteRecord ? "Download" : "Sync";
+  const busy = syncing || sharing || deleting;
 
   return (
     <article className="session-card">
@@ -450,50 +461,82 @@ function SessionCard(props: {
         <button className="button primary sm" type="button" disabled={!hasLocalRecord} onClick={() => desktop.viewSession(session.sessionId)}>
           Review
         </button>
-        <button className="button ghost sm" type="button" onClick={() => desktop.openSessionFolder(session.sessionId)} disabled={!hasLocalRecord}>
-          Open folder
-        </button>
-        {hasLocalRecord || hasRemoteRecord ? (
-          <button
-            className="button secondary sm"
-            type="button"
-            onClick={() => (hasLocalRecord ? void syncToServer() : undefined)}
-            disabled={!hasLocalRecord || syncing}
-            title={!hasLocalRecord ? "Remote download is not available in the desktop app yet." : undefined}
-          >
-            {syncing ? "Syncing…" : syncActionLabel}
-          </button>
-        ) : null}
         <div className="share-menu-wrap" ref={shareRef}>
           <button
             className="button ghost sm"
             type="button"
-            disabled={(!hasLocalRecord && !hasRemoteRecord) || syncing || sharing}
-            onClick={() => setShareOpen((prev) => !prev)}
+            disabled={(!hasLocalRecord && !hasRemoteRecord) || busy}
+            onClick={() => {
+              setActionsOpen(false);
+              setShareOpen((prev) => !prev);
+            }}
           >
-            Share ▾
+            {sharing ? "Sharing…" : "Share ▾"}
           </button>
           {shareOpen ? (
             <div className="share-menu" role="menu">
-              <button className="share-menu-item" type="button" role="menuitem" disabled={!hasRemoteRecord && !hasLocalRecord} onClick={() => void shareViaLink()}>
-                Via Link
+              <button className="share-menu-item" type="button" role="menuitem" disabled={busy || (!hasRemoteRecord && !hasLocalRecord)} onClick={() => void shareViaLink()}>
+                {sharing ? "Creating link…" : "Via Link"}
               </button>
-              <button className="share-menu-item" type="button" role="menuitem" disabled={!hasLocalRecord} onClick={() => void shareViaFile()}>
-                Via File
+              <button className="share-menu-item" type="button" role="menuitem" disabled={busy || !hasLocalRecord} onClick={() => void shareViaFile()}>
+                {sharing ? "Exporting…" : "Via File"}
               </button>
             </div>
           ) : null}
         </div>
-        <button
-          className="button ghost sm icon-only"
-          type="button"
-          aria-label="Delete session"
-          title="Delete"
-          disabled={!hasLocalRecord}
-          onClick={onDelete}
-        >
-          ✕
-        </button>
+        <div className="share-menu-wrap" ref={actionsRef}>
+          <button
+            className="button ghost sm icon-only"
+            type="button"
+            aria-label="Session actions"
+            title="Session actions"
+            disabled={busy}
+            onClick={() => {
+              setShareOpen(false);
+              setActionsOpen((prev) => !prev);
+            }}
+          >
+            ⋮
+          </button>
+          {actionsOpen ? (
+            <div className="share-menu session-overflow-menu" role="menu">
+              <button
+                className="share-menu-item"
+                type="button"
+                role="menuitem"
+                disabled={busy || !hasLocalRecord}
+                onClick={() => {
+                  setActionsOpen(false);
+                  desktop.openSessionFolder(session.sessionId);
+                }}
+              >
+                Open folder
+              </button>
+              <button
+                className="share-menu-item"
+                type="button"
+                role="menuitem"
+                disabled={busy || !hasLocalRecord}
+                title={!hasLocalRecord ? "Remote download is not available in the desktop app yet." : undefined}
+                onClick={() => void syncToServer()}
+              >
+                {syncing ? "Syncing…" : syncActionLabel}
+              </button>
+              <button
+                className="share-menu-item danger"
+                type="button"
+                role="menuitem"
+                disabled={busy || !hasLocalRecord}
+                onClick={() => {
+                  setActionsOpen(false);
+                  onDelete();
+                }}
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </article>
   );

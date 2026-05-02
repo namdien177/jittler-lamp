@@ -67,6 +67,43 @@ describe("background recovery", () => {
     expect(result.responded).toBeFalse();
   });
 
+  test("schedules the recording duration limit when capture starts", async () => {
+    const restoreStartTime = freezeSystemTime("2026-01-01T00:00:00.000Z");
+    chromeHarness.setTab({
+      id: 7,
+      status: "complete",
+      title: "Example",
+      url: "https://example.com/start"
+    });
+
+    const result = await chromeHarness.dispatchRuntimeMessage({
+      type: "jl/popup-start-recording"
+    });
+    restoreStartTime();
+
+    const alarmInfo = chromeHarness.getAlarmInfo(backgroundTest.maxRecordingDurationAlarmName);
+
+    expect(result.responded).toBeTrue();
+    expect(alarmInfo?.when).toBe(new Date("2026-01-01T00:05:00.000Z").getTime());
+  });
+
+  test("exports the partial session when the recording reaches five minutes", async () => {
+    await backgroundTest.saveDraft(createRecordingDraft());
+
+    await backgroundTest.handleMaxRecordingDurationAlarm();
+
+    const activeDraft = await backgroundTest.readDraft();
+
+    expect(activeDraft?.phase).toBe("ready");
+    expect(lifecycleDetails(activeDraft)).toContain(
+      "Stopped recording automatically after reaching the 5-minute limit."
+    );
+    expect(chromeHarness.clearedAlarms).toContain(backgroundTest.maxRecordingDurationAlarmName);
+    expect(
+      chromeHarness.runtimeMessages.some((message) => hasMessageType(message, "jl/offscreen-stop-and-export"))
+    ).toBeTrue();
+  });
+
   test("marks pending recovery and schedules an alarm when debugger detaches during loading", async () => {
     const draft = createRecordingDraft();
     chromeHarness.setTab({
@@ -290,6 +327,14 @@ function lastLifecycleDetail(draft: CaptureSessionDraft | null): string | undefi
   }
 
   return undefined;
+}
+
+function lifecycleDetails(draft: CaptureSessionDraft | null): string[] {
+  return (draft?.events ?? []).flatMap((event) => {
+    const payload = event.payload;
+
+    return payload.kind === "lifecycle" ? [payload.detail] : [];
+  });
 }
 
 function hasMessageType(message: unknown, type: string): boolean {
@@ -541,6 +586,9 @@ function createChromeHarness() {
     },
     getSessionValue(key: string): unknown {
       return sessionStorage.get(key);
+    },
+    getAlarmInfo(name: string): chrome.alarms.AlarmCreateInfo | undefined {
+      return alarms.get(name);
     },
     async dispatchRuntimeMessage(
       message: unknown,

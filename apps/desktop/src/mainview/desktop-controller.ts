@@ -60,6 +60,7 @@ export type ViewState = {
   isInstallingUpdate: boolean;
   isLoading: boolean;
   isSaving: boolean;
+  isSavingAutoSync: boolean;
 };
 
 export type DesktopController = {
@@ -76,6 +77,7 @@ export type DesktopController = {
   removeTagFromSession: (sessionId: string, tag: string) => void;
   chooseFolder: () => void;
   saveFolder: () => void;
+  setAutoSyncToCloud: (value: boolean) => void;
   setDraftOutputDir: (value: string) => void;
   openCurrentOutputFolder: () => void;
   openConfigFile: () => void;
@@ -155,7 +157,8 @@ function initialViewState(): ViewState {
     isCheckingForUpdate: false,
     isInstallingUpdate: false,
     isLoading: true,
-    isSaving: false
+    isSaving: false,
+    isSavingAutoSync: false
   };
 }
 
@@ -407,7 +410,7 @@ export function useDesktopController(options: { authStatus?: string; getAuthToke
   }, [bridge]);
 
   useEffect(() => {
-    if (!bridge || options.authStatus !== "signed-in" || !options.getAuthToken) return;
+    if (!bridge || options.authStatus !== "signed-in" || !options.getAuthToken || state.config?.autoSyncToCloud === false) return;
 
     const candidates = state.sessions
       .filter((session) => hasUploadableLocalRecord(session))
@@ -445,7 +448,7 @@ export function useDesktopController(options: { authStatus?: string; getAuthToke
           autoSyncInFlightRef.current.delete(session.sessionId);
         });
     }
-  }, [bridge, options.authStatus, options.getAuthToken, state.sessions]);
+  }, [bridge, options.authStatus, options.getAuthToken, state.config?.autoSyncToCloud, state.sessions]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -605,6 +608,34 @@ export function useDesktopController(options: { authStatus?: string; getAuthToke
           patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Unable to save the output folder.") } });
         } finally {
           patchState({ isSaving: false });
+        }
+      })();
+    },
+    setAutoSyncToCloud: (value) => {
+      void (async () => {
+        if (!bridge || stateRef.current.isSavingAutoSync) return;
+        const previousConfig = stateRef.current.config;
+        patchState((previous) => ({
+          ...previous,
+          config: previous.config ? { ...previous.config, autoSyncToCloud: value } : previous.config,
+          isSavingAutoSync: true
+        }));
+        try {
+          const nextConfig = await bridge.rpc.request.saveAutoSyncToCloud({ autoSyncToCloud: value });
+          patchState({
+            config: nextConfig,
+            feedback: {
+              tone: "success",
+              text: value ? "New companion recordings will sync to cloud automatically." : "Automatic cloud sync is off."
+            }
+          });
+        } catch (error) {
+          patchState({
+            config: previousConfig,
+            feedback: { tone: "error", text: formatErrorMessage(error, "Unable to save automatic sync setting.") }
+          });
+        } finally {
+          patchState({ isSavingAutoSync: false });
         }
       })();
     },

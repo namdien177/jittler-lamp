@@ -10,6 +10,7 @@ const configDirPath = join(homedir(), ".jittle-lamp");
 const configFilePath = join(configDirPath, "companion.json");
 
 export type CompanionConfig = {
+  autoSyncToCloud: boolean;
   outputDir: string;
 };
 
@@ -45,6 +46,7 @@ export async function loadCompanionConfig(): Promise<CompanionConfig> {
   const resolved = await loadResolvedCompanionConfig();
 
   return {
+    autoSyncToCloud: resolved.autoSyncToCloud,
     outputDir: resolved.outputDir
   };
 }
@@ -57,6 +59,7 @@ export async function loadResolvedCompanionConfig(): Promise<ResolvedCompanionCo
   if (envOutputDir) {
     return {
       configFilePath,
+      autoSyncToCloud: savedConfig?.autoSyncToCloud ?? true,
       defaultOutputDir: fallbackOutputDir,
       envOverrideActive: true,
       outputDir: normalizeOutputDir(envOutputDir),
@@ -78,6 +81,7 @@ export async function loadResolvedCompanionConfig(): Promise<ResolvedCompanionCo
 
   return {
     configFilePath,
+    autoSyncToCloud: true,
     defaultOutputDir: fallbackOutputDir,
     envOverrideActive: false,
     outputDir: fallbackOutputDir,
@@ -86,8 +90,9 @@ export async function loadResolvedCompanionConfig(): Promise<ResolvedCompanionCo
   };
 }
 
-export async function saveCompanionConfig(input: CompanionConfig): Promise<CompanionConfig> {
+export async function saveCompanionConfig(input: Partial<CompanionConfig> & Pick<CompanionConfig, "outputDir">): Promise<CompanionConfig> {
   const normalized = {
+    autoSyncToCloud: input.autoSyncToCloud ?? true,
     outputDir: normalizeOutputDir(input.outputDir)
   };
 
@@ -102,6 +107,7 @@ async function readSavedCompanionConfig(): Promise<CompanionConfig | null> {
     const parsed = JSON.parse(fileText) as Partial<CompanionConfig>;
 
     return {
+      autoSyncToCloud: parsed.autoSyncToCloud ?? true,
       outputDir: normalizeOutputDir(parsed.outputDir ?? defaultOutputDir())
     };
   } catch {

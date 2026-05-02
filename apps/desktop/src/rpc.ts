@@ -41,7 +41,7 @@ export type ViewerPayload = {
 
 export type DesktopCompanionConfigSnapshot = Pick<
   ResolvedCompanionConfig,
-  "configFilePath" | "defaultOutputDir" | "envOverrideActive" | "outputDir" | "savedOutputDir" | "source"
+  "autoSyncToCloud" | "configFilePath" | "defaultOutputDir" | "envOverrideActive" | "outputDir" | "savedOutputDir" | "source"
 >;
 
 export type DesktopCompanionRuntimeSnapshot = Pick<CompanionRuntimeState, "lastError" | "origin" | "outputDir" | "status"> & {
@@ -225,6 +225,12 @@ export type DesktopRequestMap = {
   saveOutputDirectory: {
     params: {
       outputDir: string;
+    };
+    response: DesktopCompanionConfigSnapshot;
+  };
+  saveAutoSyncToCloud: {
+    params: {
+      autoSyncToCloud: boolean;
     };
     response: DesktopCompanionConfigSnapshot;
   };

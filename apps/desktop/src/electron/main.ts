@@ -277,7 +277,14 @@ const handlers: DesktopHandlerMap = {
       );
     }
 
-    await saveCompanionConfig({ outputDir });
+    await saveCompanionConfig({ autoSyncToCloud: currentConfig.autoSyncToCloud, outputDir });
+
+    return toDesktopCompanionConfigSnapshot(await refreshCompanionConfig());
+  },
+  saveAutoSyncToCloud: async ({ autoSyncToCloud }) => {
+    const currentConfig = await loadResolvedCompanionConfig();
+
+    await saveCompanionConfig({ autoSyncToCloud, outputDir: currentConfig.savedOutputDir ?? currentConfig.outputDir });
 
     return toDesktopCompanionConfigSnapshot(await refreshCompanionConfig());
   },
@@ -426,6 +433,7 @@ function sendRendererMessage<K extends keyof DesktopRendererMessageMap>(
 
 function toDesktopCompanionConfigSnapshot(config: Awaited<ReturnType<typeof loadResolvedCompanionConfig>>): DesktopCompanionConfigSnapshot {
   return {
+    autoSyncToCloud: config.autoSyncToCloud,
     configFilePath: config.configFilePath,
     defaultOutputDir: config.defaultOutputDir,
     envOverrideActive: config.envOverrideActive,

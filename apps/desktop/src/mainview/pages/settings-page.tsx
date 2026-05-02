@@ -106,6 +106,31 @@ export function SettingsPage(props: { desktop: DesktopController }): React.JSX.E
       <section className="card">
         <div className="card-header">
           <div>
+            <h2 className="card-title">Cloud sync</h2>
+            <p className="card-subtitle">Apply automatic upload behavior to new recordings saved by the desktop companion.</p>
+          </div>
+        </div>
+        <div className="card-section">
+          <label className="setting-toggle-row">
+            <span>
+              <span className="setting-toggle-title">Auto sync to cloud</span>
+              <span className="setting-toggle-description">
+                New local companion recordings upload automatically when you are signed in.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={config?.autoSyncToCloud ?? true}
+              disabled={hasBridgeError || desktop.state.isLoading || !config || desktop.state.isSavingAutoSync}
+              onChange={(event) => desktop.setAutoSyncToCloud(event.currentTarget.checked)}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="card-header">
+          <div>
             <h2 className="card-title">App updates</h2>
             <p className="card-subtitle">Check GitHub Releases for a newer packaged desktop build.</p>
           </div>
