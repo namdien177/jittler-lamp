@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { exportSPKI, generateKeyPair, SignJWT } from "jose";
 
@@ -16,6 +16,10 @@ import {
 	shareLinks,
 	users,
 } from "../src/db/schema";
+import {
+	acceptInvitationByToken,
+	createOrganizationInvitationCode,
+} from "../src/services/organization-management";
 import {
 	ensureUserAndPersonalOrganization,
 	retryFailedProvisioning,
@@ -1211,6 +1215,67 @@ describe("routes", () => {
 		expect(secondProvision.userId).toBe(firstProvision.userId);
 		expect(secondProvision.organizationId).toBe(firstProvision.organizationId);
 		expect(secondProvision.eventId).toBeNull();
+	});
+
+	it("accepts static invitation codes with password, domain, and guest expiry", async () => {
+		const databaseUrl = `file:/tmp/jittle-lamp-${crypto.randomUUID()}.db`;
+		await applyMigrations(databaseUrl);
+
+		const db = createDb(databaseUrl);
+		expect(db).not.toBeNull();
+		if (!db) {
+			throw new Error("Database was not created");
+		}
+
+		const owner = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_code_owner",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_code_owner" },
+		});
+		const joiner = await ensureUserAndPersonalOrganization(db, {
+			clerkUserId: "user_clerk_code_joiner",
+			source: "clerk-callback",
+			rawPayload: { userId: "user_clerk_code_joiner" },
+		});
+
+		const code = await createOrganizationInvitationCode(db, {
+			organizationId: owner.organizationId,
+			label: "LittleLives onboarding",
+			role: "member",
+			createdBy: owner.userId,
+			password: "secret",
+			emailDomain: "littlelives.com",
+			guestExpiresAfterDays: 3,
+		});
+
+		await expect(
+			acceptInvitationByToken(db, {
+				token: code.code,
+				password: "secret",
+				localUserId: joiner.userId,
+				userEmail: "person@example.com",
+			}),
+		).rejects.toThrow("littlelives.com");
+
+		const accepted = await acceptInvitationByToken(db, {
+			token: code.code,
+			password: "secret",
+			localUserId: joiner.userId,
+			userEmail: "person@littlelives.com",
+		});
+		expect(accepted.organizationId).toBe(owner.organizationId);
+		expect(accepted.role).toBe("member");
+
+		const membership = await db.query.organizationMembers.findFirst({
+			where: and(
+				eq(organizationMembers.userId, joiner.userId),
+				eq(organizationMembers.organizationId, owner.organizationId),
+			),
+			columns: { organizationId: true, role: true, guestExpiresAt: true },
+		});
+		expect(membership?.organizationId).toBe(owner.organizationId);
+		expect(membership?.role).toBe("member");
+		expect(membership?.guestExpiresAt).toBeNumber();
 	});
 
 	it("only retries failed provisioning for the same Clerk user", async () => {

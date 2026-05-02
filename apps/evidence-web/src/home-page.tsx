@@ -121,6 +121,12 @@ function AuthenticatedHome(): React.JSX.Element {
             </span>
             <span>Quick view ZIP</span>
           </NavLink>
+          <NavLink to="/organisations" className={({ isActive }) => `auth-sidebar-link ${isActive ? "active" : ""}`}>
+            <span className="auth-sidebar-link-icon" aria-hidden>
+              ◫
+            </span>
+            <span>Organisations</span>
+          </NavLink>
         </div>
 
         <div className="auth-sidebar-footer">

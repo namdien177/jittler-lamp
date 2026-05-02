@@ -26,6 +26,9 @@ export function createQueryClient(): QueryClient {
 
 export const queryKeys = {
   accountProfile: () => ["account-profile"] as const,
+  organizations: () => ["organizations"] as const,
+  organizationMembers: (orgId: string) => ["organization-members", orgId] as const,
+  organizationInvitations: (orgId: string) => ["organization-invitations", orgId] as const,
   evidences: () => ["evidences"] as const,
   evidenceArtifacts: (evidenceId: string, orgId: string | undefined) =>
     ["evidence-artifacts", evidenceId, orgId ?? null] as const,
@@ -96,11 +99,42 @@ export function useAcceptInvitation() {
   const getToken = useAuthToken();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (token: string) => api.acceptInvitation(getToken, token),
+    mutationFn: (input: { token: string; password?: string }) =>
+      api.acceptInvitationWithPassword(getToken, input.token, input.password),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.accountProfile() });
       queryClient.invalidateQueries({ queryKey: queryKeys.evidences() });
     }
+  });
+}
+
+export function useOrganizations() {
+  const auth = useAuth();
+  const getToken = useAuthToken();
+  return useQuery({
+    queryKey: queryKeys.organizations(),
+    queryFn: () => api.listOrganizations(getToken),
+    enabled: auth.isLoaded && Boolean(auth.isSignedIn)
+  });
+}
+
+export function useOrganizationMembers(orgId: string | null) {
+  const auth = useAuth();
+  const getToken = useAuthToken();
+  return useQuery({
+    queryKey: queryKeys.organizationMembers(orgId ?? "none"),
+    queryFn: () => api.listMembers(getToken, orgId ?? ""),
+    enabled: auth.isLoaded && Boolean(auth.isSignedIn) && Boolean(orgId)
+  });
+}
+
+export function useOrganizationInvitations(orgId: string | null, enabled: boolean) {
+  const auth = useAuth();
+  const getToken = useAuthToken();
+  return useQuery({
+    queryKey: queryKeys.organizationInvitations(orgId ?? "none"),
+    queryFn: () => api.listInvitations(getToken, orgId ?? ""),
+    enabled: auth.isLoaded && Boolean(auth.isSignedIn) && Boolean(orgId) && enabled
   });
 }
 

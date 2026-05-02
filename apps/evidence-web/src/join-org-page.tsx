@@ -6,13 +6,25 @@ import {
   ClerkLoading,
   SignIn,
   SignedIn,
-  SignedOut
+  SignedOut,
+  useAuth
 } from "@clerk/clerk-react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { useNavigate, useSearchParams } from "react-router";
+import { z } from "zod/v4";
 
 import { AppHeader } from "./app-header";
+import { api } from "./api";
 import { clerkPublishableKey } from "./env";
 import { useAcceptInvitation } from "./queries";
+
+const joinOrganizationFormSchema = z.object({
+  token: z.string().trim().min(1, "Paste the invitation code."),
+  password: z.string().optional()
+});
+
+type JoinOrganizationFormValues = z.infer<typeof joinOrganizationFormSchema>;
 
 function safeRedirectPath(input: string | null): string {
   if (!input) return "/";
@@ -22,21 +34,40 @@ function safeRedirectPath(input: string | null): string {
 
 function JoinOrganizationForm(): React.JSX.Element {
   const navigate = useNavigate();
+  const auth = useAuth();
   const acceptMutation = useAcceptInvitation();
   const [searchParams] = useSearchParams();
   const redirectPath = safeRedirectPath(searchParams.get("redirect"));
-  const [token, setToken] = useState(searchParams.get("code") ?? "");
+  const form = useForm<JoinOrganizationFormValues>({
+    resolver: zodResolver(joinOrganizationFormSchema),
+    defaultValues: {
+      token: searchParams.get("code") ?? "",
+      password: ""
+    }
+  });
+  const [requiresPassword, setRequiresPassword] = useState(false);
+  const [checkingCode, setCheckingCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = acceptMutation.isPending;
 
-  const submit = (): void => {
-    const trimmed = token.trim();
-    if (!trimmed) {
-      setError("Paste the invitation code.");
+  const submit = async (values: JoinOrganizationFormValues): Promise<void> => {
+    const trimmed = values.token.trim();
+    if (!requiresPassword) {
+      setCheckingCode(true);
+      const lookedUp = await api.lookupInvitation(() => auth.getToken(), trimmed).catch(() => null);
+      setCheckingCode(false);
+      if (lookedUp?.code.requiresPassword) {
+        setRequiresPassword(true);
+        setError("This invitation code is password protected.");
+        return;
+      }
+    }
+    if (requiresPassword && !values.password) {
+      setError("Enter the invitation password.");
       return;
     }
     setError(null);
-    acceptMutation.mutate(trimmed, {
+    acceptMutation.mutate({ token: trimmed, ...(requiresPassword && values.password ? { password: values.password } : {}) }, {
       onSuccess: () => navigate(redirectPath, { replace: true }),
       onError: (err) =>
         setError(err instanceof Error ? err.message : "Unable to accept invitation.")
@@ -54,22 +85,31 @@ function JoinOrganizationForm(): React.JSX.Element {
             className="join-form"
             onSubmit={(event) => {
               event.preventDefault();
-              submit();
+              void form.handleSubmit(submit)(event);
             }}
           >
             <input
               className="join-input"
               type="text"
               placeholder="inv_…"
-              value={token}
               autoFocus
               disabled={busy}
-              onChange={(event) => setToken(event.currentTarget.value)}
+              {...form.register("token")}
             />
+            {form.formState.errors.token ? <p className="join-error">{form.formState.errors.token.message}</p> : null}
+            {requiresPassword ? (
+              <input
+                className="join-input"
+                type="password"
+                placeholder="Invitation password"
+                disabled={busy}
+                {...form.register("password")}
+              />
+            ) : null}
             {error ? <p className="join-error">{error}</p> : null}
             <div className="join-actions">
               <button className="drop-btn" type="submit" disabled={busy}>
-                {busy ? "Joining…" : "Join workspace"}
+                {busy ? "Joining…" : checkingCode ? "Checking…" : "Join workspace"}
               </button>
             </div>
           </form>

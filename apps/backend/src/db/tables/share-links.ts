@@ -8,7 +8,7 @@ import {
 	text,
 	uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 import { createUuidV7 } from "../uuid";
 import { evidences } from "./evidences";

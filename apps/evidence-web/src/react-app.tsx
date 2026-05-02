@@ -30,6 +30,7 @@ import { EvidenceViewerContent } from "./evidence-viewer-content";
 import { HomePage } from "./home-page";
 import { JoinOrganizationPage } from "./join-org-page";
 import type { LoadedSession } from "./loader";
+import { OrganisationsPage } from "./organisations-page";
 import { createQueryClient, useRemoteEvidence, type RemoteEvidenceData } from "./queries";
 import { useWebFileAdapter } from "./web-adapter";
 
@@ -481,6 +482,16 @@ const evidenceWebRoutes: JittleRouteObject[] = [
     )
   },
   { path: "/desktop-auth", element: <DesktopAuthApprovalPage /> },
+  {
+    path: "/organisations",
+    element: clerkPublishableKey ? (
+      <ClerkAuthGate>
+        <OrganisationsPage />
+      </ClerkAuthGate>
+    ) : (
+      <StatusScreen title="Clerk is not configured" detail="Set CLERK_PUBLISHABLE_KEY before managing organisations." />
+    )
+  },
   { path: "/join", element: <JoinOrganizationPage /> },
   { path: "/privacy", element: <PrivacyPage /> }
 ];

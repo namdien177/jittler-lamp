@@ -50,6 +50,13 @@
       "when": 1777112493264,
       "tag": "0006_desktop_recording_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777116100000,
+      "tag": "0007_static_invitation_codes",
+      "breakpoints": true
     }
   ]
 }

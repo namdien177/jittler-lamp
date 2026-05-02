@@ -14,7 +14,7 @@ CREATE TABLE `organization_invitations`
     `created_at`      integer                   NOT NULL,
     `updated_at`      integer                   NOT NULL,
     CONSTRAINT `organization_invitations_status_check` CHECK (`status` in ('pending', 'accepted', 'revoked', 'expired')),
-    CONSTRAINT `organization_invitations_role_check` CHECK (`role` in ('owner', 'member')),
+    CONSTRAINT `organization_invitations_role_check` CHECK (`role` in ('owner', 'moderator', 'member')),
     FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE cascade,
     FOREIGN KEY (`invited_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
     FOREIGN KEY (`accepted_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null

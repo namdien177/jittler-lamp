@@ -1,9 +1,12 @@
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
-import type { z } from "zod";
+import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
+import type { z } from "zod/v4";
 import {
 	createOrganizationInputSchema,
+	createOrganizationInvitationCodeInputSchema,
 	createOrganizationInvitationInputSchema,
 	createOrganizationMembershipInputSchema,
+	type organizationInvitationCodeRoleSchema,
+	organizationInvitationCodes,
 	type organizationInvitationRoleSchema,
 	organizationInvitations,
 	organizationMembers,
@@ -36,12 +39,13 @@ export type OrganizationMemberSummary = {
 	email: string | null;
 	role: string;
 	joinedAt: number;
+	guestExpiresAt: number | null;
 };
 
 export type InvitationSummary = {
 	id: string;
 	email: string;
-	role: "owner" | "member";
+	role: "owner" | "moderator" | "member";
 	status: "pending" | "accepted" | "revoked" | "expired";
 	expiresAt: number;
 	createdAt: number;
@@ -50,6 +54,24 @@ export type InvitationSummary = {
 
 export type CreatedInvitation = InvitationSummary & {
 	token: string;
+	organizationId: string;
+};
+
+export type InvitationCodeSummary = {
+	id: string;
+	label: string;
+	role: "moderator" | "member";
+	hasPassword: boolean;
+	emailDomain: string | null;
+	expiresAt: number | null;
+	guestExpiresAfterDays: number | null;
+	lockedAt: number | null;
+	createdAt: number;
+	createdBy: string;
+};
+
+export type CreatedInvitationCode = InvitationCodeSummary & {
+	code: string;
 	organizationId: string;
 };
 
@@ -66,8 +88,19 @@ const sha256Hex = async (value: string): Promise<string> => {
 export const generateInvitationToken = (): string =>
 	`inv_${crypto.randomUUID().replace(/-/g, "")}`;
 
+export const generateInvitationCode = (): string =>
+	`join_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+
 export const hashInvitationToken = (token: string): Promise<string> =>
 	sha256Hex(token);
+
+const hashInvitationCodePassword = (code: string, password: string) =>
+	sha256Hex(`${code}:${password}`);
+
+const normalizeDomain = (domain: string | null | undefined): string | null => {
+	const trimmed = domain?.trim().toLowerCase().replace(/^@/, "") ?? "";
+	return trimmed ? trimmed : null;
+};
 
 export const createOrganization = async (
 	db: BackendDb,
@@ -169,10 +202,10 @@ export const listOrganizationsForUser = async (
 	}));
 };
 
-export const ensureOrganizationOwner = async (
+export const getOrganizationRole = async (
 	db: BackendDb,
 	args: { organizationId: string; localUserId: string },
-): Promise<boolean> => {
+): Promise<string | null> => {
 	const membership = await db.query.organizationMembers.findFirst({
 		where: and(
 			eq(organizationMembers.organizationId, args.organizationId),
@@ -181,23 +214,26 @@ export const ensureOrganizationOwner = async (
 		),
 		columns: { role: true },
 	});
-	return membership?.role === "owner";
+	return membership?.role ?? null;
+};
+
+export const ensureOrganizationOwner = async (
+	db: BackendDb,
+	args: { organizationId: string; localUserId: string },
+): Promise<boolean> => (await getOrganizationRole(db, args)) === "owner";
+
+export const ensureOrganizationManager = async (
+	db: BackendDb,
+	args: { organizationId: string; localUserId: string },
+): Promise<boolean> => {
+	const role = await getOrganizationRole(db, args);
+	return role === "owner" || role === "moderator";
 };
 
 export const ensureOrganizationMember = async (
 	db: BackendDb,
 	args: { organizationId: string; localUserId: string },
-): Promise<boolean> => {
-	const membership = await db.query.organizationMembers.findFirst({
-		where: and(
-			eq(organizationMembers.organizationId, args.organizationId),
-			eq(organizationMembers.userId, args.localUserId),
-			isNull(organizationMembers.teamId),
-		),
-		columns: { id: true },
-	});
-	return Boolean(membership);
-};
+): Promise<boolean> => Boolean(await getOrganizationRole(db, args));
 
 export const listOrganizationMembers = async (
 	db: BackendDb,
@@ -213,6 +249,7 @@ export const listOrganizationMembers = async (
 			id: true,
 			userId: true,
 			role: true,
+			guestExpiresAt: true,
 			createdAt: true,
 		},
 		with: {
@@ -245,6 +282,7 @@ export const listOrganizationMembers = async (
 				email: profile.email,
 				role: membership.role,
 				joinedAt: membership.createdAt,
+				guestExpiresAt: membership.guestExpiresAt,
 			};
 		}),
 	);
@@ -252,10 +290,93 @@ export const listOrganizationMembers = async (
 	return summaries.sort((a, b) => a.joinedAt - b.joinedAt);
 };
 
+export const renameOrganization = async (
+	db: BackendDb,
+	args: { organizationId: string; name: string },
+): Promise<void> => {
+	await db
+		.update(organizations)
+		.set({ name: args.name.trim(), updatedAt: Date.now() })
+		.where(eq(organizations.id, args.organizationId));
+};
+
+export const updateOrganizationMemberRole = async (
+	db: BackendDb,
+	args: {
+		organizationId: string;
+		actorLocalUserId: string;
+		membershipId: string;
+		role: "moderator" | "member";
+	},
+): Promise<void> => {
+	const actorRole = await getOrganizationRole(db, {
+		organizationId: args.organizationId,
+		localUserId: args.actorLocalUserId,
+	});
+	const target = await db.query.organizationMembers.findFirst({
+		where: and(
+			eq(organizationMembers.id, args.membershipId),
+			eq(organizationMembers.organizationId, args.organizationId),
+			isNull(organizationMembers.teamId),
+		),
+		columns: { role: true, userId: true },
+	});
+	if (!target) throw new Error("Member not found.");
+	if (target.role === "owner") {
+		throw new Error("Owners cannot be changed from this screen.");
+	}
+	if (actorRole !== "owner" && target.role !== "member") {
+		throw new Error("Moderators can only manage regular members.");
+	}
+	if (actorRole !== "owner" && args.role !== "member") {
+		throw new Error("Only owners can promote moderators.");
+	}
+
+	await db
+		.update(organizationMembers)
+		.set({ role: args.role })
+		.where(eq(organizationMembers.id, args.membershipId));
+};
+
+export const removeOrganizationMember = async (
+	db: BackendDb,
+	args: {
+		organizationId: string;
+		actorLocalUserId: string;
+		membershipId: string;
+	},
+): Promise<void> => {
+	const actorRole = await getOrganizationRole(db, {
+		organizationId: args.organizationId,
+		localUserId: args.actorLocalUserId,
+	});
+	const target = await db.query.organizationMembers.findFirst({
+		where: and(
+			eq(organizationMembers.id, args.membershipId),
+			eq(organizationMembers.organizationId, args.organizationId),
+			isNull(organizationMembers.teamId),
+		),
+		columns: { role: true, userId: true },
+	});
+	if (!target) throw new Error("Member not found.");
+	if (target.userId === args.actorLocalUserId) {
+		throw new Error("You cannot remove yourself from the organization.");
+	}
+	if (target.role === "owner") {
+		throw new Error("Owners cannot be removed from this screen.");
+	}
+	if (actorRole !== "owner" && target.role !== "member") {
+		throw new Error("Moderators can only manage regular members.");
+	}
+	await db
+		.delete(organizationMembers)
+		.where(eq(organizationMembers.id, args.membershipId));
+};
+
 const summarizeInvitation = (row: {
 	id: string;
 	email: string;
-	role: "owner" | "member" | string;
+	role: "owner" | "moderator" | "member" | string;
 	status: string;
 	expiresAt: number;
 	createdAt: number;
@@ -263,7 +384,12 @@ const summarizeInvitation = (row: {
 }): InvitationSummary => ({
 	id: row.id,
 	email: row.email,
-	role: row.role === "owner" ? "owner" : "member",
+	role:
+		row.role === "owner"
+			? "owner"
+			: row.role === "moderator"
+				? "moderator"
+				: "member",
 	status:
 		row.status === "accepted"
 			? "accepted"
@@ -275,6 +401,30 @@ const summarizeInvitation = (row: {
 	expiresAt: row.expiresAt,
 	createdAt: row.createdAt,
 	invitedBy: row.invitedBy,
+});
+
+const summarizeInvitationCode = (row: {
+	id: string;
+	label: string;
+	role: "moderator" | "member" | string;
+	passwordHash: string | null;
+	emailDomain: string | null;
+	expiresAt: number | null;
+	guestExpiresAfterDays: number | null;
+	lockedAt: number | null;
+	createdAt: number;
+	createdBy: string;
+}): InvitationCodeSummary => ({
+	id: row.id,
+	label: row.label,
+	role: row.role === "moderator" ? "moderator" : "member",
+	hasPassword: Boolean(row.passwordHash),
+	emailDomain: row.emailDomain,
+	expiresAt: row.expiresAt,
+	guestExpiresAfterDays: row.guestExpiresAfterDays,
+	lockedAt: row.lockedAt,
+	createdAt: row.createdAt,
+	createdBy: row.createdBy,
 });
 
 export const createOrganizationInvitation = async (
@@ -346,7 +496,7 @@ export const listOrganizationInvitations = async (
 
 export const revokeOrganizationInvitation = async (
 	db: BackendDb,
-	invitationId: string,
+	args: { organizationId: string; invitationId: string },
 ): Promise<InvitationSummary | null> => {
 	const now = Date.now();
 	const [updated] = await db
@@ -354,7 +504,8 @@ export const revokeOrganizationInvitation = async (
 		.set({ status: "revoked", revokedAt: now, updatedAt: now })
 		.where(
 			and(
-				eq(organizationInvitations.id, invitationId),
+				eq(organizationInvitations.id, args.invitationId),
+				eq(organizationInvitations.organizationId, args.organizationId),
 				eq(organizationInvitations.status, "pending"),
 			),
 		)
@@ -370,12 +521,186 @@ export const revokeOrganizationInvitation = async (
 	return updated ? summarizeInvitation(updated) : null;
 };
 
+export const listOrganizationInvitationCodes = async (
+	db: BackendDb,
+	organizationId: string,
+): Promise<InvitationCodeSummary[]> => {
+	const rows = await db.query.organizationInvitationCodes.findMany({
+		where: eq(organizationInvitationCodes.organizationId, organizationId),
+		columns: {
+			id: true,
+			label: true,
+			role: true,
+			passwordHash: true,
+			emailDomain: true,
+			expiresAt: true,
+			guestExpiresAfterDays: true,
+			lockedAt: true,
+			createdAt: true,
+			createdBy: true,
+		},
+		orderBy: desc(organizationInvitationCodes.createdAt),
+	});
+	return rows.map(summarizeInvitationCode);
+};
+
+export const createOrganizationInvitationCode = async (
+	db: BackendDb,
+	args: {
+		organizationId: string;
+		label: string;
+		role: z.infer<typeof organizationInvitationCodeRoleSchema>;
+		createdBy: string;
+		password?: string;
+		emailDomain?: string | null;
+		expiresAt?: number | null;
+		guestExpiresAfterDays?: number | null;
+	},
+): Promise<CreatedInvitationCode> => {
+	const existing = await db.query.organizationInvitationCodes.findMany({
+		where: eq(organizationInvitationCodes.organizationId, args.organizationId),
+		columns: { id: true },
+	});
+	if (existing.length >= 3) {
+		throw new Error("An organization can only have up to 3 invitation codes.");
+	}
+
+	const code = generateInvitationCode();
+	const parsed = createOrganizationInvitationCodeInputSchema.parse({
+		organizationId: args.organizationId,
+		label: args.label,
+		role: args.role,
+		codeHash: await hashInvitationToken(code),
+		passwordHash: args.password
+			? await hashInvitationCodePassword(code, args.password)
+			: null,
+		emailDomain: normalizeDomain(args.emailDomain),
+		expiresAt: args.expiresAt ?? null,
+		guestExpiresAfterDays: args.guestExpiresAfterDays ?? null,
+		createdBy: args.createdBy,
+	});
+
+	const [created] = await db
+		.insert(organizationInvitationCodes)
+		.values(parsed)
+		.returning({
+			id: organizationInvitationCodes.id,
+			label: organizationInvitationCodes.label,
+			role: organizationInvitationCodes.role,
+			passwordHash: organizationInvitationCodes.passwordHash,
+			emailDomain: organizationInvitationCodes.emailDomain,
+			expiresAt: organizationInvitationCodes.expiresAt,
+			guestExpiresAfterDays: organizationInvitationCodes.guestExpiresAfterDays,
+			lockedAt: organizationInvitationCodes.lockedAt,
+			createdAt: organizationInvitationCodes.createdAt,
+			createdBy: organizationInvitationCodes.createdBy,
+		});
+	if (!created) throw new Error("Failed to create invitation code");
+	return {
+		...summarizeInvitationCode(created),
+		code,
+		organizationId: args.organizationId,
+	};
+};
+
+export const setOrganizationInvitationCodeLocked = async (
+	db: BackendDb,
+	args: { organizationId: string; codeId: string; locked: boolean },
+): Promise<InvitationCodeSummary | null> => {
+	const [updated] = await db
+		.update(organizationInvitationCodes)
+		.set({ lockedAt: args.locked ? Date.now() : null, updatedAt: Date.now() })
+		.where(
+			and(
+				eq(organizationInvitationCodes.id, args.codeId),
+				eq(organizationInvitationCodes.organizationId, args.organizationId),
+			),
+		)
+		.returning({
+			id: organizationInvitationCodes.id,
+			label: organizationInvitationCodes.label,
+			role: organizationInvitationCodes.role,
+			passwordHash: organizationInvitationCodes.passwordHash,
+			emailDomain: organizationInvitationCodes.emailDomain,
+			expiresAt: organizationInvitationCodes.expiresAt,
+			guestExpiresAfterDays: organizationInvitationCodes.guestExpiresAfterDays,
+			lockedAt: organizationInvitationCodes.lockedAt,
+			createdAt: organizationInvitationCodes.createdAt,
+			createdBy: organizationInvitationCodes.createdBy,
+		});
+	return updated ? summarizeInvitationCode(updated) : null;
+};
+
+export const deleteOrganizationInvitationCode = async (
+	db: BackendDb,
+	args: { organizationId: string; codeId: string },
+): Promise<boolean> => {
+	await db
+		.delete(organizationInvitationCodes)
+		.where(
+			and(
+				eq(organizationInvitationCodes.id, args.codeId),
+				eq(organizationInvitationCodes.organizationId, args.organizationId),
+			),
+		);
+	return true;
+};
+
+export const lookupInvitationCode = async (
+	db: BackendDb,
+	code: string,
+): Promise<{
+	codeId: string;
+	organizationId: string;
+	label: string;
+	requiresPassword: boolean;
+	emailDomain: string | null;
+	guestExpiresAfterDays: number | null;
+} | null> => {
+	const row = await db.query.organizationInvitationCodes.findFirst({
+		where: eq(
+			organizationInvitationCodes.codeHash,
+			await hashInvitationToken(code),
+		),
+		columns: {
+			id: true,
+			organizationId: true,
+			label: true,
+			passwordHash: true,
+			emailDomain: true,
+			expiresAt: true,
+			guestExpiresAfterDays: true,
+			lockedAt: true,
+		},
+	});
+	if (
+		!row ||
+		row.lockedAt ||
+		(row.expiresAt !== null && row.expiresAt <= Date.now())
+	) {
+		return null;
+	}
+	return {
+		codeId: row.id,
+		organizationId: row.organizationId,
+		label: row.label,
+		requiresPassword: Boolean(row.passwordHash),
+		emailDomain: row.emailDomain,
+		guestExpiresAfterDays: row.guestExpiresAfterDays,
+	};
+};
+
 export const acceptInvitationByToken = async (
 	db: BackendDb,
-	args: { token: string; localUserId: string },
+	args: {
+		token: string;
+		localUserId: string;
+		userEmail?: string | null;
+		password?: string;
+	},
 ): Promise<{
 	organizationId: string;
-	role: "owner" | "member";
+	role: "owner" | "moderator" | "member";
 	invitationId: string;
 }> => {
 	const tokenHash = await hashInvitationToken(args.token);
@@ -392,44 +717,142 @@ export const acceptInvitationByToken = async (
 				id: true,
 				organizationId: true,
 				role: true,
-				expiresAt: true,
 			},
 		});
-		if (!invitation) {
-			throw new Error("Invitation is invalid, expired, or already used.");
+		if (invitation) {
+			const role =
+				invitation.role === "owner"
+					? "owner"
+					: invitation.role === "moderator"
+						? "moderator"
+						: "member";
+
+			await tx
+				.insert(organizationMembers)
+				.values({
+					organizationId: invitation.organizationId,
+					userId: args.localUserId,
+					role,
+				})
+				.onConflictDoNothing();
+
+			await tx
+				.update(organizationInvitations)
+				.set({
+					status: "accepted",
+					acceptedBy: args.localUserId,
+					acceptedAt: now,
+					updatedAt: now,
+				})
+				.where(eq(organizationInvitations.id, invitation.id));
+
+			await tx
+				.update(users)
+				.set({ activeOrgId: invitation.organizationId, updatedAt: now })
+				.where(eq(users.id, args.localUserId));
+
+			return {
+				organizationId: invitation.organizationId,
+				role,
+				invitationId: invitation.id,
+			};
 		}
 
-		const role: "owner" | "member" =
-			invitation.role === "owner" ? "owner" : "member";
+		const code = await tx.query.organizationInvitationCodes.findFirst({
+			where: eq(organizationInvitationCodes.codeHash, tokenHash),
+			columns: {
+				id: true,
+				organizationId: true,
+				role: true,
+				passwordHash: true,
+				emailDomain: true,
+				expiresAt: true,
+				guestExpiresAfterDays: true,
+				lockedAt: true,
+			},
+		});
+		if (
+			!code ||
+			code.lockedAt ||
+			(code.expiresAt !== null && code.expiresAt <= now)
+		) {
+			throw new Error("Invitation is invalid, expired, or locked.");
+		}
+		if (code.passwordHash) {
+			if (!args.password)
+				throw new Error("This invitation code requires a password.");
+			const incomingHash = await hashInvitationCodePassword(
+				args.token,
+				args.password,
+			);
+			if (incomingHash !== code.passwordHash) {
+				throw new Error("Invitation code password is incorrect.");
+			}
+		}
+		if (code.emailDomain) {
+			const email = args.userEmail?.trim().toLowerCase() ?? "";
+			if (!email.endsWith(`@${code.emailDomain}`)) {
+				throw new Error(
+					`This invitation code only accepts ${code.emailDomain} email addresses.`,
+				);
+			}
+		}
 
+		const role = code.role === "moderator" ? "moderator" : "member";
+		const guestExpiresAt = code.guestExpiresAfterDays
+			? now + code.guestExpiresAfterDays * 24 * 60 * 60 * 1000
+			: null;
 		await tx
 			.insert(organizationMembers)
 			.values({
-				organizationId: invitation.organizationId,
+				organizationId: code.organizationId,
 				userId: args.localUserId,
 				role,
+				guestExpiresAt,
+				invitationCodeId: code.id,
 			})
 			.onConflictDoNothing();
 
 		await tx
-			.update(organizationInvitations)
-			.set({
-				status: "accepted",
-				acceptedBy: args.localUserId,
-				acceptedAt: now,
-				updatedAt: now,
-			})
-			.where(eq(organizationInvitations.id, invitation.id));
+			.update(organizationMembers)
+			.set({ role, guestExpiresAt, invitationCodeId: code.id })
+			.where(
+				and(
+					eq(organizationMembers.organizationId, code.organizationId),
+					eq(organizationMembers.userId, args.localUserId),
+					isNull(organizationMembers.teamId),
+				),
+			);
 
 		await tx
 			.update(users)
-			.set({ activeOrgId: invitation.organizationId, updatedAt: now })
+			.set({ activeOrgId: code.organizationId, updatedAt: now })
 			.where(eq(users.id, args.localUserId));
 
 		return {
-			organizationId: invitation.organizationId,
+			organizationId: code.organizationId,
 			role,
-			invitationId: invitation.id,
+			invitationId: code.id,
 		};
 	});
+};
+
+export const cleanupExpiredGuestMemberships = async (
+	db: BackendDb,
+	now = Date.now(),
+): Promise<number> => {
+	const expired = await db.query.organizationMembers.findMany({
+		where: and(
+			lt(organizationMembers.guestExpiresAt, now),
+			isNull(organizationMembers.teamId),
+		),
+		columns: { id: true, role: true },
+	});
+	const removable = expired.filter((row) => row.role !== "owner");
+	for (const row of removable) {
+		await db
+			.delete(organizationMembers)
+			.where(eq(organizationMembers.id, row.id));
+	}
+	return removable.length;
 };

@@ -17,6 +17,11 @@ export {
 	evidences,
 } from "./tables/evidences";
 export {
+	createOrganizationInvitationCodeInputSchema,
+	organizationInvitationCodeRoleSchema,
+	organizationInvitationCodes,
+} from "./tables/organization-invitation-codes";
+export {
 	createOrganizationInvitationInputSchema,
 	organizationInvitationRoleSchema,
 	organizationInvitationStatusSchema,

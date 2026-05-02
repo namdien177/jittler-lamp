@@ -7,7 +7,7 @@ import {
 	text,
 	uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 import { createUuidV7 } from "../uuid";
 import { organizations } from "./organizations";
@@ -23,7 +23,11 @@ export type OrganizationInvitationStatus = z.infer<
 	typeof organizationInvitationStatusSchema
 >;
 
-export const organizationInvitationRoleSchema = z.enum(["owner", "member"]);
+export const organizationInvitationRoleSchema = z.enum([
+	"owner",
+	"moderator",
+	"member",
+]);
 export type OrganizationInvitationRole = z.infer<
 	typeof organizationInvitationRoleSchema
 >;
@@ -76,7 +80,7 @@ export const organizationInvitations = sqliteTable(
 		),
 		check(
 			"organization_invitations_role_check",
-			sql`${table.role} in ('owner', 'member')`,
+			sql`${table.role} in ('owner', 'moderator', 'member')`,
 		),
 	],
 );

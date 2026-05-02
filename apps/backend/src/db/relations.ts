@@ -3,6 +3,7 @@ import { relations } from "drizzle-orm";
 import { desktopRecordingSessions } from "./tables/desktop-recording-sessions";
 import { evidenceArtifacts } from "./tables/evidence-artifacts";
 import { evidences } from "./tables/evidences";
+import { organizationInvitationCodes } from "./tables/organization-invitation-codes";
 import { organizationInvitations } from "./tables/organization-invitations";
 import { organizationMembers } from "./tables/organization-members";
 import { organizations } from "./tables/organizations";
@@ -19,6 +20,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 	sentInvitations: many(organizationInvitations, {
 		relationName: "invitedByUser",
 	}),
+	createdInvitationCodes: many(organizationInvitationCodes),
 }));
 
 export const organizationsRelations = relations(
@@ -32,7 +34,22 @@ export const organizationsRelations = relations(
 		evidences: many(evidences),
 		shareLinks: many(shareLinks),
 		invitations: many(organizationInvitations),
+		invitationCodes: many(organizationInvitationCodes),
 		desktopRecordingSessions: many(desktopRecordingSessions),
+	}),
+);
+
+export const organizationInvitationCodesRelations = relations(
+	organizationInvitationCodes,
+	({ one }) => ({
+		organization: one(organizations, {
+			fields: [organizationInvitationCodes.organizationId],
+			references: [organizations.id],
+		}),
+		createdByUser: one(users, {
+			fields: [organizationInvitationCodes.createdBy],
+			references: [users.id],
+		}),
 	}),
 );
 

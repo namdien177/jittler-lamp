@@ -16,7 +16,7 @@
     },
     "apps/backend": {
       "name": "@jittle-lamp/backend",
-      "version": "1.3.0",
+      "version": "1.3.2",
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1037.0",
         "@aws-sdk/s3-request-presigner": "^3.1037.0",
@@ -39,9 +39,10 @@
     },
     "apps/desktop": {
       "name": "@jittle-lamp/desktop",
-      "version": "1.3.0",
+      "version": "1.3.2",
       "dependencies": {
         "@clerk/clerk-react": "^5.61.3",
+        "@hookform/resolvers": "^5.2.2",
         "@jittle-lamp/shared": "workspace:*",
         "@jittle-lamp/viewer-core": "workspace:*",
         "@jittle-lamp/viewer-react": "workspace:*",
@@ -51,7 +52,9 @@
         "libsql": "0.5.29",
         "react": "19.2.0",
         "react-dom": "19.2.0",
+        "react-hook-form": "^7.75.0",
         "react-router": "7.14.2",
+        "zod": "4.3.6",
       },
       "devDependencies": {
         "electron": "41.3.0",
@@ -60,9 +63,10 @@
     },
     "apps/evidence-web": {
       "name": "@jittle-lamp/evidence-web",
-      "version": "1.3.0",
+      "version": "1.3.2",
       "dependencies": {
         "@clerk/clerk-react": "^5.61.3",
+        "@hookform/resolvers": "^5.2.2",
         "@jittle-lamp/shared": "workspace:*",
         "@jittle-lamp/viewer-core": "workspace:*",
         "@jittle-lamp/viewer-react": "workspace:*",
@@ -71,12 +75,14 @@
         "fflate": "0.8.2",
         "react": "19.2.0",
         "react-dom": "19.2.0",
+        "react-hook-form": "^7.75.0",
         "react-router": "7.14.2",
+        "zod": "4.3.6",
       },
     },
     "apps/extension": {
       "name": "@jittle-lamp/extension",
-      "version": "1.3.0",
+      "version": "1.3.2",
       "dependencies": {
         "@jittle-lamp/shared": "workspace:*",
       },
@@ -86,21 +92,21 @@
     },
     "packages/shared": {
       "name": "@jittle-lamp/shared",
-      "version": "1.3.0",
+      "version": "1.3.2",
       "dependencies": {
-        "zod": "3.25.76",
+        "zod": "4.3.6",
       },
     },
     "packages/viewer-core": {
       "name": "@jittle-lamp/viewer-core",
-      "version": "1.3.0",
+      "version": "1.3.2",
       "dependencies": {
         "@jittle-lamp/shared": "workspace:*",
       },
     },
     "packages/viewer-react": {
       "name": "@jittle-lamp/viewer-react",
-      "version": "1.3.0",
+      "version": "1.3.2",
       "dependencies": {
         "@jittle-lamp/shared": "workspace:*",
         "@jittle-lamp/viewer-core": "workspace:*",
@@ -307,6 +313,8 @@
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.25.12", "", { "os": "win32", "cpu": "x64" }, "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA=="],
 
+    "@hookform/resolvers": ["@hookform/resolvers@5.2.2", "", { "dependencies": { "@standard-schema/utils": "^0.3.0" }, "peerDependencies": { "react-hook-form": "^7.55.0" } }, "sha512-A/IxlMLShx3KjV/HeTcTfaMxdwy690+L/ZADoeaTltLx+CVuzkeVIPuybK3jrRfw7YZnmdKsVVHAlEPIAEUNlA=="],
+
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 
     "@jittle-lamp/backend": ["@jittle-lamp/backend@workspace:apps/backend"],
@@ -464,6 +472,8 @@
     "@smithy/uuid": ["@smithy/uuid@1.1.2", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-O/IEdcCUKkubz60tFbGA7ceITTAJsty+lBjNoorP4Z6XRqaFb/OjQjZODophEcuq68nKm6/0r+6/lLQ+XVpk8g=="],
 
     "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
+
+    "@standard-schema/utils": ["@standard-schema/utils@0.3.0", "", {}, "sha512-e7Mew686owMaPJVNNLs55PUvgz371nKgwsc4vxE49zsODpJEnxgxRo2y/OKrqueavXgZNMDVj3DdHFlaSAeU8g=="],
 
     "@szmarczak/http-timer": ["@szmarczak/http-timer@4.0.6", "", { "dependencies": { "defer-to-connect": "^2.0.0" } }, "sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w=="],
 
@@ -939,6 +949,8 @@
 
     "react-dom": ["react-dom@19.2.0", "", { "dependencies": { "scheduler": "^0.27.0" }, "peerDependencies": { "react": "^19.2.0" } }, "sha512-UlbRu4cAiGaIewkPyiRGJk0imDN2T3JjieT6spoL2UeSf5od4n5LB/mQ4ejmxhCFT1tYe8IvaFulzynWovsEFQ=="],
 
+    "react-hook-form": ["react-hook-form@7.75.0", "", { "peerDependencies": { "react": "^16.8.0 || ^17 || ^18 || ^19" } }, "sha512-Ovv94H+0p3sJ7B9B5QxPuCP1u8V/cHuVGyH55cSwodYDtoJwK+fqk3vjfIgSX59I2U/bU4z0nRJ9HMLpNiWEmw=="],
+
     "react-router": ["react-router@7.14.2", "", { "dependencies": { "cookie": "^1.0.1", "set-cookie-parser": "^2.6.0" }, "peerDependencies": { "react": ">=18", "react-dom": ">=18" }, "optionalPeers": ["react-dom"] }, "sha512-yCqNne6I8IB6rVCH7XUvlBK7/QKyqypBFGv+8dj4QBFJiiRX+FG7/nkdAvGElyvVZ/HQP5N19wzteuTARXi5Gw=="],
 
     "read-binary-file-arch": ["read-binary-file-arch@1.0.6", "", { "dependencies": { "debug": "^4.3.4" }, "bin": { "read-binary-file-arch": "cli.js" } }, "sha512-BNg9EN3DD3GsDXX7Aa8O4p92sryjkmzYYgmgTAc6CA4uGLEDzFfxOxugu21akOxpcXHiEgsYkC6nPsQvLLLmEg=="],
@@ -1133,7 +1145,11 @@
 
     "@jittle-lamp/backend/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
 
-    "@jittle-lamp/shared/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+    "@jittle-lamp/desktop/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
+
+    "@jittle-lamp/evidence-web/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
+
+    "@jittle-lamp/shared/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
 
     "@malept/flatpak-bundler/fs-extra": ["fs-extra@9.1.0", "", { "dependencies": { "at-least-node": "^1.0.0", "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-hcg3ZmepS30/7BSFqRvoo3DOMQu7IjqxO5nCDt+zM9XWjb33Wg7ziNT+Qvqbuc3+gWpzO02JubVyk2G4Zvo1OQ=="],
 

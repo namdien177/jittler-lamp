@@ -40,16 +40,46 @@ export type ApiMember = {
   email: string | null;
   role: string;
   joinedAt: number;
+  guestExpiresAt: number | null;
 };
 
 export type ApiInvitation = {
   id: string;
   email: string;
-  role: "owner" | "member";
+  role: "owner" | "moderator" | "member";
   status: "pending" | "accepted" | "revoked" | "expired";
   expiresAt: number;
   createdAt: number;
   invitedBy: string;
+};
+
+export type ApiInvitationCode = {
+  id: string;
+  label: string;
+  role: "moderator" | "member";
+  hasPassword: boolean;
+  emailDomain: string | null;
+  expiresAt: number | null;
+  guestExpiresAfterDays: number | null;
+  lockedAt: number | null;
+  createdAt: number;
+  createdBy: string;
+};
+
+export type ApiCreatedInvitationCode = ApiInvitationCode & {
+  code: string;
+  organizationId: string;
+};
+
+export type ApiInvitationLookup = {
+  code: {
+    codeId: string;
+    organizationId: string;
+    label: string;
+    requiresPassword: boolean;
+    emailDomain: string | null;
+    guestExpiresAfterDays: number | null;
+  };
 };
 
 export type ApiCreatedInvitation = ApiInvitation & {
@@ -176,21 +206,85 @@ export const api = {
       body: JSON.stringify({ name })
     }),
 
+  renameOrganization: (getToken: FetchToken, orgId: string, name: string) =>
+    authedFetch<{ organizationId: string; name: string }>(getToken, `/orgs/${encodeURIComponent(orgId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name })
+    }),
+
   listMembers: (getToken: FetchToken, orgId: string) =>
     authedFetch<{ members: ApiMember[] }>(getToken, `/orgs/${encodeURIComponent(orgId)}/members`),
 
   listInvitations: (getToken: FetchToken, orgId: string) =>
-    authedFetch<{ invitations: ApiInvitation[] }>(getToken, `/orgs/${encodeURIComponent(orgId)}/invitations`),
+    authedFetch<{ invitations: ApiInvitation[]; codes: ApiInvitationCode[] }>(
+      getToken,
+      `/orgs/${encodeURIComponent(orgId)}/invitations`
+    ),
+
+  updateMemberRole: (getToken: FetchToken, orgId: string, membershipId: string, role: "moderator" | "member") =>
+    authedFetch<{ ok: true }>(
+      getToken,
+      `/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(membershipId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ role })
+      }
+    ),
+
+  removeMember: (getToken: FetchToken, orgId: string, membershipId: string) =>
+    authedFetch<{ ok: true }>(
+      getToken,
+      `/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(membershipId)}`,
+      { method: "DELETE" }
+    ),
 
   createInvitation: (
     getToken: FetchToken,
     orgId: string,
-    body: { email: string; role?: "owner" | "member"; ttlMs?: number }
+    body: { email: string; role?: "owner" | "moderator" | "member"; ttlMs?: number }
   ) =>
     authedFetch<{ invitation: ApiCreatedInvitation }>(getToken, `/orgs/${encodeURIComponent(orgId)}/invitations`, {
       method: "POST",
       body: JSON.stringify(body)
     }),
+
+  createInvitationCode: (
+    getToken: FetchToken,
+    orgId: string,
+    body: {
+      label: string;
+      role?: "moderator" | "member";
+      password?: string;
+      emailDomain?: string | null;
+      expiresAt?: number | null;
+      guestExpiresAfterDays?: number | null;
+    }
+  ) =>
+    authedFetch<{ code: ApiCreatedInvitationCode }>(
+      getToken,
+      `/orgs/${encodeURIComponent(orgId)}/invitation-codes`,
+      {
+        method: "POST",
+        body: JSON.stringify(body)
+      }
+    ),
+
+  setInvitationCodeLocked: (getToken: FetchToken, orgId: string, codeId: string, locked: boolean) =>
+    authedFetch<{ code: ApiInvitationCode }>(
+      getToken,
+      `/orgs/${encodeURIComponent(orgId)}/invitation-codes/${encodeURIComponent(codeId)}/lock`,
+      {
+        method: "POST",
+        body: JSON.stringify({ locked })
+      }
+    ),
+
+  deleteInvitationCode: (getToken: FetchToken, orgId: string, codeId: string) =>
+    authedFetch<{ ok: true }>(
+      getToken,
+      `/orgs/${encodeURIComponent(orgId)}/invitation-codes/${encodeURIComponent(codeId)}`,
+      { method: "DELETE" }
+    ),
 
   revokeInvitation: (getToken: FetchToken, orgId: string, invitationId: string) =>
     authedFetch<{ invitation: ApiInvitation }>(
@@ -199,13 +293,19 @@ export const api = {
       { method: "POST" }
     ),
 
-  acceptInvitation: (getToken: FetchToken, token: string) =>
-    authedFetch<{ organizationId: string; role: "owner" | "member"; invitationId: string }>(
+  lookupInvitation: (getToken: FetchToken, token: string) =>
+    authedFetch<ApiInvitationLookup>(getToken, "/orgs/invitations/lookup", {
+      method: "POST",
+      body: JSON.stringify({ token })
+    }),
+
+  acceptInvitation: (getToken: FetchToken, token: string, password?: string) =>
+    authedFetch<{ organizationId: string; role: "owner" | "moderator" | "member"; invitationId: string }>(
       getToken,
       "/orgs/invitations/accept",
       {
         method: "POST",
-        body: JSON.stringify({ token })
+        body: JSON.stringify(password ? { token, password } : { token })
       }
     ),
 

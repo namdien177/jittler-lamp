@@ -6,13 +6,17 @@ import {
 	text,
 	uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 import { createUuidV7 } from "../uuid";
 import { organizations } from "./organizations";
 import { users } from "./users";
 
-export const defaultOrganizationRoles = ["owner", "member"] as const;
+export const defaultOrganizationRoles = [
+	"owner",
+	"moderator",
+	"member",
+] as const;
 export const organizationRoleSchema = z.string().trim().min(1);
 export type OrganizationRole = z.infer<typeof organizationRoleSchema>;
 
@@ -30,6 +34,8 @@ export const organizationMembers = sqliteTable(
 			.references(() => users.id, { onDelete: "cascade" }),
 		teamId: text("team_id"),
 		role: text("role").$type<OrganizationRole>().notNull().default("member"),
+		guestExpiresAt: integer("guest_expires_at"),
+		invitationCodeId: text("invitation_code_id"),
 		createdAt: integer("created_at")
 			.notNull()
 			.$defaultFn(() => Date.now()),
@@ -51,4 +57,6 @@ export const createOrganizationMembershipInputSchema = z.object({
 	userId: z.string().uuid(),
 	teamId: z.string().uuid().nullable().optional(),
 	role: organizationRoleSchema,
+	guestExpiresAt: z.number().int().nullable().optional(),
+	invitationCodeId: z.string().uuid().nullable().optional(),
 });

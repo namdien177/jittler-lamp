@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.61.3",
+    "@hookform/resolvers": "^5.2.2",
     "@jittle-lamp/shared": "workspace:*",
     "@jittle-lamp/viewer-core": "workspace:*",
     "@jittle-lamp/viewer-react": "workspace:*",
@@ -27,7 +28,9 @@
     "libsql": "0.5.29",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "react-router": "7.14.2"
+    "react-hook-form": "^7.75.0",
+    "react-router": "7.14.2",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "electron": "41.3.0",

@@ -1,4 +1,4 @@
-import { ZodError } from "zod/v3";
+import { ZodError } from "zod/v4";
 
 import { sessionArchiveSchema, type SessionArchive } from "./session";
 
@@ -34,6 +34,7 @@ export function safeParseSessionArchiveJson(input: string | Uint8Array): ReturnT
       error: new ZodError([
         {
           code: "custom",
+          input: jsonText,
           message: e instanceof Error ? e.message : "Invalid JSON",
           path: []
         }
