@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/clerk-react";
 import { Link, useNavigate } from "react-router";
 
@@ -86,7 +87,7 @@ function OrganisationMenu(): React.JSX.Element {
         aria-expanded={open}
       >
         <span className="org-menu-label">{triggerLabel}</span>
-        <span className="org-menu-caret" aria-hidden>▾</span>
+        <ChevronDown className="org-menu-caret" aria-hidden size={14} strokeWidth={2} />
       </button>
       {open ? (
         <div className="org-menu-popover" role="menu">

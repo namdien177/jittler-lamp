@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import clsx from "clsx";
+import { X } from "lucide-react";
 
 import type { FeedbackTone } from "@jittle-lamp/viewer-core";
 import type { NetworkSubtype, TimelineItem } from "@jittle-lamp/shared";
@@ -240,7 +241,7 @@ export function FeedbackBanner(props: { tone: FeedbackTone; message: ReactNode; 
       <span>{props.message}</span>
       {props.onDismiss ? (
         <button type="button" aria-label="Dismiss" onClick={props.onDismiss}>
-          ×
+          <X aria-hidden size={14} strokeWidth={2} />
         </button>
       ) : null}
     </aside>

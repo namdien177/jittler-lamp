@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Search } from "lucide-react";
 
 import type { ApiEvidenceSummary } from "../api";
 import { useCreateShareLink, useEvidences, useRevokeShareLink, useShareLinks } from "../queries";
@@ -51,6 +52,7 @@ export function CloudPage(): React.JSX.Element {
 
       <div className="library-toolbar">
         <div className="search-input-wrap">
+          <Search className="search-input-icon" aria-hidden size={14} strokeWidth={2} />
           <input
             type="text"
             className="input search-input"

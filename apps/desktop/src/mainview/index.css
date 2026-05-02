@@ -156,6 +156,12 @@ a:hover {
   padding: 0;
 }
 
+.button-label-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .button.sm {
   height: 28px;
   padding: 0 var(--space-3);
@@ -724,18 +730,14 @@ a:hover {
   max-width: 460px;
 }
 
-.search-input-wrap::before {
-  content: "";
+.search-input-icon {
   position: absolute;
   left: 10px;
   top: 50%;
   transform: translateY(-50%);
-  width: 12px;
-  height: 12px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'><path stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M21 21l-4.35-4.35M10 18a8 8 0 100-16 8 8 0 000 16z'/></svg>");
-  background-repeat: no-repeat;
-  background-size: 12px;
+  color: var(--text-muted);
   opacity: 0.7;
+  pointer-events: none;
 }
 
 .search-input {
@@ -812,9 +814,9 @@ a:hover {
 }
 
 .session-origin-icon {
+  display: inline-flex;
+  align-items: center;
   color: var(--accent);
-  font-family: var(--font-sans);
-  font-size: 12px;
 }
 
 .session-time {
@@ -850,6 +852,8 @@ a:hover {
 .chip.neutral { color: var(--text); border-color: var(--border-strong); background: var(--surface-high); }
 
 .chip-x {
+  display: inline-flex;
+  align-items: center;
   background: transparent;
   border: none;
   color: inherit;
@@ -872,6 +876,7 @@ a:hover {
 .tag-add-btn {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   height: 22px;
   padding: 0 8px;
   border-radius: var(--radius-pill);

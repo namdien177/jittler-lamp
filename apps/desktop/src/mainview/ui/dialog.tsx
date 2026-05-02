@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { X } from "lucide-react";
 
 export type DialogProps = {
   open: boolean;
@@ -47,7 +48,7 @@ export function Dialog(props: DialogProps): React.JSX.Element | null {
             {description ? <p className="ui-dialog-description">{description}</p> : null}
           </div>
           <button className="ui-dialog-close" type="button" aria-label="Close" onClick={onClose}>
-            ✕
+            <X aria-hidden size={16} strokeWidth={2} />
           </button>
         </div>
         <div className="ui-dialog-body">{children}</div>

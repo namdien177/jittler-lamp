@@ -1,4 +1,5 @@
 import { popupResponseSchema, type PopupResponse, type PopupState } from "@jittle-lamp/shared";
+import { CircleStop, createIcons, Play } from "lucide";
 
 const refreshIntervalMs = 1_500;
 
@@ -18,6 +19,7 @@ const stopButton = requireElement<HTMLButtonElement>("[data-role='stop-button']"
 
 let requestInFlight = false;
 
+createIcons({ icons: { CircleStop, Play } });
 void refreshState();
 setInterval(() => {
   void refreshState();

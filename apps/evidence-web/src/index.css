@@ -391,6 +391,9 @@ input {
 }
 
 .drop-icon {
+  display: inline-block;
+  width: 42px;
+  height: 42px;
   color: var(--text-soft);
   margin-bottom: var(--space-2);
 }
@@ -1180,8 +1183,8 @@ input {
 
 .auth-sidebar-link-icon {
   width: 18px;
-  text-align: center;
-  font-size: 13px;
+  height: 18px;
+  flex: 0 0 auto;
 }
 
 .auth-sidebar-link-count {

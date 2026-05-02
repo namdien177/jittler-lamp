@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { formatOffset, type TimelineItem, type TimelineSection } from "@jittle-lamp/shared";
 import { deriveSectionTimeline } from "@jittle-lamp/viewer-core";
+import { BookOpen, Building2, ChevronDown, Cloud, LogOut, Settings, User } from "lucide-react";
 import { MemoryRouter, Navigate, NavLink, Outlet, useLocation, useNavigate, useRoutes } from "react-router";
 import {
   ViewerModal,
@@ -212,16 +213,16 @@ function Sidebar(): React.JSX.Element {
       <div className="sidebar-section">
         <span className="sidebar-section-label">Workspace</span>
         <NavLink to="/" end className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
-          <span className="sidebar-link-icon" aria-hidden>📚</span>
+          <BookOpen className="sidebar-link-icon" aria-hidden size={16} strokeWidth={2} />
           <span>Library</span>
           <span className="sidebar-link-count">{sessionCount}</span>
         </NavLink>
         <NavLink to="/cloud" className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
-          <span className="sidebar-link-icon" aria-hidden>☁️</span>
+          <Cloud className="sidebar-link-icon" aria-hidden size={16} strokeWidth={2} />
           <span>Cloud evidences</span>
         </NavLink>
         <NavLink to="/organisations" className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
-          <span className="sidebar-link-icon" aria-hidden>👥</span>
+          <Building2 className="sidebar-link-icon" aria-hidden size={16} strokeWidth={2} />
           <span>Organisations</span>
         </NavLink>
       </div>
@@ -235,7 +236,7 @@ function Sidebar(): React.JSX.Element {
               role="menuitem"
               onClick={() => goto("/account")}
             >
-              <span aria-hidden>👤</span>
+              <User aria-hidden size={15} strokeWidth={2} />
               <span>Account</span>
             </button>
             <button
@@ -244,7 +245,7 @@ function Sidebar(): React.JSX.Element {
               role="menuitem"
               onClick={() => goto("/account/companion")}
             >
-              <span aria-hidden>⚙</span>
+              <Settings aria-hidden size={15} strokeWidth={2} />
               <span>Companion settings</span>
             </button>
             {auth.state.status === "signed-in" ? (
@@ -259,7 +260,7 @@ function Sidebar(): React.JSX.Element {
                     void auth.signOut();
                   }}
                 >
-                  <span aria-hidden>↩</span>
+                  <LogOut aria-hidden size={15} strokeWidth={2} />
                   <span>Sign out</span>
                 </button>
               </>
@@ -278,7 +279,7 @@ function Sidebar(): React.JSX.Element {
             <span className="sidebar-account-name">{accountLabel}</span>
             <span className="sidebar-account-org">{activeOrg ? activeOrg.name : "No active workspace"}</span>
           </div>
-          <span className="sidebar-account-chevron" aria-hidden>▾</span>
+          <ChevronDown className="sidebar-account-chevron" aria-hidden size={15} strokeWidth={2} />
         </button>
       </div>
     </aside>

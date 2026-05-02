@@ -15,6 +15,7 @@ import {
 } from "@clerk/clerk-react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { JittleRouteObject } from "@jittle-lamp/viewer-react";
+import { Upload } from "lucide-react";
 
 import { AppHeader } from "./app-header";
 import {
@@ -314,7 +315,7 @@ function ZipEvidencePage(): React.JSX.Element {
           onDrop={fileAdapter.onDrop}
           onClick={fileAdapter.openDialog}
         >
-          <div className="drop-icon">⇪</div>
+          <Upload className="drop-icon" aria-hidden size={42} strokeWidth={1.75} />
           <p className="drop-title">{phase.kind === "loading" ? "Loading…" : "Drop a session ZIP here"}</p>
           <p className="drop-sub">
             {phase.kind === "loading" ? "Extracting and validating…" : "or click to browse"}

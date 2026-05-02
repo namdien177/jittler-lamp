@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { X } from "lucide-react";
 
 export type ToastTone = "neutral" | "success" | "error" | "warning";
 
@@ -110,7 +111,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): Reac
                 </button>
               ) : null}
               <button className="toast-dismiss" type="button" aria-label="Dismiss" onClick={() => dismiss(toast.id)}>
-                ✕
+                <X aria-hidden size={14} strokeWidth={2} />
               </button>
             </div>
           </div>

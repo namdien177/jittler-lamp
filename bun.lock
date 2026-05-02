@@ -16,7 +16,7 @@
     },
     "apps/backend": {
       "name": "@jittle-lamp/backend",
-      "version": "1.3.2",
+      "version": "1.3.4",
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1037.0",
         "@aws-sdk/s3-request-presigner": "^3.1037.0",
@@ -39,7 +39,7 @@
     },
     "apps/desktop": {
       "name": "@jittle-lamp/desktop",
-      "version": "1.3.2",
+      "version": "1.3.4",
       "dependencies": {
         "@clerk/clerk-react": "^5.61.3",
         "@hookform/resolvers": "^5.2.2",
@@ -51,6 +51,7 @@
         "electron-updater": "6.8.3",
         "fflate": "0.8.2",
         "libsql": "0.5.29",
+        "lucide-react": "^1.14.0",
         "react": "19.2.0",
         "react-dom": "19.2.0",
         "react-hook-form": "^7.75.0",
@@ -64,7 +65,7 @@
     },
     "apps/evidence-web": {
       "name": "@jittle-lamp/evidence-web",
-      "version": "1.3.2",
+      "version": "1.3.4",
       "dependencies": {
         "@clerk/clerk-react": "^5.61.3",
         "@hookform/resolvers": "^5.2.2",
@@ -74,6 +75,7 @@
         "@tanstack/react-query": "^5.100.5",
         "@vercel/analytics": "^2.0.1",
         "fflate": "0.8.2",
+        "lucide-react": "^1.14.0",
         "react": "19.2.0",
         "react-dom": "19.2.0",
         "react-hook-form": "^7.75.0",
@@ -83,9 +85,10 @@
     },
     "apps/extension": {
       "name": "@jittle-lamp/extension",
-      "version": "1.3.2",
+      "version": "1.3.4",
       "dependencies": {
         "@jittle-lamp/shared": "workspace:*",
+        "lucide": "^1.14.0",
       },
       "devDependencies": {
         "@types/chrome": "^0.0.325",
@@ -93,25 +96,26 @@
     },
     "packages/shared": {
       "name": "@jittle-lamp/shared",
-      "version": "1.3.2",
+      "version": "1.3.4",
       "dependencies": {
         "zod": "4.3.6",
       },
     },
     "packages/viewer-core": {
       "name": "@jittle-lamp/viewer-core",
-      "version": "1.3.2",
+      "version": "1.3.4",
       "dependencies": {
         "@jittle-lamp/shared": "workspace:*",
       },
     },
     "packages/viewer-react": {
       "name": "@jittle-lamp/viewer-react",
-      "version": "1.3.2",
+      "version": "1.3.4",
       "dependencies": {
         "@jittle-lamp/shared": "workspace:*",
         "@jittle-lamp/viewer-core": "workspace:*",
         "clsx": "2.1.1",
+        "lucide-react": "^1.14.0",
       },
       "devDependencies": {
         "react": "19.2.0",
@@ -848,6 +852,10 @@
 
     "lru-cache": ["lru-cache@6.0.0", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA=="],
 
+    "lucide": ["lucide@1.14.0", "", {}, "sha512-IoRC3lHwemJWvsXKcHK90hkgY4h1HGztBL63w2XwFtIu8gFDPp4/kiuqVtlN3vaM9bxsLQ4ZUBJfGsbKFaB2IA=="],
+
+    "lucide-react": ["lucide-react@1.14.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-+1mdWcfSJVUsaTIjN9zoezmUhfXo5l0vP7ekBMPo3jcS/aIkxHnXqAPsByszMZx/Y8oQBRJxJx5xg+RH3urzxA=="],
+
     "matcher": ["matcher@3.0.0", "", { "dependencies": { "escape-string-regexp": "^4.0.0" } }, "sha512-OkeDaAZ/bQCxeFAozM55PKcKU0yJMPGifLwV4Qgjitu+5MoAfSQN4lsLJeXZ1b8w0x+/Emda6MZgXS1jvsapng=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
@@ -1145,12 +1153,6 @@
     "@esbuild-kit/core-utils/esbuild": ["esbuild@0.18.20", "", { "optionalDependencies": { "@esbuild/android-arm": "0.18.20", "@esbuild/android-arm64": "0.18.20", "@esbuild/android-x64": "0.18.20", "@esbuild/darwin-arm64": "0.18.20", "@esbuild/darwin-x64": "0.18.20", "@esbuild/freebsd-arm64": "0.18.20", "@esbuild/freebsd-x64": "0.18.20", "@esbuild/linux-arm": "0.18.20", "@esbuild/linux-arm64": "0.18.20", "@esbuild/linux-ia32": "0.18.20", "@esbuild/linux-loong64": "0.18.20", "@esbuild/linux-mips64el": "0.18.20", "@esbuild/linux-ppc64": "0.18.20", "@esbuild/linux-riscv64": "0.18.20", "@esbuild/linux-s390x": "0.18.20", "@esbuild/linux-x64": "0.18.20", "@esbuild/netbsd-x64": "0.18.20", "@esbuild/openbsd-x64": "0.18.20", "@esbuild/sunos-x64": "0.18.20", "@esbuild/win32-arm64": "0.18.20", "@esbuild/win32-ia32": "0.18.20", "@esbuild/win32-x64": "0.18.20" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-ceqxoedUrcayh7Y7ZX6NdbbDzGROiyVBgC4PriJThBKSVPWnnFHZAkfI1lJT8QFkOwH4qOS2SJkS4wvpGl8BpA=="],
 
     "@jittle-lamp/backend/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
-
-    "@jittle-lamp/desktop/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
-
-    "@jittle-lamp/evidence-web/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
-
-    "@jittle-lamp/shared/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
 
     "@malept/flatpak-bundler/fs-extra": ["fs-extra@9.1.0", "", { "dependencies": { "at-least-node": "^1.0.0", "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-hcg3ZmepS30/7BSFqRvoo3DOMQu7IjqxO5nCDt+zM9XWjb33Wg7ziNT+Qvqbuc3+gWpzO02JubVyk2G4Zvo1OQ=="],
 

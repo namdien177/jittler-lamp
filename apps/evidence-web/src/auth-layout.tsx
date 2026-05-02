@@ -1,5 +1,6 @@
 import React from "react";
 import { UserButton } from "@clerk/clerk-react";
+import { Building2, Cloud, Upload } from "lucide-react";
 import { NavLink } from "react-router";
 
 import { useAccountProfile } from "./queries";
@@ -23,24 +24,18 @@ export function AuthSidebar(props: { evidenceCount?: number }): React.JSX.Elemen
       <div className="auth-sidebar-section">
         <span className="auth-sidebar-section-label">Workspace</span>
         <NavLink to="/" end className={({ isActive }) => `auth-sidebar-link ${isActive ? "active" : ""}`}>
-          <span className="auth-sidebar-link-icon" aria-hidden>
-            ☁
-          </span>
+          <Cloud className="auth-sidebar-link-icon" aria-hidden size={16} strokeWidth={2} />
           <span>Cloud evidences</span>
           {props.evidenceCount !== undefined ? (
             <span className="auth-sidebar-link-count">{props.evidenceCount}</span>
           ) : null}
         </NavLink>
         <NavLink to="/quick-view" className={({ isActive }) => `auth-sidebar-link ${isActive ? "active" : ""}`}>
-          <span className="auth-sidebar-link-icon" aria-hidden>
-            ⇪
-          </span>
+          <Upload className="auth-sidebar-link-icon" aria-hidden size={16} strokeWidth={2} />
           <span>Quick view ZIP</span>
         </NavLink>
         <NavLink to="/organisations" className={({ isActive }) => `auth-sidebar-link ${isActive ? "active" : ""}`}>
-          <span className="auth-sidebar-link-icon" aria-hidden>
-            ◫
-          </span>
+          <Building2 className="auth-sidebar-link-icon" aria-hidden size={16} strokeWidth={2} />
           <span>Organisations</span>
         </NavLink>
       </div>

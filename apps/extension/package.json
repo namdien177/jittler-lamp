@@ -8,7 +8,8 @@
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@jittle-lamp/shared": "workspace:*"
+    "@jittle-lamp/shared": "workspace:*",
+    "lucide": "^1.14.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.325"

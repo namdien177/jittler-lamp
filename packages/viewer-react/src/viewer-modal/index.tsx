@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { X } from "lucide-react";
 
 import {
   formatOffset,
@@ -183,7 +184,7 @@ export function ViewerModal(props: ViewerModalProps): React.JSX.Element | null {
                 aria-label="Dismiss"
                 onClick={props.onFeedbackDismiss}
               >
-                ×
+                <X aria-hidden size={14} strokeWidth={2} />
               </button>
             ) : null}
           </div>
@@ -255,7 +256,7 @@ function ViewerModalHeader(props: ViewerModalProps): React.JSX.Element {
           aria-label="Close viewer"
           onClick={props.onClose}
         >
-          ✕
+          <X aria-hidden size={16} strokeWidth={2} />
         </button>
       </div>
     </header>
@@ -451,7 +452,7 @@ function NetworkDetailDrawer(props: {
       <div className="jl-vm-drawer-header">
         <span>Network request</span>
         <button type="button" className="jl-vm-btn jl-vm-btn-icon" aria-label="Close drawer" onClick={props.onClose}>
-          ✕
+          <X aria-hidden size={16} strokeWidth={2} />
         </button>
       </div>
       <div className="jl-vm-drawer-body">
@@ -487,7 +488,7 @@ function ConsoleDetailDrawer(props: {
       <div className="jl-vm-drawer-header">
         <span>Log entry</span>
         <button type="button" className="jl-vm-btn jl-vm-btn-icon" aria-label="Close drawer" onClick={props.onClose}>
-          ✕
+          <X aria-hidden size={16} strokeWidth={2} />
         </button>
       </div>
       <div className="jl-vm-drawer-body">
@@ -508,7 +509,7 @@ function ActionDetailDrawer(props: {
       <div className="jl-vm-drawer-header">
         <span>Action</span>
         <button type="button" className="jl-vm-btn jl-vm-btn-icon" aria-label="Close drawer" onClick={props.onClose}>
-          ✕
+          <X aria-hidden size={16} strokeWidth={2} />
         </button>
       </div>
       <div className="jl-vm-drawer-body">

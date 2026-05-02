@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Cloud, HardDrive, MoreVertical, Plus, Search, X } from "lucide-react";
 
 import type { SessionRecord } from "../../rpc";
 import { api, webOrigin, type ApiEvidenceSummary } from "../api";
@@ -152,6 +153,7 @@ export function LibraryPage(props: { desktop: DesktopController }): React.JSX.El
 
       <div className="library-toolbar">
         <div className="search-input-wrap">
+          <Search className="search-input-icon" aria-hidden size={14} strokeWidth={2} />
           <input
             type="text"
             className="input search-input"
@@ -210,7 +212,7 @@ export function LibraryPage(props: { desktop: DesktopController }): React.JSX.El
           <span className="chip accent">
             {desktop.state.tagFilter}
             <button className="chip-x" type="button" aria-label="Clear tag filter" onClick={() => desktop.setTagFilter(null)}>
-              ✕
+              <X aria-hidden size={12} strokeWidth={2.25} />
             </button>
           </span>
         </div>
@@ -401,7 +403,7 @@ function SessionCard(props: {
       <div className="session-head">
         <span className="session-id" title={session.sessionId}>
           <span className="session-origin-icon" title={hasLocalRecord ? "Local recording available" : "Remote only"}>
-            {hasLocalRecord ? "▣" : "☁"}
+            {hasLocalRecord ? <HardDrive aria-hidden size={14} strokeWidth={2} /> : <Cloud aria-hidden size={14} strokeWidth={2} />}
           </span>
           {shortId}
         </span>
@@ -423,7 +425,7 @@ function SessionCard(props: {
               aria-label={`Remove tag ${tag}`}
               onClick={() => desktop.removeTagFromSession(session.sessionId, tag)}
             >
-              ✕
+              <X aria-hidden size={12} strokeWidth={2.25} />
             </button>
           </span>
         ))}
@@ -452,7 +454,8 @@ function SessionCard(props: {
           </div>
         ) : (
           <button className="tag-add-btn" type="button" onClick={() => desktop.startTagEdit(session.sessionId)}>
-            + add tag
+            <Plus aria-hidden size={13} strokeWidth={2.25} />
+            <span>add tag</span>
           </button>
         )}
       </div>
@@ -471,7 +474,7 @@ function SessionCard(props: {
               setShareOpen((prev) => !prev);
             }}
           >
-            {sharing ? "Sharing…" : "Share ▾"}
+            {sharing ? "Sharing…" : <span className="button-label-with-icon">Share <ChevronDown aria-hidden size={14} strokeWidth={2} /></span>}
           </button>
           {shareOpen ? (
             <div className="share-menu" role="menu">
@@ -496,7 +499,7 @@ function SessionCard(props: {
               setActionsOpen((prev) => !prev);
             }}
           >
-            ⋮
+            <MoreVertical aria-hidden size={16} strokeWidth={2} />
           </button>
           {actionsOpen ? (
             <div className="share-menu session-overflow-menu" role="menu">
