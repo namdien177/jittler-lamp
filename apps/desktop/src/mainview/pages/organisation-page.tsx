@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { z } from "zod/v4";
 
 import {
@@ -82,13 +82,14 @@ function sortOrganizations(orgs: ApiOrgSummary[], activeOrgId: string | null, so
   });
 }
 
-function currentTab(value: string | null): DetailTab {
-  return value === "invitations" || value === "library" || value === "options" ? value : "members";
+function getTabPath(orgId: string, tab: DetailTab): string {
+  if (tab === "members") return `/organisations/${orgId}`;
+  return `/organisations/${orgId}/${tab}`;
 }
 
-export function OrganisationPage(): React.JSX.Element {
+export function OrganisationPage(props: { section?: DetailTab }): React.JSX.Element {
   const { orgId } = useParams();
-  return orgId ? <OrganisationDetailPage orgId={orgId} /> : <OrganisationListPage />;
+  return orgId ? <OrganisationDetailPage orgId={orgId} tab={props.section ?? "members"} /> : <OrganisationListPage />;
 }
 
 function OrganisationListPage(): React.JSX.Element {
@@ -250,13 +251,11 @@ function OrganisationListPage(): React.JSX.Element {
   );
 }
 
-function OrganisationDetailPage(props: { orgId: string }): React.JSX.Element {
-  const { orgId } = props;
+function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React.JSX.Element {
+  const { orgId, tab } = props;
   const auth = useDesktopAuth();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
-  const tab = currentTab(searchParams.get("tab"));
   const [orgs, setOrgs] = useState<ApiOrgSummary[]>([]);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [membersResult, setMembersResult] = useState<ApiMembersResponse>({ members: [], total: 0, page: 1, limit: 20 });
@@ -337,10 +336,6 @@ function OrganisationDetailPage(props: { orgId: string }): React.JSX.Element {
     }).catch((err) => setError(err instanceof Error ? err.message : "Unable to load organisation library."));
   }, [auth.state.status, orgId, tab]);
 
-  const setTab = (next: DetailTab): void => {
-    setSearchParams(next === "members" ? {} : { tab: next });
-  };
-
   const refreshInvitations = async (): Promise<void> => {
     const result = await api.listInvitations(auth.getToken, orgId);
     setInvitations(result.invitations);
@@ -406,7 +401,7 @@ function OrganisationDetailPage(props: { orgId: string }): React.JSX.Element {
 
       <div className="org-detail-tabs">
         {tabs.map((item) => (
-          <button key={item.id} type="button" data-active={tab === item.id} onClick={() => setTab(item.id)}>
+          <button key={item.id} type="button" data-active={tab === item.id} onClick={() => navigate(getTabPath(orgId, item.id))}>
             {item.label}
           </button>
         ))}

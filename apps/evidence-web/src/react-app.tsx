@@ -502,6 +502,36 @@ const evidenceWebRoutes: JittleRouteObject[] = [
       <StatusScreen title="Clerk is not configured" detail="Set CLERK_PUBLISHABLE_KEY before managing organisations." />
     )
   },
+  {
+    path: "/organisations/:orgId/invitations",
+    element: clerkPublishableKey ? (
+      <ClerkAuthGate>
+        <OrganisationsPage section="invitations" />
+      </ClerkAuthGate>
+    ) : (
+      <StatusScreen title="Clerk is not configured" detail="Set CLERK_PUBLISHABLE_KEY before managing organisations." />
+    )
+  },
+  {
+    path: "/organisations/:orgId/library",
+    element: clerkPublishableKey ? (
+      <ClerkAuthGate>
+        <OrganisationsPage section="library" />
+      </ClerkAuthGate>
+    ) : (
+      <StatusScreen title="Clerk is not configured" detail="Set CLERK_PUBLISHABLE_KEY before managing organisations." />
+    )
+  },
+  {
+    path: "/organisations/:orgId/options",
+    element: clerkPublishableKey ? (
+      <ClerkAuthGate>
+        <OrganisationsPage section="options" />
+      </ClerkAuthGate>
+    ) : (
+      <StatusScreen title="Clerk is not configured" detail="Set CLERK_PUBLISHABLE_KEY before managing organisations." />
+    )
+  },
   { path: "/join", element: <JoinOrganizationPage /> },
   { path: "/privacy", element: <PrivacyPage /> }
 ];
