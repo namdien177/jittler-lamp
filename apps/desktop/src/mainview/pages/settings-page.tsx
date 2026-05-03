@@ -13,9 +13,8 @@ export function SettingsPage(props: { desktop: DesktopController }): React.JSX.E
   const isEnvOverrideActive = config?.envOverrideActive ?? false;
   const isDirty = Boolean(config && desktop.state.draftOutputDir !== config.outputDir);
   const hasBridgeError = desktop.state.bridgeError !== null;
-  const canInstallUpdate = update?.status === "downloaded";
-  const isUpdateBusy =
-    desktop.state.isCheckingForUpdate || update?.status === "checking" || update?.status === "downloading";
+  const canInstallUpdate = update?.status === "available";
+  const isUpdateBusy = desktop.state.isCheckingForUpdate || update?.status === "checking";
 
   return (
     <>
@@ -142,11 +141,6 @@ export function SettingsPage(props: { desktop: DesktopController }): React.JSX.E
             <Detail label="Status" value={formatUpdateStatus(update)} />
             <Detail label="Last checked" value={formatUpdateDate(update?.lastCheckedAt)} />
           </div>
-          {update?.status === "downloading" && update.progressPercent !== null ? (
-            <div className="update-progress" aria-label="Update download progress">
-              <span style={{ width: `${Math.max(0, Math.min(100, update.progressPercent))}%` }} />
-            </div>
-          ) : null}
           {update?.error ? <div className="auth-error">{update.error}</div> : null}
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             <button
@@ -205,10 +199,6 @@ function Detail(props: { label: string; value: string }): React.JSX.Element {
 
 function formatUpdateStatus(update: DesktopUpdateState | null | undefined): string {
   if (!update) return "—";
-
-  if (update.status === "downloading" && update.progressPercent !== null) {
-    return `Downloading ${Math.round(update.progressPercent)}%`;
-  }
 
   return update.status
     .split("-")

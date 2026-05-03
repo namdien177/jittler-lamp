@@ -661,7 +661,7 @@ export function useDesktopController(options: { authStatus?: string; getAuthToke
           patchState({
             update,
             feedback: {
-              tone: update.status === "error" ? "error" : update.status === "downloaded" ? "success" : "neutral",
+              tone: update.status === "error" ? "error" : update.status === "available" ? "success" : "neutral",
               text: formatUpdateFeedback(update)
             }
           });
@@ -674,7 +674,7 @@ export function useDesktopController(options: { authStatus?: string; getAuthToke
     },
     installUpdate: () => {
       void (async () => {
-        if (!bridge || stateRef.current.update?.status !== "downloaded") return;
+        if (!bridge || stateRef.current.update?.status !== "available") return;
         patchState({
           isInstallingUpdate: true,
           feedback: { tone: "neutral", text: "Opening the desktop update installer…" }
@@ -959,18 +959,8 @@ export function useDesktopController(options: { authStatus?: string; getAuthToke
 }
 
 function formatUpdateFeedback(update: DesktopUpdateState): string {
-  if (update.status === "downloaded") {
-    return `Version ${update.availableVersion ?? "the latest update"} is ready to install.`;
-  }
-
-  if (update.status === "downloading") {
-    return update.progressPercent === null
-      ? "Downloading the desktop update…"
-      : `Downloading the desktop update (${Math.round(update.progressPercent)}%).`;
-  }
-
   if (update.status === "available") {
-    return `Version ${update.availableVersion ?? "a new update"} is available and will download automatically.`;
+    return `Version ${update.availableVersion ?? "a new update"} is available and can be installed with the macOS installer.`;
   }
 
   if (update.status === "not-available") {

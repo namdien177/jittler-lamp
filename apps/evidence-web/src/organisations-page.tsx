@@ -362,10 +362,11 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
 
           {tab === "members" ? (
             <section className="org-web-panel">
-              <div className="org-web-toolbar">
-                <TextInput className="auth-search" placeholder="Search members" value={memberSearch} onChange={(event) => { setMemberPage(1); setMemberSearch(event.currentTarget.value); }} />
+              <div className="org-web-toolbar org-member-toolbar">
+                <TextInput className="auth-search org-member-search" placeholder="Search members" value={memberSearch} onChange={(event) => { setMemberPage(1); setMemberSearch(event.currentTarget.value); }} />
                 <UiSelect
                   ariaLabel="Filter members by role"
+                  className="org-member-role-filter"
                   options={roleFilterOptions}
                   value={roleFilter}
                   onValueChange={(value) => {

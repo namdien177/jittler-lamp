@@ -28,7 +28,7 @@ asset_url=""
 if [[ -n "$requested_signing_suffix" ]]; then
   candidate_suffixes=("$requested_signing_suffix")
 else
-  candidate_suffixes=("signed" "unsigned" "adhoc")
+  candidate_suffixes=("unsigned" "adhoc" "signed")
 fi
 
 for suffix in "${candidate_suffixes[@]}"; do
@@ -53,7 +53,7 @@ mount_point=""
 
 cleanup() {
   if [[ -n "$mount_point" ]]; then
-    hdiutil detach "$mount_point" -quiet || true
+    hdiutil detach "$mount_point" -quiet || hdiutil detach "$mount_point" -force -quiet || true
   fi
 
   rm -rf "$tmp_dir"
@@ -72,11 +72,25 @@ if [[ -z "$mount_point" || ! -d "${mount_point}/${app_name}" ]]; then
   exit 1
 fi
 
+echo "Waiting for ${app_name} to close"
+osascript -e 'tell application id "dev.jittlelamp.desktop" to quit' >/dev/null 2>&1 || true
+for _ in {1..30}; do
+  if ! pgrep -x "Jittle Lamp" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
 echo "Installing ${app_name} to ${install_dir}"
 if [[ -w "$install_dir" ]]; then
   ditto "${mount_point}/${app_name}" "${install_dir}/${app_name}"
 else
-  sudo ditto "${mount_point}/${app_name}" "${install_dir}/${app_name}"
+  copy_command="ditto $(printf "%q" "${mount_point}/${app_name}") $(printf "%q" "${install_dir}/${app_name}")"
+  copy_command="${copy_command//\\/\\\\}"
+  copy_command="${copy_command//\"/\\\"}"
+  osascript -e "do shell script \"${copy_command}\" with administrator privileges"
 fi
+
+xattr -cr "${install_dir}/${app_name}" >/dev/null 2>&1 || true
 
 echo "Installed ${install_dir}/${app_name}"

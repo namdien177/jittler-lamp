@@ -49,7 +49,7 @@ export type DesktopCompanionRuntimeSnapshot = Pick<CompanionRuntimeState, "lastE
 };
 
 export type DesktopUpdateState = {
-  status: "idle" | "checking" | "not-available" | "available" | "downloading" | "downloaded" | "error" | "unsupported";
+  status: "idle" | "checking" | "not-available" | "available" | "error" | "unsupported";
   currentVersion: string;
   availableVersion: string | null;
   releaseDate: string | null;

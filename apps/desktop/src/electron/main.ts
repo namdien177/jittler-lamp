@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 import {
   recordingFileName,
@@ -20,8 +19,6 @@ import {
   type MenuItemConstructorOptions,
   type OpenDialogOptions
 } from "electron";
-import electronUpdater from "electron-updater";
-import type { UpdateInfo } from "electron-updater";
 
 import { loadResolvedCompanionConfig, saveCompanionConfig } from "../companion/config";
 import {
@@ -79,10 +76,9 @@ const preloadPath = join(currentDir, "preload.js");
 const mainViewPath = join(currentDir, "..", "views", "mainview", "index.html");
 const macosDesktopInstallScriptUrl =
   "https://raw.githubusercontent.com/namdien177/jittle-lamp/main/scripts/release/install-macos-desktop.sh";
-const execFileAsync = promisify(execFile);
+const latestReleaseApiUrl = "https://api.github.com/repos/namdien177/jittle-lamp/releases/latest";
 
 let mainWindow: BrowserWindow | null = null;
-const { autoUpdater } = electronUpdater;
 let desktopUpdateState: DesktopUpdateState = createInitialDesktopUpdateState();
 
 const handlers: DesktopHandlerMap = {
@@ -185,12 +181,12 @@ const handlers: DesktopHandlerMap = {
   getDesktopUpdateState: () => desktopUpdateState,
   checkForDesktopUpdate: async () => checkForDesktopUpdate(),
   installDesktopUpdate: async () => {
-    if (desktopUpdateState.status !== "downloaded") {
-      throw new Error("No downloaded update is ready to install.");
+    if (desktopUpdateState.status !== "available") {
+      throw new Error("No desktop update is ready to install.");
     }
 
     if (process.platform === "darwin") {
-      await launchMacosInstallerInTerminal(desktopUpdateState.availableVersion);
+      await launchMacosInstallerInBackground(desktopUpdateState.availableVersion);
 
       queueMicrotask(() => {
         app.quit();
@@ -199,11 +195,7 @@ const handlers: DesktopHandlerMap = {
       return { ok: true as const };
     }
 
-    queueMicrotask(() => {
-      autoUpdater.quitAndInstall(false, true);
-    });
-
-    return { ok: true as const };
+    throw new Error("Desktop update install is currently supported only on macOS.");
   },
   getSessionNotes: async ({ sessionId }) => {
     return { notes: getSessionNotes(sessionId) };
@@ -309,7 +301,6 @@ const handlers: DesktopHandlerMap = {
 };
 
 app.setName("Jittle Lamp");
-configureAutoUpdater();
 registerIpcHandlers();
 
 void app.whenReady().then(async () => {
@@ -476,56 +467,6 @@ function patchDesktopUpdateState(update: Partial<DesktopUpdateState>): DesktopUp
   return desktopUpdateState;
 }
 
-function configureAutoUpdater(): void {
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = process.platform !== "darwin";
-
-  autoUpdater.on("checking-for-update", () => {
-    patchDesktopUpdateState({
-      status: "checking",
-      progressPercent: null,
-      error: null,
-      lastCheckedAt: new Date().toISOString()
-    });
-  });
-
-  autoUpdater.on("update-available", (info: UpdateInfo) => {
-    patchDesktopUpdateState(toDesktopUpdateAvailableState(info, "available"));
-  });
-
-  autoUpdater.on("download-progress", (progress) => {
-    patchDesktopUpdateState({
-      status: "downloading",
-      progressPercent: Number.isFinite(progress.percent) ? progress.percent : null,
-      error: null
-    });
-  });
-
-  autoUpdater.on("update-downloaded", (info: UpdateInfo) => {
-    patchDesktopUpdateState(toDesktopUpdateAvailableState(info, "downloaded"));
-  });
-
-  autoUpdater.on("update-not-available", (info: UpdateInfo) => {
-    patchDesktopUpdateState({
-      status: "not-available",
-      availableVersion: info.version ?? null,
-      releaseDate: info.releaseDate ?? null,
-      progressPercent: null,
-      lastCheckedAt: new Date().toISOString(),
-      error: null
-    });
-  });
-
-  autoUpdater.on("error", (error: Error) => {
-    patchDesktopUpdateState({
-      status: "error",
-      progressPercent: null,
-      lastCheckedAt: new Date().toISOString(),
-      error: error.message
-    });
-  });
-}
-
 async function checkForDesktopUpdate(): Promise<DesktopUpdateState> {
   if (!app.isPackaged) {
     return patchDesktopUpdateState({
@@ -536,7 +477,16 @@ async function checkForDesktopUpdate(): Promise<DesktopUpdateState> {
     });
   }
 
-  if (desktopUpdateState.status === "checking" || desktopUpdateState.status === "downloading") {
+  if (process.platform !== "darwin") {
+    return patchDesktopUpdateState({
+      status: "unsupported",
+      progressPercent: null,
+      lastCheckedAt: new Date().toISOString(),
+      error: "Desktop update install is currently supported only on macOS."
+    });
+  }
+
+  if (desktopUpdateState.status === "checking") {
     return desktopUpdateState;
   }
 
@@ -547,8 +497,29 @@ async function checkForDesktopUpdate(): Promise<DesktopUpdateState> {
       lastCheckedAt: new Date().toISOString(),
       error: null
     });
-    await autoUpdater.checkForUpdates();
-    return desktopUpdateState;
+    const latestRelease = await fetchLatestDesktopRelease();
+    const latestVersion = normalizeReleaseVersion(latestRelease.tagName);
+    const currentVersion = normalizeReleaseVersion(app.getVersion());
+
+    if (!latestVersion || !currentVersion || compareVersions(latestVersion, currentVersion) <= 0) {
+      return patchDesktopUpdateState({
+        status: "not-available",
+        availableVersion: latestVersion ?? latestRelease.tagName,
+        releaseDate: latestRelease.publishedAt,
+        progressPercent: null,
+        lastCheckedAt: new Date().toISOString(),
+        error: null
+      });
+    }
+
+    return patchDesktopUpdateState({
+      status: "available",
+      availableVersion: latestVersion,
+      releaseDate: latestRelease.publishedAt,
+      progressPercent: null,
+      lastCheckedAt: new Date().toISOString(),
+      error: null
+    });
   } catch (error) {
     return patchDesktopUpdateState({
       status: "error",
@@ -559,41 +530,96 @@ async function checkForDesktopUpdate(): Promise<DesktopUpdateState> {
   }
 }
 
-function toDesktopUpdateAvailableState(
-  info: UpdateInfo,
-  status: Extract<DesktopUpdateState["status"], "available" | "downloaded">
-): Partial<DesktopUpdateState> {
+async function fetchLatestDesktopRelease(): Promise<{ tagName: string; publishedAt: string | null }> {
+  const response = await fetch(latestReleaseApiUrl, {
+    headers: {
+      accept: "application/vnd.github+json",
+      "user-agent": `Jittle Lamp Desktop/${app.getVersion()}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to check the latest desktop release (${response.status}).`);
+  }
+
+  const payload = (await response.json()) as {
+    tag_name?: unknown;
+    published_at?: unknown;
+    assets?: unknown;
+  };
+  if (typeof payload.tag_name !== "string" || payload.tag_name.trim().length === 0) {
+    throw new Error("The latest desktop release did not include a valid tag.");
+  }
+
+  const assetNames = Array.isArray(payload.assets)
+    ? payload.assets
+        .map((asset) => (isReleaseAsset(asset) ? asset.name : null))
+        .filter((assetName) => assetName !== null)
+    : [];
+  if (!assetNames.some((assetName) => isMacosDesktopDmg(payload.tag_name as string, assetName))) {
+    throw new Error("The latest desktop release does not include a macOS desktop DMG.");
+  }
+
   return {
-    status,
-    availableVersion: info.version ?? null,
-    releaseDate: info.releaseDate ?? null,
-    progressPercent: status === "downloaded" ? 100 : null,
-    lastCheckedAt: new Date().toISOString(),
-    error: null
+    tagName: payload.tag_name,
+    publishedAt: typeof payload.published_at === "string" ? payload.published_at : null
   };
 }
 
-async function launchMacosInstallerInTerminal(version: string | null): Promise<void> {
+function isReleaseAsset(value: unknown): value is { name: string } {
+  return Boolean(value && typeof value === "object" && "name" in value && typeof value.name === "string");
+}
+
+function isMacosDesktopDmg(tagName: string, assetName: string): boolean {
+  return ["unsigned", "adhoc", "signed"].some(
+    (suffix) => assetName === `jittle-lamp-desktop-${tagName}-macos-arm64-${suffix}.dmg`
+  );
+}
+
+async function launchMacosInstallerInBackground(version: string | null): Promise<void> {
   const command = buildMacosInstallerCommand(version);
-  await execFileAsync("osascript", [
-    "-e",
-    "tell application \"Terminal\" to activate",
-    "-e",
-    `tell application "Terminal" to do script ${JSON.stringify(command)}`
-  ]);
+  const child = spawn("bash", ["-lc", command], {
+    detached: true,
+    stdio: "ignore"
+  });
+  child.unref();
 }
 
 function buildMacosInstallerCommand(version: string | null): string {
   const tag = normalizeReleaseTag(version);
   const versionPrefix = tag ? `JITTLE_LAMP_VERSION=${shellQuote(tag)} ` : "";
-  const installAndReopenCommand = `curl -fsSL ${macosDesktopInstallScriptUrl} | bash && open -a ${shellQuote("Jittle Lamp")}`;
+  const installAndReopenCommand = `sleep 2; curl -fsSL ${macosDesktopInstallScriptUrl} | bash && open -a ${shellQuote("Jittle Lamp")}`;
   return `${versionPrefix}bash -lc ${shellQuote(installAndReopenCommand)}`;
+}
+
+function normalizeReleaseVersion(version: string | null): string | null {
+  const tag = normalizeReleaseTag(version);
+  return tag?.slice(1) ?? null;
 }
 
 function normalizeReleaseTag(version: string | null): string | null {
   const trimmed = version?.trim();
   if (!trimmed) return null;
   return trimmed.startsWith("v") ? trimmed : `v${trimmed}`;
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = parseVersionParts(left);
+  const rightParts = parseVersionParts(right);
+  if (!leftParts || !rightParts) return left.localeCompare(right);
+
+  for (const index of [0, 1, 2] as const) {
+    const diff = leftParts[index] - rightParts[index];
+    if (diff !== 0) return diff;
+  }
+
+  return 0;
+}
+
+function parseVersionParts(version: string): [number, number, number] | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
 function shellQuote(value: string): string {

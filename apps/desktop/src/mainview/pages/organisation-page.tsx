@@ -434,8 +434,9 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
 
       {tab === "members" ? (
         <section className="org-section">
-          <div className="auth-toolbar">
+          <div className="auth-toolbar org-member-toolbar">
             <TextInput
+              className="org-member-search"
               type="search"
               placeholder="Search members by name, email, or role"
               value={memberSearch}
@@ -446,6 +447,7 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
             />
             <UiSelect
               ariaLabel="Filter members by role"
+              className="org-member-role-filter"
               options={roleFilterOptions}
               value={roleFilter}
               onValueChange={(value) => {

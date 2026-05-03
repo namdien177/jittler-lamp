@@ -1705,6 +1705,24 @@ select {
   padding: var(--space-3);
 }
 
+.org-member-toolbar {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.org-member-search {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+}
+
+.org-member-role-filter {
+  flex: 0 0 160px;
+  width: 160px;
+  min-width: 120px;
+  max-width: 160px;
+}
+
 .org-web-sort {
   display: flex;
   align-items: center;
@@ -2007,5 +2025,11 @@ select {
   .org-web-option-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .org-member-search,
+  .org-member-role-filter {
+    width: 100%;
+    max-width: none;
   }
 }

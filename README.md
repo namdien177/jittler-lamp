@@ -217,7 +217,7 @@ To install a specific release:
 curl -fsSL https://raw.githubusercontent.com/namdien177/jittle-lamp/main/scripts/release/install-macos-desktop.sh | JITTLE_LAMP_VERSION=vX.Y.Z bash
 ```
 
-The same terminal installer can be rerun later to replace an existing app with the latest release. The in-app updater downloads update artifacts from inside the packaged desktop app, so it does not go through the browser quarantine path. However, macOS still validates the replacement app through ShipIt/Squirrel. For unsigned/ad-hoc builds that validation can fail because each release has a different ad-hoc code requirement. Use the terminal installer for ad-hoc upgrades, and reserve in-app updates for Developer ID signed/notarized releases.
+The same terminal installer can be rerun later to replace an existing app with the latest release. The packaged app's Settings screen uses this same installer path for upgrades: it checks GitHub for the latest release, starts the macOS installer in the background, quits the running app, replaces `/Applications/Jittle Lamp.app`, removes the temporary DMG download, and reopens the app. The app does not use Squirrel/ShipIt installation for ad-hoc upgrades.
 
 If the app was already downloaded through a browser and macOS blocks it, remove quarantine manually after installing the app:
 
@@ -260,9 +260,9 @@ With the checked-in config, Electron Builder writes build output into:
 
 - `apps/desktop/artifacts/`
 
-The release workflow collects the install-oriented artifact from `apps/desktop/artifacts/`.
+The release workflow collects the install-oriented DMG from `apps/desktop/artifacts/`.
 
-In-app desktop updates use Electron Builder's GitHub provider. The macOS job publishes the DMG for first install plus the updater ZIP, blockmap, and `latest-mac.yml` metadata that the Settings screen uses when the user clicks **Check for update**. Updates are available only from packaged builds, not from `bun run --cwd apps/desktop dev`.
+In-app desktop update checks read the latest GitHub release and hand installation to `scripts/release/install-macos-desktop.sh`. The macOS job publishes only the install DMG; it does not publish Squirrel updater ZIP/blockmap metadata. Updates are available only from packaged builds, not from `bun run --cwd apps/desktop dev`.
 
 ### 4. Release notes specific to this repo
 

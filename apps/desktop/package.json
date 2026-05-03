@@ -25,7 +25,6 @@
     "@jittle-lamp/viewer-react": "workspace:*",
     "@tanstack/react-query": "^5.100.5",
     "@vercel/analytics": "^2.0.1",
-    "electron-updater": "6.8.3",
     "fflate": "0.8.2",
     "libsql": "0.5.29",
     "lucide-react": "^1.14.0",
@@ -60,8 +59,7 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
     }
   }
