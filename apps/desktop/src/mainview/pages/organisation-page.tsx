@@ -17,6 +17,7 @@ import {
 } from "../api";
 import { useDesktopAuth } from "../auth-context";
 import { Dialog } from "../ui/dialog";
+import { UiSelect } from "../ui/select";
 import { useToast } from "../ui/toast";
 import { copyToClipboard, formatRelativeTime, getInitials } from "../utils";
 
@@ -55,6 +56,33 @@ const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "invitations", label: "Invitations" },
   { id: "library", label: "Library" },
   { id: "options", label: "Options" }
+];
+
+const sortOptions: Array<{ label: string; value: SortKey }> = [
+  { label: "Name", value: "name" },
+  { label: "Date joining", value: "joinedAt" },
+  { label: "Role", value: "role" }
+];
+
+const roleFilterOptions: Array<{ label: string; value: RoleFilter }> = [
+  { label: "All roles", value: "all" },
+  { label: "Owner", value: "owner" },
+  { label: "Moderator", value: "moderator" },
+  { label: "Member", value: "member" }
+];
+
+const editableRoleOptions: Array<{ label: string; value: "member" | "moderator" }> = [
+  { label: "Member", value: "member" },
+  { label: "Moderator", value: "moderator" }
+];
+
+const guestDayOptions: Array<{ label: string; value: string }> = [
+  { label: "Permanent", value: "" },
+  { label: "1 day", value: "1" },
+  { label: "3 days", value: "3" },
+  { label: "7 days", value: "7" },
+  { label: "14 days", value: "14" },
+  { label: "30 days", value: "30" }
 ];
 
 function getInviteUrl(token: string): string {
@@ -160,11 +188,7 @@ function OrganisationListPage(): React.JSX.Element {
         <span className="muted">{loading ? "Loading..." : `${orgs.length} organisation${orgs.length === 1 ? "" : "s"}`}</span>
         <label className="org-sort-control">
           <span>Order by</span>
-          <select className="select" value={sort} onChange={(event) => setSort(event.currentTarget.value as SortKey)}>
-            <option value="name">Name</option>
-            <option value="joinedAt">Date joining</option>
-            <option value="role">Role</option>
-          </select>
+          <UiSelect ariaLabel="Order organisations by" options={sortOptions} value={sort} onValueChange={setSort} />
         </label>
       </div>
 
@@ -422,12 +446,15 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
                 setMemberSearch(event.currentTarget.value);
               }}
             />
-            <select className="select" value={roleFilter} onChange={(event) => { setMemberPage(1); setRoleFilter(event.currentTarget.value as RoleFilter); }}>
-              <option value="all">All roles</option>
-              <option value="owner">Owner</option>
-              <option value="moderator">Moderator</option>
-              <option value="member">Member</option>
-            </select>
+            <UiSelect
+              ariaLabel="Filter members by role"
+              options={roleFilterOptions}
+              value={roleFilter}
+              onValueChange={(value) => {
+                setMemberPage(1);
+                setRoleFilter(value);
+              }}
+            />
           </div>
           <MemberTable
             members={membersResult.members}
@@ -523,10 +550,7 @@ function MemberTable(props: {
               <td>
                 <div className="table-actions">
                   {canEdit && props.isOwner ? (
-                    <select className="select xs-select" value={member.role === "moderator" ? "moderator" : "member"} disabled={props.busy} onChange={(event) => void props.onRoleChange(member, event.currentTarget.value as "moderator" | "member")}>
-                      <option value="member">Member</option>
-                      <option value="moderator">Moderator</option>
-                    </select>
+                    <UiSelect ariaLabel={`Change role for ${getMemberPrimaryText(member)}`} className="ui-select-trigger-xs" options={editableRoleOptions} value={member.role === "moderator" ? "moderator" : "member"} disabled={props.busy} onValueChange={(value) => void props.onRoleChange(member, value)} />
                   ) : null}
                   {canEdit ? <button className="button ghost xs" type="button" disabled={props.busy} onClick={() => void props.onRemove(member)}>Remove</button> : null}
                 </div>
@@ -584,6 +608,8 @@ function InvitationCodePanel(props: {
     defaultValues: { label: "Team onboarding", role: "member", password: "", emailDomain: "", expiresDays: "", guestDays: "" }
   });
   const [showCreate, setShowCreate] = useState(false);
+  const roleValue = form.watch("role");
+  const guestDaysValue = form.watch("guestDays");
 
   const createCode = async (values: InvitationCodeFormValues): Promise<void> => {
     props.setBusy(true);
@@ -686,11 +712,11 @@ function InvitationCodePanel(props: {
         <Dialog open onClose={() => setShowCreate(false)} title="Create invitation code" footer={<><button className="button ghost sm" type="button" onClick={() => setShowCreate(false)} disabled={props.busy}>Cancel</button><button className="button primary sm" type="button" onClick={() => void form.handleSubmit(createCode)()} disabled={props.busy}>{props.busy ? "Creating..." : "Create"}</button></>}>
           <form className="column" style={{ gap: 12 }} onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(createCode)(event); }}>
             <label className="field"><span>Label</span><input className="input field-input" autoFocus {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
-            <label className="field"><span>Role</span><select className="select field-input" {...form.register("role")}><option value="member">Member</option><option value="moderator">Moderator</option></select></label>
+            <label className="field"><span>Role</span><UiSelect ariaLabel="Invitation role" className="field-input" options={editableRoleOptions} value={roleValue} onValueChange={(value) => form.setValue("role", value, { shouldDirty: true, shouldValidate: true })} /></label>
             <label className="field"><span>Password</span><input className="input field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
             <label className="field"><span>Email domain</span><input className="input field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
             <label className="field"><span>Code expires in days</span><input className="input field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
-            <label className="field"><span>Guest days</span><select className="select field-input" {...form.register("guestDays")}><option value="">Permanent</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label>
+            <label className="field"><span>Guest days</span><UiSelect ariaLabel="Guest duration" className="field-input" options={guestDayOptions} value={guestDaysValue} onValueChange={(value) => form.setValue("guestDays", value, { shouldDirty: true, shouldValidate: true })} /></label>
           </form>
         </Dialog>
       ) : null}
