@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Dialog as BaseDialog } from "@base-ui-components/react/dialog";
 import { useAuth } from "@clerk/clerk-react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router";
 import { z } from "zod/v4";
+import { Button, Dialog, TextInput, UiSelect } from "@jittle-lamp/ui";
 
 import {
   api,
@@ -18,7 +18,6 @@ import {
   type ApiOrgSummary
 } from "./api";
 import { AuthenticatedWebLayout } from "./auth-layout";
-import { UiSelect } from "./ui-select";
 
 type DetailTab = "members" | "invitations" | "library" | "options";
 type SortKey = "name" | "joinedAt" | "role";
@@ -164,8 +163,8 @@ function OrganisationListPage(): React.JSX.Element {
             <p className="auth-page-subtitle">Workspaces you belong to, with the active organisation always first.</p>
           </div>
           <div className="org-web-actions">
-            <button className="auth-button ghost" type="button" onClick={() => setShowAcceptInvite(true)}>Accept invite</button>
-            <button className="auth-button primary" type="button" onClick={() => setShowCreate(true)}>Create</button>
+            <Button variant="ghost" type="button" onClick={() => setShowAcceptInvite(true)}>Accept invite</Button>
+            <Button variant="primary" type="button" onClick={() => setShowCreate(true)}>Create</Button>
           </div>
         </header>
 
@@ -191,8 +190,8 @@ function OrganisationListPage(): React.JSX.Element {
                     <td>{org.memberCount}</td>
                     <td>
                       <div className="org-web-actions">
-                        <button className={org.id === activeOrgId ? "auth-button" : "auth-button primary"} type="button" disabled={busy || org.id === activeOrgId} onClick={() => void activate(org.id)}>Active</button>
-                        <button className="auth-button ghost" type="button" onClick={() => navigate(`/organisations/${org.id}`)}>Manage</button>
+                        <Button variant={org.id === activeOrgId ? "secondary" : "primary"} type="button" disabled={busy || org.id === activeOrgId} onClick={() => void activate(org.id)}>Active</Button>
+                        <Button variant="ghost" type="button" onClick={() => navigate(`/organisations/${org.id}`)}>Manage</Button>
                       </div>
                     </td>
                   </tr>
@@ -350,7 +349,7 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
       <main className="auth-main org-web-main">
         <header className="auth-main-header">
           <div>
-            <button className="auth-button ghost" type="button" onClick={() => navigate("/organisations")}>Back</button>
+            <Button variant="ghost" type="button" onClick={() => navigate("/organisations")}>Back</Button>
             <h1 className="auth-page-title">{org?.name ?? "Organisation"}</h1>
             <p className="auth-page-subtitle">{org ? `${org.memberCount} members · your role is ${org.role}` : "Loading organisation..."}</p>
           </div>
@@ -364,7 +363,7 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
           {tab === "members" ? (
             <section className="org-web-panel">
               <div className="org-web-toolbar">
-                <input className="auth-search" placeholder="Search members" value={memberSearch} onChange={(event) => { setMemberPage(1); setMemberSearch(event.currentTarget.value); }} />
+                <TextInput className="auth-search" placeholder="Search members" value={memberSearch} onChange={(event) => { setMemberPage(1); setMemberSearch(event.currentTarget.value); }} />
                 <UiSelect
                   ariaLabel="Filter members by role"
                   options={roleFilterOptions}
@@ -395,7 +394,7 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
                       <td>{creatorByUserId.get(evidence.createdBy) ?? evidence.createdBy}</td>
                       <td><span className="auth-chip">{evidence.sourceType}</span></td>
                       <td>{formatRelativeTime(evidence.updatedAt)}</td>
-                      <td><button className="auth-button ghost" type="button" onClick={() => navigate(`/evidence/${encodeURIComponent(evidence.id)}`)}>Open</button></td>
+                      <td><Button variant="ghost" type="button" onClick={() => navigate(`/evidence/${encodeURIComponent(evidence.id)}`)}>Open</Button></td>
                     </tr>
                   ))}
                   {evidences.length === 0 ? <tr><td colSpan={5}>No organisation evidence yet.</td></tr> : null}
@@ -407,11 +406,11 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
           {tab === "options" && org ? (
             <section className="org-web-panel org-web-options">
               <OptionRow title="Leave organisation" detail="Remove your membership from this organisation.">
-                <button className="auth-button danger" type="button" disabled={busy || org.isPersonal} onClick={() => void leave()}>Leave</button>
+                <Button variant="danger" type="button" disabled={busy || org.isPersonal} onClick={() => void leave()}>Leave</Button>
               </OptionRow>
               {isOwner ? (
                 <OptionRow title="Transfer organisation" detail="Transfer ownership to another member before stepping away.">
-                  <button className="auth-button ghost" type="button" disabled>Transfer</button>
+                  <Button variant="ghost" type="button" disabled>Transfer</Button>
                 </OptionRow>
               ) : null}
             </section>
@@ -442,7 +441,7 @@ function MembersTable(props: {
               <td><span className="auth-chip">{member.role}</span></td>
               <td>{formatRelativeTime(member.joinedAt)}</td>
               <td>{member.guestExpiresAt ? formatRelativeTime(member.guestExpiresAt) : "Permanent"}</td>
-              <td><div className="org-web-actions">{editable && props.isOwner ? <UiSelect ariaLabel={`Change role for ${memberName(member)}`} className="ui-select-trigger-xs" options={editableRoleOptions} value={member.role === "moderator" ? "moderator" : "member"} disabled={props.busy} onValueChange={(value) => void props.onRoleChange(member, value)} /> : null}{editable ? <button className="auth-button ghost" type="button" disabled={props.busy} onClick={() => void props.onRemove(member)}>Remove</button> : null}</div></td>
+              <td><div className="org-web-actions">{editable && props.isOwner ? <UiSelect ariaLabel={`Change role for ${memberName(member)}`} className="ui-select-trigger-xs" options={editableRoleOptions} value={member.role === "moderator" ? "moderator" : "member"} disabled={props.busy} onValueChange={(value) => void props.onRoleChange(member, value)} /> : null}{editable ? <Button variant="ghost" type="button" disabled={props.busy} onClick={() => void props.onRemove(member)}>Remove</Button> : null}</div></td>
             </tr>
           );
         })}
@@ -457,9 +456,9 @@ function Pagination(props: { page: number; pages: number; total: number; onPage:
     <div className="org-web-pagination">
       <span className="auth-muted">{props.total} member{props.total === 1 ? "" : "s"}</span>
       <div className="org-web-actions">
-        <button className="auth-button ghost icon-only" type="button" aria-label="Previous page" disabled={props.page <= 1} onClick={() => props.onPage(props.page - 1)}><ChevronLeft aria-hidden size={15} strokeWidth={2} /></button>
+        <Button variant="ghost" iconOnly type="button" aria-label="Previous page" disabled={props.page <= 1} onClick={() => props.onPage(props.page - 1)}><ChevronLeft aria-hidden size={15} strokeWidth={2} /></Button>
         <span className="auth-muted">Page {props.page} of {props.pages}</span>
-        <button className="auth-button ghost icon-only" type="button" aria-label="Next page" disabled={props.page >= props.pages} onClick={() => props.onPage(props.page + 1)}><ChevronRight aria-hidden size={15} strokeWidth={2} /></button>
+        <Button variant="ghost" iconOnly type="button" aria-label="Next page" disabled={props.page >= props.pages} onClick={() => props.onPage(props.page + 1)}><ChevronRight aria-hidden size={15} strokeWidth={2} /></Button>
       </div>
     </div>
   );
@@ -552,9 +551,9 @@ function InvitationsPanel(props: {
           <h2>Invitation codes</h2>
           <p>Reusable codes for member onboarding.</p>
         </div>
-        <button className="auth-button primary" type="button" onClick={() => setShowCreate(true)} disabled={props.busy || props.codes.length >= 3}>Create</button>
+        <Button variant="primary" type="button" onClick={() => setShowCreate(true)} disabled={props.busy || props.codes.length >= 3}>Create</Button>
       </div>
-      {props.createdCode ? <div className="invite-token-box"><span className="detail-label">New static joining code</span><span>{props.createdCode.code}</span><button className="auth-button ghost" type="button" onClick={() => props.setCreatedCode(null)}>Done</button></div> : null}
+      {props.createdCode ? <div className="invite-token-box"><span className="detail-label">New static joining code</span><span>{props.createdCode.code}</span><Button variant="ghost" type="button" onClick={() => props.setCreatedCode(null)}>Done</Button></div> : null}
       <table className="org-web-table">
         <thead><tr><th>Code</th><th>Restrictions</th><th>Guest</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
@@ -564,7 +563,7 @@ function InvitationsPanel(props: {
               <td>{[code.hasPassword ? "password" : null, code.emailDomain ? `@${code.emailDomain}` : null, code.expiresAt ? `expires ${formatRelativeTime(code.expiresAt)}` : null].filter(Boolean).join(" · ") || "None"}</td>
               <td>{code.guestExpiresAfterDays ? `${code.guestExpiresAfterDays} days` : "Permanent"}</td>
               <td><span className="auth-chip">{code.lockedAt ? "locked" : "active"}</span></td>
-              <td><div className="org-web-actions">{props.isOwner ? <button className="auth-button ghost" type="button" disabled={props.busy} onClick={() => void toggleCode(code)}>{code.lockedAt ? "Unlock" : "Lock"}</button> : null}<button className="auth-button ghost" type="button" disabled={props.busy} onClick={() => void deleteCode(code)}>Delete</button></div></td>
+              <td><div className="org-web-actions">{props.isOwner ? <Button variant="ghost" type="button" disabled={props.busy} onClick={() => void toggleCode(code)}>{code.lockedAt ? "Unlock" : "Lock"}</Button> : null}<Button variant="ghost" type="button" disabled={props.busy} onClick={() => void deleteCode(code)}>Delete</Button></div></td>
             </tr>
           ))}
           {props.codes.length === 0 ? <tr><td colSpan={5}>No static codes yet.</td></tr> : null}
@@ -577,20 +576,20 @@ function InvitationsPanel(props: {
         </table>
       ) : null}
       {showCreate ? (
-        <WebDialog
+        <Dialog
           title="Create invitation code"
           onClose={() => setShowCreate(false)}
-          footer={<><button className="auth-button ghost" type="button" onClick={() => setShowCreate(false)} disabled={props.busy}>Cancel</button><button className="auth-button primary" type="button" onClick={() => void form.handleSubmit(createCode)()} disabled={props.busy}>{props.busy ? "Creating..." : "Create"}</button></>}
+          footer={<><Button variant="ghost" type="button" onClick={() => setShowCreate(false)} disabled={props.busy}>Cancel</Button><Button variant="primary" type="button" onClick={() => void form.handleSubmit(createCode)()} disabled={props.busy}>{props.busy ? "Creating..." : "Create"}</Button></>}
         >
           <form className="org-web-dialog-form" onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(createCode)(event); }}>
-            <label className="field"><span>Label</span><input className="input field-input" autoFocus {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
+            <label className="field"><span>Label</span><TextInput className="field-input" autoFocus {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
             <label className="field"><span>Role</span><UiSelect ariaLabel="Invitation role" className="field-input" options={editableRoleOptions} value={roleValue} onValueChange={(value) => form.setValue("role", value, { shouldDirty: true, shouldValidate: true })} /></label>
-            <label className="field"><span>Password</span><input className="input field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
-            <label className="field"><span>Email domain</span><input className="input field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
-            <label className="field"><span>Code expires in days</span><input className="input field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
+            <label className="field"><span>Password</span><TextInput className="field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
+            <label className="field"><span>Email domain</span><TextInput className="field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
+            <label className="field"><span>Code expires in days</span><TextInput className="field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
             <label className="field"><span>Guest days</span><UiSelect ariaLabel="Guest duration" className="field-input" options={guestDayOptions} value={guestDaysValue} onValueChange={(value) => form.setValue("guestDays", value, { shouldDirty: true, shouldValidate: true })} /></label>
           </form>
-        </WebDialog>
+        </Dialog>
       ) : null}
     </section>
   );
@@ -619,12 +618,12 @@ function CreateOrganizationDialog(props: {
   };
 
   return (
-    <WebDialog title="Create organisation" onClose={props.onClose} footer={<><button className="auth-button ghost" type="button" onClick={props.onClose} disabled={busy}>Cancel</button><button className="auth-button primary" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Creating..." : "Create"}</button></>}>
+    <Dialog title="Create organisation" onClose={props.onClose} footer={<><Button variant="ghost" type="button" onClick={props.onClose} disabled={busy}>Cancel</Button><Button variant="primary" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Creating..." : "Create"}</Button></>}>
       <form className="org-web-dialog-form" onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(submit)(event); }}>
-        <label className="field"><span>Name</span><input className="input field-input" autoFocus {...form.register("name")} />{form.formState.errors.name ? <span className="field-error">{form.formState.errors.name.message}</span> : null}</label>
+        <label className="field"><span>Name</span><TextInput className="field-input" autoFocus {...form.register("name")} />{form.formState.errors.name ? <span className="field-error">{form.formState.errors.name.message}</span> : null}</label>
       </form>
       {error ? <div className="auth-error-banner">{error}</div> : null}
-    </WebDialog>
+    </Dialog>
   );
 }
 
@@ -664,42 +663,12 @@ function AcceptInvitationDialog(props: {
   };
 
   return (
-    <WebDialog title="Accept invitation" onClose={props.onClose} footer={<><button className="auth-button ghost" type="button" onClick={props.onClose} disabled={busy}>Cancel</button><button className="auth-button primary" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Joining..." : "Join"}</button></>}>
+    <Dialog title="Accept invitation" onClose={props.onClose} footer={<><Button variant="ghost" type="button" onClick={props.onClose} disabled={busy}>Cancel</Button><Button variant="primary" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Joining..." : "Join"}</Button></>}>
       <form className="org-web-dialog-form" onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(submit)(event); }}>
-        <label className="field"><span>Invitation code</span><input className="input field-input auth-mono" autoFocus {...form.register("token")} />{form.formState.errors.token ? <span className="field-error">{form.formState.errors.token.message}</span> : null}</label>
-        {requiresPassword ? <label className="field"><span>Password</span><input className="input field-input" type="password" {...form.register("password")} /></label> : null}
+        <label className="field"><span>Invitation code</span><TextInput className="field-input" mono autoFocus {...form.register("token")} />{form.formState.errors.token ? <span className="field-error">{form.formState.errors.token.message}</span> : null}</label>
+        {requiresPassword ? <label className="field"><span>Password</span><TextInput className="field-input" type="password" {...form.register("password")} /></label> : null}
       </form>
       {error ? <div className="auth-error-banner">{error}</div> : null}
-    </WebDialog>
-  );
-}
-
-function WebDialog(props: {
-  title: React.ReactNode;
-  children: React.ReactNode;
-  footer?: React.ReactNode;
-  onClose: () => void;
-}): React.JSX.Element {
-  return (
-    <BaseDialog.Root
-      open
-      onOpenChange={(open) => {
-        if (!open) props.onClose();
-      }}
-    >
-      <BaseDialog.Portal>
-        <BaseDialog.Backdrop className="ui-dialog-backdrop" />
-        <BaseDialog.Viewport className="ui-dialog-viewport">
-          <BaseDialog.Popup className="ui-dialog">
-            <div className="ui-dialog-header">
-              <BaseDialog.Title className="ui-dialog-title" id="web-dialog-title">{props.title}</BaseDialog.Title>
-              <BaseDialog.Close className="ui-dialog-close" type="button" aria-label="Close"><X aria-hidden size={16} strokeWidth={2} /></BaseDialog.Close>
-            </div>
-            <div className="ui-dialog-body">{props.children}</div>
-            {props.footer ? <div className="ui-dialog-footer">{props.footer}</div> : null}
-          </BaseDialog.Popup>
-        </BaseDialog.Viewport>
-      </BaseDialog.Portal>
-    </BaseDialog.Root>
+    </Dialog>
   );
 }

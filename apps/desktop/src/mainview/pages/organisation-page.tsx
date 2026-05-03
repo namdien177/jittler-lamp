@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router";
 import { z } from "zod/v4";
+import { Button, Dialog, TextInput, UiSelect } from "@jittle-lamp/ui";
 
 import {
   api,
@@ -16,8 +17,6 @@ import {
   webOrigin
 } from "../api";
 import { useDesktopAuth } from "../auth-context";
-import { Dialog } from "../ui/dialog";
-import { UiSelect } from "../ui/select";
 import { useToast } from "../ui/toast";
 import { copyToClipboard, formatRelativeTime, getInitials } from "../utils";
 
@@ -175,12 +174,12 @@ function OrganisationListPage(): React.JSX.Element {
           <p className="page-subtitle">Workspaces you belong to, with active workspace kept at the top.</p>
         </div>
         <div className="row">
-          <button className="button ghost sm" type="button" onClick={() => setShowAcceptInvite(true)}>
+          <Button variant="ghost" size="sm" type="button" onClick={() => setShowAcceptInvite(true)}>
             Accept invite
-          </button>
-          <button className="button primary sm" type="button" onClick={() => setShowCreate(true)}>
+          </Button>
+          <Button variant="primary" size="sm" type="button" onClick={() => setShowCreate(true)}>
             New organisation
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -228,17 +227,17 @@ function OrganisationListPage(): React.JSX.Element {
                   <td className="muted">{org.memberCount}</td>
                   <td>
                     <div className="table-actions">
-                      <button
-                        className={org.id === activeOrgId ? "button secondary sm" : "button primary sm"}
+                      <Button
+                        variant={org.id === activeOrgId ? "secondary" : "primary"} size="sm"
                         type="button"
                         disabled={org.id === activeOrgId}
                         onClick={() => void activate(org.id)}
                       >
                         Active
-                      </button>
-                      <button className="button ghost sm" type="button" onClick={() => navigate(`/organisations/${org.id}`)}>
+                      </Button>
+                      <Button variant="ghost" size="sm" type="button" onClick={() => navigate(`/organisations/${org.id}`)}>
                         Manage
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -412,9 +411,9 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
     <div className="page org-page">
       <div className="page-header">
         <div>
-          <button className="button ghost xs" type="button" onClick={() => navigate("/organisations")}>
+          <Button variant="ghost" size="xs" type="button" onClick={() => navigate("/organisations")}>
             Back
-          </button>
+          </Button>
           <h1 className="page-title">{org?.name ?? "Organisation"}</h1>
           <p className="page-subtitle">
             {org ? `${org.memberCount} member${org.memberCount === 1 ? "" : "s"} · your role is ${org.role}` : loading ? "Loading organisation..." : "Organisation not found"}
@@ -436,8 +435,7 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
       {tab === "members" ? (
         <section className="org-section">
           <div className="auth-toolbar">
-            <input
-              className="input"
+            <TextInput
               type="search"
               placeholder="Search members by name, email, or role"
               value={memberSearch}
@@ -505,15 +503,15 @@ function OrganisationDetailPage(props: { orgId: string; tab: DetailTab }): React
       {tab === "options" && org ? (
         <section className="org-options">
           <OptionRow title="Leave organisation" detail="Remove your membership from this organisation.">
-            <button className="button danger sm" type="button" disabled={busy || org.isPersonal} onClick={() => void leave()}>
+            <Button variant="danger" size="sm" type="button" disabled={busy || org.isPersonal} onClick={() => void leave()}>
               Leave
-            </button>
+            </Button>
           </OptionRow>
           {isOwner ? (
             <OptionRow title="Transfer organisation" detail="Transfer ownership to another member before stepping away.">
-              <button className="button ghost sm" type="button" disabled>
+              <Button variant="ghost" size="sm" type="button" disabled>
                 Transfer
-              </button>
+              </Button>
             </OptionRow>
           ) : null}
         </section>
@@ -552,7 +550,7 @@ function MemberTable(props: {
                   {canEdit && props.isOwner ? (
                     <UiSelect ariaLabel={`Change role for ${getMemberPrimaryText(member)}`} className="ui-select-trigger-xs" options={editableRoleOptions} value={member.role === "moderator" ? "moderator" : "member"} disabled={props.busy} onValueChange={(value) => void props.onRoleChange(member, value)} />
                   ) : null}
-                  {canEdit ? <button className="button ghost xs" type="button" disabled={props.busy} onClick={() => void props.onRemove(member)}>Remove</button> : null}
+                  {canEdit ? <Button variant="ghost" size="xs" type="button" disabled={props.busy} onClick={() => void props.onRemove(member)}>Remove</Button> : null}
                 </div>
               </td>
             </tr>
@@ -569,9 +567,9 @@ function Pagination(props: { page: number; pages: number; total: number; onPage:
     <div className="org-pagination">
       <span className="muted">{props.total} member{props.total === 1 ? "" : "s"}</span>
       <div className="row">
-        <button className="button ghost xs" type="button" disabled={props.page <= 1} onClick={() => props.onPage(props.page - 1)}>Previous</button>
+        <Button variant="ghost" size="xs" type="button" disabled={props.page <= 1} onClick={() => props.onPage(props.page - 1)}>Previous</Button>
         <span className="muted">Page {props.page} of {props.pages}</span>
-        <button className="button ghost xs" type="button" disabled={props.page >= props.pages} onClick={() => props.onPage(props.page + 1)}>Next</button>
+        <Button variant="ghost" size="xs" type="button" disabled={props.page >= props.pages} onClick={() => props.onPage(props.page + 1)}>Next</Button>
       </div>
     </div>
   );
@@ -671,7 +669,7 @@ function InvitationCodePanel(props: {
           <h2>Invitation codes</h2>
           <p>Reusable codes for member onboarding.</p>
         </div>
-        <button className="button primary sm" type="button" onClick={() => setShowCreate(true)} disabled={props.busy || props.codes.length >= 3}>Create</button>
+        <Button variant="primary" size="sm" type="button" onClick={() => setShowCreate(true)} disabled={props.busy || props.codes.length >= 3}>Create</Button>
       </div>
 
       {props.createdCode ? (
@@ -679,9 +677,9 @@ function InvitationCodePanel(props: {
           <span className="detail-label">New static joining link</span>
           <span>{props.createdCode.code}</span>
           <div className="row">
-            <button className="button primary xs" type="button" onClick={async () => { await copyToClipboard(props.createdCode?.code ?? ""); toast.success("Code copied"); }}>Copy code</button>
-            <button className="button ghost xs" type="button" onClick={async () => { await copyToClipboard(getInviteUrl(props.createdCode?.code ?? "")); toast.success("Join URL copied"); }}>Copy URL</button>
-            <button className="button ghost xs" type="button" onClick={() => props.setCreatedCode(null)}>Done</button>
+            <Button variant="primary" size="xs" type="button" onClick={async () => { await copyToClipboard(props.createdCode?.code ?? ""); toast.success("Code copied"); }}>Copy code</Button>
+            <Button variant="ghost" size="xs" type="button" onClick={async () => { await copyToClipboard(getInviteUrl(props.createdCode?.code ?? "")); toast.success("Join URL copied"); }}>Copy URL</Button>
+            <Button variant="ghost" size="xs" type="button" onClick={() => props.setCreatedCode(null)}>Done</Button>
           </div>
         </div>
       ) : null}
@@ -695,7 +693,7 @@ function InvitationCodePanel(props: {
               <td className="muted">{[code.hasPassword ? "password" : null, code.emailDomain ? `@${code.emailDomain}` : null, code.expiresAt ? `expires ${formatRelativeTime(code.expiresAt)}` : null].filter(Boolean).join(" · ") || "None"}</td>
               <td className="muted">{code.guestExpiresAfterDays ? `${code.guestExpiresAfterDays} days` : "Permanent"}</td>
               <td><span className={`chip ${code.lockedAt ? "danger" : "success"}`}>{code.lockedAt ? "locked" : "active"}</span></td>
-              <td><div className="table-actions">{props.isOwner ? <button className="button ghost xs" type="button" disabled={props.busy} onClick={() => void lockCode(code, !code.lockedAt)}>{code.lockedAt ? "Unlock" : "Lock"}</button> : null}<button className="button ghost xs" type="button" disabled={props.busy} onClick={() => void deleteCode(code)}>Delete</button></div></td>
+              <td><div className="table-actions">{props.isOwner ? <Button variant="ghost" size="xs" type="button" disabled={props.busy} onClick={() => void lockCode(code, !code.lockedAt)}>{code.lockedAt ? "Unlock" : "Lock"}</Button> : null}<Button variant="ghost" size="xs" type="button" disabled={props.busy} onClick={() => void deleteCode(code)}>Delete</Button></div></td>
             </tr>
           ))}
           {props.codes.length === 0 ? <tr><td colSpan={5} className="muted">No static codes yet. Create one for repeat onboarding.</td></tr> : null}
@@ -709,13 +707,13 @@ function InvitationCodePanel(props: {
         </table>
       ) : null}
       {showCreate ? (
-        <Dialog open onClose={() => setShowCreate(false)} title="Create invitation code" footer={<><button className="button ghost sm" type="button" onClick={() => setShowCreate(false)} disabled={props.busy}>Cancel</button><button className="button primary sm" type="button" onClick={() => void form.handleSubmit(createCode)()} disabled={props.busy}>{props.busy ? "Creating..." : "Create"}</button></>}>
+        <Dialog open onClose={() => setShowCreate(false)} title="Create invitation code" footer={<><Button variant="ghost" size="sm" type="button" onClick={() => setShowCreate(false)} disabled={props.busy}>Cancel</Button><Button variant="primary" size="sm" type="button" onClick={() => void form.handleSubmit(createCode)()} disabled={props.busy}>{props.busy ? "Creating..." : "Create"}</Button></>}>
           <form className="column" style={{ gap: 12 }} onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(createCode)(event); }}>
-            <label className="field"><span>Label</span><input className="input field-input" autoFocus {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
+            <label className="field"><span>Label</span><TextInput className="field-input" autoFocus {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
             <label className="field"><span>Role</span><UiSelect ariaLabel="Invitation role" className="field-input" options={editableRoleOptions} value={roleValue} onValueChange={(value) => form.setValue("role", value, { shouldDirty: true, shouldValidate: true })} /></label>
-            <label className="field"><span>Password</span><input className="input field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
-            <label className="field"><span>Email domain</span><input className="input field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
-            <label className="field"><span>Code expires in days</span><input className="input field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
+            <label className="field"><span>Password</span><TextInput className="field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
+            <label className="field"><span>Email domain</span><TextInput className="field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
+            <label className="field"><span>Code expires in days</span><TextInput className="field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
             <label className="field"><span>Guest days</span><UiSelect ariaLabel="Guest duration" className="field-input" options={guestDayOptions} value={guestDaysValue} onValueChange={(value) => form.setValue("guestDays", value, { shouldDirty: true, shouldValidate: true })} /></label>
           </form>
         </Dialog>
@@ -747,9 +745,9 @@ function CreateOrganizationDialog(props: {
   };
 
   return (
-    <Dialog open onClose={props.onClose} title="Create organisation" footer={<><button className="button ghost sm" type="button" onClick={props.onClose} disabled={busy}>Cancel</button><button className="button primary sm" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Creating..." : "Create"}</button></>}>
+    <Dialog open onClose={props.onClose} title="Create organisation" footer={<><Button variant="ghost" size="sm" type="button" onClick={props.onClose} disabled={busy}>Cancel</Button><Button variant="primary" size="sm" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Creating..." : "Create"}</Button></>}>
       <form className="column" style={{ gap: 12 }} onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(submit)(event); }}>
-        <label className="field"><span>Name</span><input className="input field-input" autoFocus {...form.register("name")} />{form.formState.errors.name ? <span className="field-error">{form.formState.errors.name.message}</span> : null}</label>
+        <label className="field"><span>Name</span><TextInput className="field-input" autoFocus {...form.register("name")} />{form.formState.errors.name ? <span className="field-error">{form.formState.errors.name.message}</span> : null}</label>
       </form>
       {error ? <div className="auth-error">{error}</div> : null}
     </Dialog>
@@ -792,10 +790,10 @@ function AcceptInvitationDialog(props: {
   };
 
   return (
-    <Dialog open onClose={props.onClose} title="Accept invitation" footer={<><button className="button ghost sm" type="button" onClick={props.onClose} disabled={busy}>Cancel</button><button className="button primary sm" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Joining..." : "Join"}</button></>}>
+    <Dialog open onClose={props.onClose} title="Accept invitation" footer={<><Button variant="ghost" size="sm" type="button" onClick={props.onClose} disabled={busy}>Cancel</Button><Button variant="primary" size="sm" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Joining..." : "Join"}</Button></>}>
       <form className="column" style={{ gap: 12 }} onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(submit)(event); }}>
-        <label className="field"><span>Invitation code</span><input className="input field-input mono" autoFocus {...form.register("token")} />{form.formState.errors.token ? <span className="field-error">{form.formState.errors.token.message}</span> : null}</label>
-        {requiresPassword ? <label className="field"><span>Password</span><input className="input field-input" type="password" {...form.register("password")} /></label> : null}
+        <label className="field"><span>Invitation code</span><TextInput className="field-input" mono autoFocus {...form.register("token")} />{form.formState.errors.token ? <span className="field-error">{form.formState.errors.token.message}</span> : null}</label>
+        {requiresPassword ? <label className="field"><span>Password</span><TextInput className="field-input" type="password" {...form.register("password")} /></label> : null}
       </form>
       {error ? <div className="auth-error">{error}</div> : null}
     </Dialog>

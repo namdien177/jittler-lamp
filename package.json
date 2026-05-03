@@ -8,8 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run build:shared && bun run build:viewer-core && bun run build:viewer-react && bun run build:extension && bun run build:desktop && bun run build:web",
+    "build": "bun run build:shared && bun run build:ui && bun run build:viewer-core && bun run build:viewer-react && bun run build:extension && bun run build:desktop && bun run build:web",
     "build:shared": "bun run --cwd packages/shared build",
+    "build:ui": "bun run --cwd packages/ui build",
     "build:extension": "bun run --cwd apps/extension build",
     "build:desktop": "bun run --cwd apps/desktop build",
     "build:web": "bun run --cwd apps/evidence-web build",

@@ -253,7 +253,8 @@ a:hover {
 
 .input,
 .textarea,
-.select {
+.select,
+.ui-input {
   width: 100%;
   min-height: 32px;
   padding: 6px 10px;
@@ -266,7 +267,8 @@ a:hover {
 
 .input:focus,
 .textarea:focus,
-.select:focus {
+.select:focus,
+.ui-input:focus {
   outline: none;
   border-color: var(--accent);
   background: var(--surface);
@@ -279,8 +281,13 @@ a:hover {
 }
 
 .input::placeholder,
-.textarea::placeholder {
+.textarea::placeholder,
+.ui-input::placeholder {
   color: var(--text-faint);
+}
+
+.ui-input-mono {
+  font-family: var(--font-mono);
 }
 
 .field {
@@ -300,6 +307,99 @@ a:hover {
   color: var(--danger);
   font-size: 11px;
   font-weight: 500;
+}
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+  white-space: nowrap;
+}
+
+.ui-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ui-button-xs {
+  height: 22px;
+  padding: 0 var(--space-2);
+  font-size: 11px;
+}
+
+.ui-button-sm {
+  height: 28px;
+  padding: 0 var(--space-3);
+  font-size: 12px;
+}
+
+.ui-button-lg {
+  height: 38px;
+  padding: 0 var(--space-5);
+  font-size: 13px;
+}
+
+.ui-button-icon-only {
+  width: 28px;
+  padding: 0;
+}
+
+.ui-button-primary {
+  background: var(--accent);
+  color: #06120a;
+  border-color: var(--accent);
+}
+
+.ui-button-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.ui-button-secondary {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.ui-button-secondary:hover:not(:disabled) {
+  background: var(--surface-high);
+  border-color: var(--accent);
+}
+
+.ui-button-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+
+.ui-button-ghost:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.ui-button-danger {
+  background: var(--danger-strong);
+  color: #fff;
+  border-color: var(--danger-strong);
+}
+
+.ui-button-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.ui-button-outline {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 .ui-select-trigger {
@@ -1611,7 +1711,8 @@ a:hover {
   gap: var(--space-3);
 }
 
-.auth-toolbar .input {
+.auth-toolbar .input,
+.auth-toolbar .ui-input {
   flex: 1 1 auto;
 }
 

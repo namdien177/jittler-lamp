@@ -1,5 +1,5 @@
 import React from "react";
-import { Select as BaseSelect } from "@base-ui-components/react/select";
+import { Select as BaseSelect } from "@base-ui/react/select";
 import { Check, ChevronDown } from "lucide-react";
 
 export type SelectOption<TValue extends string> = {

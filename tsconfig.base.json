@@ -19,6 +19,9 @@
       "@jittle-lamp/shared": [
         "packages/shared/src/index.ts"
       ],
+      "@jittle-lamp/ui": [
+        "packages/ui/src/index.ts"
+      ],
       "@jittle-lamp/viewer-core": [
         "packages/viewer-core/src/index.ts"
       ],
