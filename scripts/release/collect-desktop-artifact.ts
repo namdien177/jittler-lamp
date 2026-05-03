@@ -30,6 +30,7 @@ const releaseName = `jittle-lamp-desktop-v${version}-macos-arm64-${isSigned ? "s
 
 mkdirSync(releaseArtifactsPath, { recursive: true });
 copyFileSync(join(artifactsPath, selectedArtifact), join(releaseArtifactsPath, releaseName));
+copyLegacyUpdaterArtifacts();
 
 console.info(`Collected desktop release asset as ${join(releaseArtifactsPath, releaseName)}`);
 
@@ -38,4 +39,31 @@ function priority(fileName: string): number {
   if (fileName.endsWith(".zip")) return 1;
   if (fileName.endsWith(".pkg")) return 2;
   return 99;
+}
+
+function copyLegacyUpdaterArtifacts(): void {
+  const updaterArtifacts = readdirSync(artifactsPath, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter(
+      (fileName) =>
+        fileName === "latest-mac.yml" ||
+        fileName.endsWith(".zip") ||
+        fileName.endsWith(".zip.blockmap") ||
+        fileName.endsWith(".dmg.blockmap")
+    )
+    .sort();
+
+  if (!updaterArtifacts.includes("latest-mac.yml")) {
+    throw new Error(`No latest-mac.yml legacy update metadata found in ${artifactsPath}`);
+  }
+
+  if (!updaterArtifacts.some((fileName) => fileName.endsWith(".zip"))) {
+    throw new Error(`No macOS ZIP legacy updater artifact found in ${artifactsPath}`);
+  }
+
+  for (const artifact of updaterArtifacts) {
+    copyFileSync(join(artifactsPath, artifact), join(releaseArtifactsPath, artifact));
+    console.info(`Collected legacy desktop updater artifact as ${join(releaseArtifactsPath, artifact)}`);
+  }
 }

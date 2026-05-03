@@ -262,7 +262,7 @@ With the checked-in config, Electron Builder writes build output into:
 
 The release workflow collects the install-oriented DMG from `apps/desktop/artifacts/`.
 
-In-app desktop update checks read the latest GitHub release and hand installation to `scripts/release/install-macos-desktop.sh`. The macOS job publishes only the install DMG; it does not publish Squirrel updater ZIP/blockmap metadata. Updates are available only from packaged builds, not from `bun run --cwd apps/desktop dev`.
+In-app desktop update checks read the latest GitHub release and hand installation to `scripts/release/install-macos-desktop.sh`. The macOS job also publishes `latest-mac.yml`, ZIP, and blockmap artifacts so older installed versions that still use Electron Builder's updater can discover the release and prompt users onto the installer-backed path. Updates are available only from packaged builds, not from `bun run --cwd apps/desktop dev`.
 
 ### 4. Release notes specific to this repo
 
