@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Dialog as BaseDialog } from "@base-ui-components/react/dialog";
 import { useAuth } from "@clerk/clerk-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { X } from "lucide-react";
@@ -650,24 +651,26 @@ function WebDialog(props: {
   footer?: React.ReactNode;
   onClose: () => void;
 }): React.JSX.Element {
-  useEffect(() => {
-    const handler = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") props.onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [props.onClose]);
-
   return (
-    <div className="ui-dialog-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) props.onClose(); }}>
-      <div className="ui-dialog" role="dialog" aria-modal="true" aria-labelledby="web-dialog-title">
-        <div className="ui-dialog-header">
-          <h2 className="ui-dialog-title" id="web-dialog-title">{props.title}</h2>
-          <button className="ui-dialog-close" type="button" aria-label="Close" onClick={props.onClose}><X aria-hidden size={16} strokeWidth={2} /></button>
-        </div>
-        <div className="ui-dialog-body">{props.children}</div>
-        {props.footer ? <div className="ui-dialog-footer">{props.footer}</div> : null}
-      </div>
-    </div>
+    <BaseDialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) props.onClose();
+      }}
+    >
+      <BaseDialog.Portal>
+        <BaseDialog.Backdrop className="ui-dialog-backdrop" />
+        <BaseDialog.Viewport className="ui-dialog-viewport">
+          <BaseDialog.Popup className="ui-dialog">
+            <div className="ui-dialog-header">
+              <BaseDialog.Title className="ui-dialog-title" id="web-dialog-title">{props.title}</BaseDialog.Title>
+              <BaseDialog.Close className="ui-dialog-close" type="button" aria-label="Close"><X aria-hidden size={16} strokeWidth={2} /></BaseDialog.Close>
+            </div>
+            <div className="ui-dialog-body">{props.children}</div>
+            {props.footer ? <div className="ui-dialog-footer">{props.footer}</div> : null}
+          </BaseDialog.Popup>
+        </BaseDialog.Viewport>
+      </BaseDialog.Portal>
+    </BaseDialog.Root>
   );
 }

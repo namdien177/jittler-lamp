@@ -1,4 +1,5 @@
-import React, { useEffect } from "react";
+import { Dialog as BaseDialog } from "@base-ui-components/react/dialog";
+import React from "react";
 import { X } from "lucide-react";
 
 export type DialogProps = {
@@ -15,46 +16,37 @@ export type DialogProps = {
 export function Dialog(props: DialogProps): React.JSX.Element | null {
   const { open, onClose, title, description, children, footer, size = "md", closeOnOverlay = true } = props;
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
-
   if (!open) return null;
 
   return (
-    <div
-      className="ui-dialog-overlay"
-      role="presentation"
-      onClick={(event) => {
-        if (closeOnOverlay && event.target === event.currentTarget) {
-          onClose();
-        }
+    <BaseDialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
       }}
+      disablePointerDismissal={!closeOnOverlay}
     >
-      <div className="ui-dialog" data-size={size} role="dialog" aria-modal="true" aria-labelledby="ui-dialog-title">
-        <div className="ui-dialog-header">
-          <div>
-            <h2 className="ui-dialog-title" id="ui-dialog-title">
-              {title}
-            </h2>
-            {description ? <p className="ui-dialog-description">{description}</p> : null}
-          </div>
-          <button className="ui-dialog-close" type="button" aria-label="Close" onClick={onClose}>
-            <X aria-hidden size={16} strokeWidth={2} />
-          </button>
-        </div>
-        <div className="ui-dialog-body">{children}</div>
-        {footer ? <div className="ui-dialog-footer">{footer}</div> : null}
-      </div>
-    </div>
+      <BaseDialog.Portal>
+        <BaseDialog.Backdrop className="ui-dialog-backdrop" />
+        <BaseDialog.Viewport className="ui-dialog-viewport">
+          <BaseDialog.Popup className="ui-dialog" data-size={size}>
+            <div className="ui-dialog-header">
+              <div>
+                <BaseDialog.Title className="ui-dialog-title" id="ui-dialog-title">
+                  {title}
+                </BaseDialog.Title>
+                {description ? <BaseDialog.Description className="ui-dialog-description">{description}</BaseDialog.Description> : null}
+              </div>
+              <BaseDialog.Close className="ui-dialog-close" type="button" aria-label="Close">
+                <X aria-hidden size={16} strokeWidth={2} />
+              </BaseDialog.Close>
+            </div>
+            <div className="ui-dialog-body">{children}</div>
+            {footer ? <div className="ui-dialog-footer">{footer}</div> : null}
+          </BaseDialog.Popup>
+        </BaseDialog.Viewport>
+      </BaseDialog.Portal>
+    </BaseDialog.Root>
   );
 }
 

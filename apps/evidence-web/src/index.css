@@ -1699,15 +1699,22 @@ select {
   text-transform: uppercase;
 }
 
-.ui-dialog-overlay {
+.ui-dialog-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(2, 4, 8, 0.65);
   backdrop-filter: blur(6px);
+  z-index: 900;
+}
+
+.ui-dialog-viewport {
+  position: fixed;
+  inset: 0;
   display: grid;
   place-items: center;
   padding: 24px;
-  z-index: 900;
+  pointer-events: none;
+  z-index: 901;
 }
 
 .ui-dialog {
@@ -1721,6 +1728,7 @@ select {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
 }
 
 .ui-dialog-header {
