@@ -1517,6 +1517,25 @@ a:hover {
   padding: var(--space-4);
 }
 
+.org-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.org-section-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.org-section-header p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .org-list-table tbody tr[data-active="true"] td {
   background: var(--accent-fade);
 }
@@ -1605,13 +1624,6 @@ a:hover {
   font-size: 12px;
 }
 
-.invite-code-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
-  gap: var(--space-3);
-  align-items: end;
-}
-
 .xs-select {
   width: auto;
   min-height: 24px;
@@ -1635,9 +1647,6 @@ a:hover {
     flex-direction: column;
   }
 
-  .invite-code-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ==========================================================================

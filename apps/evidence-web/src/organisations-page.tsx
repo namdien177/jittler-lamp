@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { X } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router";
 import { z } from "zod/v4";
@@ -90,14 +91,13 @@ export function OrganisationsPage(props: { section?: DetailTab }): React.JSX.Ele
 function OrganisationListPage(): React.JSX.Element {
   const auth = useAuth();
   const navigate = useNavigate();
-  const createForm = useForm<CreateOrgValues>({ resolver: zodResolver(createOrgSchema), defaultValues: { name: "" } });
-  const acceptForm = useForm<AcceptInvitationValues>({ resolver: zodResolver(acceptInvitationSchema), defaultValues: { token: "", password: "" } });
   const [orgs, setOrgs] = useState<ApiOrgSummary[]>([]);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("name");
-  const [requiresPassword, setRequiresPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showAcceptInvite, setShowAcceptInvite] = useState(false);
   const getToken = () => auth.getToken();
 
   const load = async (): Promise<void> => {
@@ -126,43 +126,6 @@ function OrganisationListPage(): React.JSX.Element {
     }
   };
 
-  const createOrg = async (values: CreateOrgValues): Promise<void> => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.createOrganization(getToken, values.name);
-      createForm.reset();
-      await load();
-      navigate(`/organisations/${result.organization.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to create organisation.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const acceptInvite = async (values: AcceptInvitationValues): Promise<void> => {
-    setBusy(true);
-    setError(null);
-    try {
-      if (!requiresPassword) {
-        const lookup = await api.lookupInvitation(getToken, values.token.trim());
-        if (lookup.code.requiresPassword) {
-          setRequiresPassword(true);
-          setError("This invitation code requires a password.");
-          return;
-        }
-      }
-      const result = await api.acceptInvitationWithPassword(getToken, values.token.trim(), requiresPassword ? values.password : undefined);
-      await load();
-      navigate(`/organisations/${result.organizationId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to accept invitation.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <AuthenticatedWebLayout>
       <main className="auth-main org-web-main">
@@ -171,20 +134,16 @@ function OrganisationListPage(): React.JSX.Element {
             <h1 className="auth-page-title">Organisations</h1>
             <p className="auth-page-subtitle">Workspaces you belong to, with the active organisation always first.</p>
           </div>
-          <form className="org-web-inline-form" onSubmit={createForm.handleSubmit(createOrg)}>
-            <input className="auth-search" placeholder="New organisation name" {...createForm.register("name")} />
-            <button className="auth-button primary" type="submit" disabled={busy}>Create</button>
-          </form>
+          <div className="org-web-actions">
+            <button className="auth-button ghost" type="button" onClick={() => setShowAcceptInvite(true)}>Accept invite</button>
+            <button className="auth-button primary" type="button" onClick={() => setShowCreate(true)}>Create</button>
+          </div>
         </header>
 
         <div className="auth-main-content org-web-stack">
           {error ? <div className="auth-error-banner">{error}</div> : null}
           <div className="org-web-toolbar">
-            <form className="org-web-inline-form" onSubmit={acceptForm.handleSubmit(acceptInvite)}>
-              <input className="auth-search" placeholder="Invitation code" {...acceptForm.register("token")} />
-              {requiresPassword ? <input className="auth-search" type="password" placeholder="Password" {...acceptForm.register("password")} /> : null}
-              <button className="auth-button ghost" type="submit" disabled={busy}>Join</button>
-            </form>
+            <span className="auth-muted">{orgs.length} organisation{orgs.length === 1 ? "" : "s"}</span>
             <label className="org-web-sort">
               <span>Order by</span>
               <select value={sort} onChange={(event) => setSort(event.currentTarget.value as SortKey)}>
@@ -218,6 +177,30 @@ function OrganisationListPage(): React.JSX.Element {
             </table>
           </section>
         </div>
+
+        {showCreate ? (
+          <CreateOrganizationDialog
+            getToken={getToken}
+            onClose={() => setShowCreate(false)}
+            onCreated={async (created) => {
+              setShowCreate(false);
+              await load();
+              navigate(`/organisations/${created.id}`);
+            }}
+          />
+        ) : null}
+
+        {showAcceptInvite ? (
+          <AcceptInvitationDialog
+            getToken={getToken}
+            onClose={() => setShowAcceptInvite(false)}
+            onAccepted={async (id) => {
+              setShowAcceptInvite(false);
+              await load();
+              navigate(`/organisations/${id}`);
+            }}
+          />
+        ) : null}
       </main>
     </AuthenticatedWebLayout>
   );
@@ -476,6 +459,7 @@ function InvitationsPanel(props: {
     resolver: zodResolver(codeSchema),
     defaultValues: { label: "Team onboarding", role: "member", password: "", emailDomain: "", expiresDays: "", guestDays: "" }
   });
+  const [showCreate, setShowCreate] = useState(false);
   const getToken = () => auth.getToken();
 
   const createCode = async (values: CodeValues): Promise<void> => {
@@ -492,6 +476,7 @@ function InvitationsPanel(props: {
       });
       props.setCreatedCode(result.code);
       form.setValue("password", "");
+      setShowCreate(false);
       await props.reload();
     } catch (err) {
       props.setError(err instanceof Error ? err.message : "Unable to create invitation code.");
@@ -532,16 +517,14 @@ function InvitationsPanel(props: {
 
   return (
     <section className="org-web-panel org-web-stack">
-      <form className="org-web-code-form" onSubmit={form.handleSubmit(createCode)}>
-        <input className="auth-search" placeholder="Code label" {...form.register("label")} />
-        <select {...form.register("role")}><option value="member">Member</option><option value="moderator">Moderator</option></select>
-        <input className="auth-search" type="password" placeholder="Password optional" {...form.register("password")} />
-        <input className="auth-search" placeholder="Email domain optional" {...form.register("emailDomain")} />
-        <input className="auth-search" type="number" min="1" placeholder="Expires days" {...form.register("expiresDays")} />
-        <select {...form.register("guestDays")}><option value="">Permanent</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select>
-        <button className="auth-button primary" type="submit" disabled={props.busy || props.codes.length >= 3}>Create code</button>
-      </form>
-      {props.createdCode ? <div className="auth-error-banner">New code: {props.createdCode.code}</div> : null}
+      <div className="org-web-section-header">
+        <div>
+          <h2>Invitation codes</h2>
+          <p>Reusable codes for member onboarding.</p>
+        </div>
+        <button className="auth-button primary" type="button" onClick={() => setShowCreate(true)} disabled={props.busy || props.codes.length >= 3}>Create</button>
+      </div>
+      {props.createdCode ? <div className="invite-token-box"><span className="detail-label">New static joining code</span><span>{props.createdCode.code}</span><button className="auth-button ghost" type="button" onClick={() => props.setCreatedCode(null)}>Done</button></div> : null}
       <table className="org-web-table">
         <thead><tr><th>Code</th><th>Restrictions</th><th>Guest</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
@@ -563,6 +546,128 @@ function InvitationsPanel(props: {
           <tbody>{props.invitations.map((invitation) => <tr key={invitation.id}><td>{invitation.email}</td><td>{invitation.role}</td><td>{invitation.status}</td></tr>)}</tbody>
         </table>
       ) : null}
+      {showCreate ? (
+        <WebDialog
+          title="Create invitation code"
+          onClose={() => setShowCreate(false)}
+          footer={<><button className="auth-button ghost" type="button" onClick={() => setShowCreate(false)} disabled={props.busy}>Cancel</button><button className="auth-button primary" type="button" onClick={() => void form.handleSubmit(createCode)()} disabled={props.busy}>{props.busy ? "Creating..." : "Create"}</button></>}
+        >
+          <form className="org-web-dialog-form" onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(createCode)(event); }}>
+            <label className="field"><span>Label</span><input className="input field-input" autoFocus {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
+            <label className="field"><span>Role</span><select className="select field-input" {...form.register("role")}><option value="member">Member</option><option value="moderator">Moderator</option></select></label>
+            <label className="field"><span>Password</span><input className="input field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
+            <label className="field"><span>Email domain</span><input className="input field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
+            <label className="field"><span>Code expires in days</span><input className="input field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
+            <label className="field"><span>Guest days</span><select className="select field-input" {...form.register("guestDays")}><option value="">Permanent</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label>
+          </form>
+        </WebDialog>
+      ) : null}
     </section>
+  );
+}
+
+function CreateOrganizationDialog(props: {
+  getToken: () => Promise<string | null>;
+  onClose: () => void;
+  onCreated: (organization: ApiOrgSummary) => Promise<void>;
+}): React.JSX.Element {
+  const form = useForm<CreateOrgValues>({ resolver: zodResolver(createOrgSchema), defaultValues: { name: "" } });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (values: CreateOrgValues): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.createOrganization(props.getToken, values.name.trim());
+      await props.onCreated(result.organization);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create organisation.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <WebDialog title="Create organisation" onClose={props.onClose} footer={<><button className="auth-button ghost" type="button" onClick={props.onClose} disabled={busy}>Cancel</button><button className="auth-button primary" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Creating..." : "Create"}</button></>}>
+      <form className="org-web-dialog-form" onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(submit)(event); }}>
+        <label className="field"><span>Name</span><input className="input field-input" autoFocus {...form.register("name")} />{form.formState.errors.name ? <span className="field-error">{form.formState.errors.name.message}</span> : null}</label>
+      </form>
+      {error ? <div className="auth-error-banner">{error}</div> : null}
+    </WebDialog>
+  );
+}
+
+function AcceptInvitationDialog(props: {
+  getToken: () => Promise<string | null>;
+  onClose: () => void;
+  onAccepted: (orgId: string) => Promise<void>;
+}): React.JSX.Element {
+  const form = useForm<AcceptInvitationValues>({ resolver: zodResolver(acceptInvitationSchema), defaultValues: { token: "", password: "" } });
+  const [requiresPassword, setRequiresPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (values: AcceptInvitationValues): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (!requiresPassword) {
+        const lookup = await api.lookupInvitation(props.getToken, values.token.trim()).catch(() => null);
+        if (lookup?.code.requiresPassword) {
+          setRequiresPassword(true);
+          setError("This invitation code requires a password.");
+          return;
+        }
+      }
+      if (requiresPassword && !values.password) {
+        setError("Enter the invitation password.");
+        return;
+      }
+      const result = await api.acceptInvitationWithPassword(props.getToken, values.token.trim(), requiresPassword ? values.password : undefined);
+      await props.onAccepted(result.organizationId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to accept invitation.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <WebDialog title="Accept invitation" onClose={props.onClose} footer={<><button className="auth-button ghost" type="button" onClick={props.onClose} disabled={busy}>Cancel</button><button className="auth-button primary" type="button" onClick={() => void form.handleSubmit(submit)()} disabled={busy}>{busy ? "Joining..." : "Join"}</button></>}>
+      <form className="org-web-dialog-form" onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(submit)(event); }}>
+        <label className="field"><span>Invitation code</span><input className="input field-input auth-mono" autoFocus {...form.register("token")} />{form.formState.errors.token ? <span className="field-error">{form.formState.errors.token.message}</span> : null}</label>
+        {requiresPassword ? <label className="field"><span>Password</span><input className="input field-input" type="password" {...form.register("password")} /></label> : null}
+      </form>
+      {error ? <div className="auth-error-banner">{error}</div> : null}
+    </WebDialog>
+  );
+}
+
+function WebDialog(props: {
+  title: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  onClose: () => void;
+}): React.JSX.Element {
+  useEffect(() => {
+    const handler = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") props.onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [props.onClose]);
+
+  return (
+    <div className="ui-dialog-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) props.onClose(); }}>
+      <div className="ui-dialog" role="dialog" aria-modal="true" aria-labelledby="web-dialog-title">
+        <div className="ui-dialog-header">
+          <h2 className="ui-dialog-title" id="web-dialog-title">{props.title}</h2>
+          <button className="ui-dialog-close" type="button" aria-label="Close" onClick={props.onClose}><X aria-hidden size={16} strokeWidth={2} /></button>
+        </div>
+        <div className="ui-dialog-body">{props.children}</div>
+        {props.footer ? <div className="ui-dialog-footer">{props.footer}</div> : null}
+      </div>
+    </div>
   );
 }

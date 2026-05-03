@@ -583,6 +583,7 @@ function InvitationCodePanel(props: {
     resolver: zodResolver(invitationCodeFormSchema),
     defaultValues: { label: "Team onboarding", role: "member", password: "", emailDomain: "", expiresDays: "", guestDays: "" }
   });
+  const [showCreate, setShowCreate] = useState(false);
 
   const createCode = async (values: InvitationCodeFormValues): Promise<void> => {
     props.setBusy(true);
@@ -597,6 +598,7 @@ function InvitationCodePanel(props: {
       });
       props.setCreatedCode(result.code);
       form.setValue("password", "");
+      setShowCreate(false);
       toast.success("Invitation code created");
       await props.reload();
     } catch (err) {
@@ -638,15 +640,13 @@ function InvitationCodePanel(props: {
 
   return (
     <section className="org-section">
-      <form className="invite-code-grid" onSubmit={form.handleSubmit(createCode)}>
-        <label className="field"><span>Label</span><input className="input field-input" {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
-        <label className="field"><span>Role</span><select className="select field-input" {...form.register("role")}><option value="member">Member</option><option value="moderator">Moderator</option></select></label>
-        <label className="field"><span>Password</span><input className="input field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
-        <label className="field"><span>Email domain</span><input className="input field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
-        <label className="field"><span>Code expires in days</span><input className="input field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
-        <label className="field"><span>Guest days</span><select className="select field-input" {...form.register("guestDays")}><option value="">Permanent</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label>
-        <button className="button primary sm" type="submit" disabled={props.busy || props.codes.length >= 3}>Create code</button>
-      </form>
+      <div className="org-section-header">
+        <div>
+          <h2>Invitation codes</h2>
+          <p>Reusable codes for member onboarding.</p>
+        </div>
+        <button className="button primary sm" type="button" onClick={() => setShowCreate(true)} disabled={props.busy || props.codes.length >= 3}>Create</button>
+      </div>
 
       {props.createdCode ? (
         <div className="invite-token-box">
@@ -681,6 +681,18 @@ function InvitationCodePanel(props: {
           <thead><tr><th>Direct invitation</th><th>Role</th><th>Status</th></tr></thead>
           <tbody>{props.invitations.map((invitation) => <tr key={invitation.id}><td>{invitation.email}</td><td><span className={`chip ${roleChipClass(invitation.role)}`}>{invitation.role}</span></td><td><span className="chip neutral">{invitation.status}</span></td></tr>)}</tbody>
         </table>
+      ) : null}
+      {showCreate ? (
+        <Dialog open onClose={() => setShowCreate(false)} title="Create invitation code" footer={<><button className="button ghost sm" type="button" onClick={() => setShowCreate(false)} disabled={props.busy}>Cancel</button><button className="button primary sm" type="button" onClick={() => void form.handleSubmit(createCode)()} disabled={props.busy}>{props.busy ? "Creating..." : "Create"}</button></>}>
+          <form className="column" style={{ gap: 12 }} onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(createCode)(event); }}>
+            <label className="field"><span>Label</span><input className="input field-input" autoFocus {...form.register("label")} />{form.formState.errors.label ? <span className="field-error">{form.formState.errors.label.message}</span> : null}</label>
+            <label className="field"><span>Role</span><select className="select field-input" {...form.register("role")}><option value="member">Member</option><option value="moderator">Moderator</option></select></label>
+            <label className="field"><span>Password</span><input className="input field-input" type="password" placeholder="Optional" {...form.register("password")} /></label>
+            <label className="field"><span>Email domain</span><input className="input field-input" placeholder="littlelives.com" {...form.register("emailDomain")} />{form.formState.errors.emailDomain ? <span className="field-error">{form.formState.errors.emailDomain.message}</span> : null}</label>
+            <label className="field"><span>Code expires in days</span><input className="input field-input" type="number" min="1" placeholder="No expiry" {...form.register("expiresDays")} />{form.formState.errors.expiresDays ? <span className="field-error">{form.formState.errors.expiresDays.message}</span> : null}</label>
+            <label className="field"><span>Guest days</span><select className="select field-input" {...form.register("guestDays")}><option value="">Permanent</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label>
+          </form>
+        </Dialog>
       ) : null}
     </section>
   );
