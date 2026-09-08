@@ -9,6 +9,7 @@ import {
 import {
   CircleStop,
   Copy,
+  ExternalLink,
   LogIn,
   Monitor,
   Move,
@@ -596,6 +597,7 @@ class FloatingWidgetController {
     const controls = deriveRecordingControlState(state, this.localRecordingOperation);
     const operation = this.localRecordingOperation ?? state?.recordingOperation;
     const phase = operation ?? state?.activeSession?.phase ?? "idle";
+    this.host.dataset.recording = String(phase === "recording" && !this.transientError);
     const pill = this.element("phase");
     const savedToCloud = isCloudSaveComplete(state) && !operation && !this.transientError;
     pill.textContent = savedToCloud ? "Saved to cloud" : statusPhaseLabel(phase);
@@ -625,11 +627,12 @@ class FloatingWidgetController {
       button.setAttribute("aria-busy", String(operation === (role === "retry" ? "retrying-upload" : "saving-local")));
     }
     const signIn = this.element<HTMLButtonElement>("sign-in");
-    const signedIn = state?.cloud.status === "signed-in";
+    const needsSignIn = state?.cloud.status === "signed-out";
+    signIn.hidden = !needsSignIn;
     signIn.disabled = this.actionInFlight || controls.busy;
-    signIn.title = signedIn ? "Re-sign in to cloud" : "Sign in to cloud";
-    signIn.setAttribute("aria-label", signIn.title);
-    this.element("sign-in-label").hidden = signedIn;
+    const openWeb = this.element<HTMLButtonElement>("open-web");
+    openWeb.hidden = needsSignIn;
+    openWeb.disabled = this.actionInFlight;
     const target = this.element<HTMLButtonElement>("target");
     target.hidden = !controls.start.visible;
     target.disabled = this.actionInFlight || controls.busy;
@@ -688,6 +691,7 @@ async function sendPopupRequest(
     | "jl/popup-resume-recording"
     | "jl/popup-abort-recording"
     | "jl/popup-start-cloud-sign-in"
+    | "jl/popup-open-evidence-list"
     | "jl/popup-logout-cloud",
   options: { playTabAudio?: boolean; captureTarget?: CaptureTarget } = {}
 ): Promise<PopupResponse> {
@@ -836,6 +840,7 @@ function clamp(value: number, min: number, max: number): number {
 const floatingWidgetIcons = {
   CircleStop,
   Copy,
+  ExternalLink,
   LogIn,
   Monitor,
   Move,
@@ -923,6 +928,21 @@ function floatingWidgetTemplate(): string {
         opacity: .55; transition: opacity 140ms ease;
       }
       .jl-float:hover, .jl-float:focus-within, :host([data-error="true"]) .jl-float { opacity: 1; }
+      :host([data-recording="true"]) .jl-float {
+        position: relative; border-color: #9fe3b74d;
+        box-shadow: 0 4px 20px #0004, 0 0 18px #9fe3b714;
+      }
+      :host([data-recording="true"]) .jl-float::after {
+        content: ""; position: absolute; bottom: 0; left: 12px; right: 12px; height: 1px;
+        pointer-events: none;
+        background: linear-gradient(90deg, transparent, #9fe3b7, transparent) 100% 0 / 200% 100%;
+        animation: jl-recording-sweep 3s ease-in-out infinite alternate;
+      }
+      :host([data-recording="true"]) .jl-phase::before {
+        content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px;
+        border-radius: 50%; background: #a6ecc0; vertical-align: 1px;
+        animation: jl-recording-beacon 2s ease-out infinite;
+      }
       .jl-bar { display: flex; align-items: center; gap: 4px; height: 34px; }
       button {
         display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -936,13 +956,12 @@ function floatingWidgetTemplate(): string {
       .jl-icon { width: 30px; padding: 0; }
       .jl-icon-svg { width: 16px; height: 16px; display: block; }
       .jl-target { background: #ffffff0d; border-color: #ffffff24; color: #dce6df; }
-      .jl-target .jl-switch-hint { color: #9aa69f; font-size: 12px; }
       .jl-start { background: #9fe3b7; color: #14271c; }
+      .jl-start:hover:not(:disabled), .jl-save:hover:not(:disabled) { background: #b7edcb; color: #14271c; }
       .jl-stop { background: #63332f; color: #ffded8; }
       .jl-save { background: #9fe3b7; color: #14271c; }
       .jl-phase { padding: 0 7px; font-size: 10px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
-      .jl-phase[data-saved="true"] { color: #bceccd; background: #9fe3b714; border: 1px solid #9fe3b72b; border-radius: 6px; padding: 4px 7px; font-size: 11px; font-weight: 500; letter-spacing: 0; }
-      .jl-phase[data-saved="true"]::before { content: "✓"; margin-right: 5px; }
+      .jl-phase[data-saved="true"] { color: #bceccd; font-size: 11px; font-weight: 500; letter-spacing: 0; }
       [data-role="sign-in"] { color: #bceccd; }
       .jl-phase[data-phase="recording"] { color: #a6ecc0; }
       .jl-phase[data-phase="failed"] { color: #ffb4a7; }
@@ -954,7 +973,12 @@ function floatingWidgetTemplate(): string {
       :host([data-error="true"]) .jl-status { color: #ffb4a7; }
       [data-loading="true"] .jl-action-icon { animation: jl-pulse 800ms ease infinite alternate; }
       @keyframes jl-pulse { to { opacity: .25; } }
-      @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+      @keyframes jl-recording-beacon {
+        0% { box-shadow: 0 0 0 0 #a6ecc066; }
+        75%, 100% { box-shadow: 0 0 0 5px #a6ecc000; }
+      }
+      @keyframes jl-recording-sweep { to { background-position: 0% 0; } }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
       @media (max-width: 520px) {
         .jl-bar { gap: 2px; }
         .jl-phase { padding: 0 3px; font-size: 9px; }
@@ -967,16 +991,14 @@ function floatingWidgetTemplate(): string {
         .jl-icon { width: 24px; }
         button { padding: 0 4px; }
         .jl-target { gap: 3px; }
-        .jl-target .jl-switch-hint { display: none; }
-        .jl-phase[data-saved="true"] { padding: 4px; font-size: 10px; }
-        .jl-phase[data-saved="true"]::before { margin-right: 3px; }
+        .jl-phase[data-saved="true"] { font-size: 10px; }
       }
     </style>
     <section class="jl-float" aria-label="Jittle Lamp recorder">
       <div class="jl-bar" role="toolbar" aria-label="Recording controls">
         <button class="jl-icon" data-role="drag" title="Move recorder. Use arrow keys when focused." aria-label="Move recorder"><span data-icon="Move"></span></button>
         <span class="jl-phase" data-role="phase" role="status" aria-live="polite" aria-atomic="true">READY</span>
-        <button class="jl-target" data-role="target" title="Record tab. Click to record screen or window." aria-label="Record tab. Click to record screen or window."><span data-icon="PanelTop"></span><span data-role="target-label">Tab</span><span class="jl-switch-hint" aria-hidden="true">⇄</span></button>
+        <button class="jl-target" data-role="target" title="Record tab. Click to record screen or window." aria-label="Record tab. Click to record screen or window."><span data-icon="PanelTop"></span><span data-role="target-label">Tab</span></button>
         <button class="jl-start" data-role="start" data-action="jl/popup-start-recording" disabled><span class="jl-action-icon" data-icon="Play"></span><span class="jl-label" data-role="start-label">Start</span></button>
         <button data-role="pause" data-action="pause" hidden><span class="jl-action-icon" data-icon="Pause"></span><span class="jl-label" data-role="pause-label">Pause</span></button>
         <button class="jl-stop" data-role="stop" data-action="jl/popup-stop-recording" hidden><span class="jl-action-icon" data-icon="CircleStop"></span><span class="jl-label" data-role="stop-label">Stop</span></button>
@@ -985,7 +1007,8 @@ function floatingWidgetTemplate(): string {
         <button class="jl-icon" data-role="discard" data-action="jl/popup-abort-recording" hidden><span data-icon="Trash2"></span><span hidden data-role="discard-label">Discard</span></button>
         <span class="jl-divider"></span>
         <button class="jl-icon" data-role="copy" title="Copy URL" aria-label="Copy evidence URL" disabled><span data-icon="Copy"></span></button>
-        <button data-role="sign-in" data-action="jl/popup-start-cloud-sign-in" title="Sign in to cloud" aria-label="Sign in to cloud"><span data-icon="LogIn"></span><span class="jl-label" data-role="sign-in-label">Sign in</span></button>
+        <button data-role="sign-in" data-action="jl/popup-start-cloud-sign-in" title="Sign in to cloud" aria-label="Sign in to cloud" hidden><span data-icon="LogIn"></span><span class="jl-label" data-role="sign-in-label">Sign in</span></button>
+        <button class="jl-icon" data-role="open-web" data-action="jl/popup-open-evidence-list" title="Open Jittle Lamp web" aria-label="Open Jittle Lamp web"><span data-icon="ExternalLink"></span></button>
         <button class="jl-icon" data-role="close" title="Close overlay" aria-label="Close overlay"><span data-icon="X"></span></button>
       </div>
       <p class="jl-status" data-role="status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
