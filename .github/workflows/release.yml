@@ -246,4 +246,5 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read
     uses: namdien177/jittle-lamp/.github/workflows/publish-chrome.yml@main

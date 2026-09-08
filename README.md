@@ -172,7 +172,7 @@ The release workflow builds the extension from `apps/extension/dist` and publish
 
 - `jittle-lamp-extension-vX.Y.Z.zip`
 
-The same tag workflow also submits that ZIP to the Chrome Web Store after the desktop artifact build succeeds. Configure these GitHub Actions environment secrets in the `production` environment before tagging a release:
+The same tag workflow also submits that ZIP to the Chrome Web Store after the desktop artifact build succeeds. Configure these GitHub Actions environment variables in the `production` environment before tagging a release:
 
 - `CHROME_PUBLISHER_ID`
 - `CHROME_EXTENSION_ID`

@@ -62,6 +62,47 @@ describe("Chrome publishing credential boundary", () => {
 });
 
 describe("release source checks before code execution", () => {
+  test("retry accepts only an owner's verified release artifact from protected main history", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/publish-chrome.yml", import.meta.url), "utf8");
+    const script = workflow.split("        run: |\n")[1]!.split("      - name:")[0]!.replace(/^          /gm, "");
+    const root = mkdtempSync(join(tmpdir(), "publish-retry-"));
+    const run = { event: "push", path: ".github/workflows/release.yml", status: "completed", head_branch: "v1.8.2", head_sha: "release-sha" };
+    const jobs = { jobs: ["validate-tag", "build-extension", "build-desktop"].map(name => ({ name, conclusion: "success" })) };
+    writeFileSync(join(root, "gh"), `#!/bin/sh
+case "$2" in
+  */git/ref/heads/main) printf '%s' 'main-sha';;
+  */actions/runs/123) printf '%s' "$TEST_RUN";;
+  */git/ref/tags/v1.8.2) printf '%s' "$TEST_TAG_SHA";;
+  */compare/main-sha...release-sha) printf '%s' "$TEST_COMPARISON";;
+  */actions/runs/123/jobs*) printf '%s' "$TEST_JOBS";;
+  *) exit 1;;
+esac
+`, { mode: 0o700 });
+    const env = {
+      ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "namdien177/jittle-lamp",
+      GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/main", GITHUB_REF_NAME: "main",
+      GITHUB_SHA: "main-sha", GITHUB_ACTOR_ID: "29449869", GITHUB_RUN_ID: "456", RELEASE_RUN_ID: "123",
+      GITHUB_OUTPUT: join(root, "output"), TEST_RUN: JSON.stringify(run), TEST_JOBS: JSON.stringify(jobs),
+      TEST_TAG_SHA: "release-sha", TEST_COMPARISON: "behind"
+    };
+    try {
+      const execute = (overrides = {}) => Bun.spawnSync(["bash", "-c", script], { env: { ...env, ...overrides } });
+      expect(execute().exitCode).toBe(0);
+      expect(readFileSync(env.GITHUB_OUTPUT, "utf8")).toBe("version=1.8.2\nrelease_tag=v1.8.2\nartifact_run_id=123\n");
+      for (const overrides of [
+        { GITHUB_ACTOR_ID: "another-user" }, { GITHUB_REF: "refs/heads/untrusted" }, { GITHUB_SHA: "old-main" },
+        { RELEASE_RUN_ID: "123;exit 0" }, { TEST_TAG_SHA: "moved-tag" }, { TEST_COMPARISON: "diverged" },
+        { TEST_RUN: JSON.stringify({ ...run, event: "pull_request" }) },
+        { TEST_RUN: JSON.stringify({ ...run, path: ".github/workflows/untrusted.yml" }) },
+        { TEST_RUN: JSON.stringify({ ...run, status: "in_progress" }) },
+        { TEST_RUN: JSON.stringify({ ...run, head_branch: "main" }) },
+        { TEST_JOBS: JSON.stringify({ jobs: jobs.jobs.slice(0, 2) }) }
+      ]) expect(execute(overrides).exitCode).not.toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   for (const workflow of ["release.yml", "publish-chrome.yml"]) {
     test(`${workflow} accepts only stable tag pushes at main HEAD`, () => {
       const text = readFileSync(new URL(`../.github/workflows/${workflow}`, import.meta.url), "utf8");
@@ -75,12 +116,12 @@ describe("release source checks before code execution", () => {
         ...process.env, PATH: `${root}:${process.env.PATH}`, TEST_MAIN_SHA: "abc123",
         GITHUB_REPOSITORY: "namdien177/jittle-lamp", GITHUB_EVENT_NAME: "push",
         GITHUB_REF_TYPE: "tag", GITHUB_REF_NAME: "v1.2.3", GITHUB_SHA: "abc123",
-        GITHUB_OUTPUT: join(root, "output")
+        GITHUB_RUN_ID: "123", GITHUB_OUTPUT: join(root, "output")
       };
       try {
         const run = (overrides = {}) => Bun.spawnSync(["bash", "-c", script!], { env: { ...env, ...overrides } });
         expect(run().exitCode).toBe(0);
-        expect(readFileSync(env.GITHUB_OUTPUT, "utf8")).toBe("version=1.2.3\n");
+        expect(readFileSync(env.GITHUB_OUTPUT, "utf8")).toContain("version=1.2.3\n");
         for (const overrides of [
           { GITHUB_REPOSITORY: "attacker/jittle-lamp" }, { GITHUB_EVENT_NAME: "pull_request" },
           { GITHUB_REF_TYPE: "branch" }, { GITHUB_SHA: "other-commit" },

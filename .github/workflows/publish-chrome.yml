@@ -2,9 +2,20 @@ name: Publish Chrome Web Store
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Release workflow run whose verified extension artifact should be published
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: chrome-webstore-publish
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -13,6 +24,7 @@ jobs:
     environment: production
     permissions:
       contents: read
+      actions: read
       id-token: write
 
     steps:
@@ -20,19 +32,51 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REPOSITORY" != "namdien177/jittle-lamp" || "$GITHUB_EVENT_NAME" != "push" || "$GITHUB_REF_TYPE" != "tag" || ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Expected a stable release tag push in namdien177/jittle-lamp." >&2
+          if [[ "$GITHUB_REPOSITORY" != "namdien177/jittle-lamp" ]]; then
+            echo "Unexpected repository." >&2
             exit 1
           fi
           main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-          if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
-            echo "Release tags must point at the current main HEAD." >&2
+          release_tag="$GITHUB_REF_NAME"
+          artifact_run_id="$GITHUB_RUN_ID"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" || "$GITHUB_SHA" != "$main_sha" || "$GITHUB_ACTOR_ID" != "29449869" || ! "$RELEASE_RUN_ID" =~ ^[0-9]+$ ]]; then
+              echo "Publishing retries require the owner, current main, and a numeric release run ID." >&2
+              exit 1
+            fi
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
+            if ! jq -e '.event == "push" and .path == ".github/workflows/release.yml" and .status == "completed"' <<< "$run" > /dev/null; then
+              echo "Expected a completed Release workflow triggered by a tag push." >&2
+              exit 1
+            fi
+            release_tag="$(jq -r .head_branch <<< "$run")"
+            release_sha="$(jq -r .head_sha <<< "$run")"
+            if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Expected a stable release tag." >&2
+              exit 1
+            fi
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" --jq 'select(.object.type == "commit") | .object.sha')"
+            comparison="$(gh api "repos/$GITHUB_REPOSITORY/compare/$main_sha...$release_sha" --jq .status)"
+            if [[ "$tag_sha" != "$release_sha" || ( "$comparison" != "behind" && "$comparison" != "identical" ) ]]; then
+              echo "Release must match its tag and be reachable from protected main." >&2
+              exit 1
+            fi
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID/jobs?filter=all&per_page=100" --paginate |
+              jq -se '[.[].jobs[] | select(.conclusion == "success") | .name] as $passed | ["validate-tag", "build-extension", "build-desktop"] | all(. as $job | $passed | index($job) != null)' > /dev/null
+            artifact_run_id="$RELEASE_RUN_ID"
+          elif [[ "$GITHUB_EVENT_NAME" != "push" || "$GITHUB_REF_TYPE" != "tag" || ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ || "$GITHUB_SHA" != "$main_sha" ]]; then
+            echo "Expected a stable release tag push at current main HEAD." >&2
             exit 1
           fi
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=${release_tag#v}"
+            echo "release_tag=$release_tag"
+            echo "artifact_run_id=$artifact_run_id"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Check out verified release source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -45,11 +89,19 @@ jobs:
         with:
           bun-version: "1.2.15"
 
-      - name: Download extension asset from this run
+      - name: Download verified extension asset
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.version.outputs.artifact_run_id }}
           name: release-extension
           path: release-artifacts
+
+      - name: Check publishing configuration
+        env:
+          CHROME_PUBLISHER_ID: ${{ vars.CHROME_PUBLISHER_ID }}
+          CHROME_EXTENSION_ID: ${{ vars.CHROME_EXTENSION_ID }}
+        run: test -n "$CHROME_PUBLISHER_ID" && test -n "$CHROME_EXTENSION_ID"
 
       - name: Authenticate Chrome Web Store publisher
         id: chrome-auth
@@ -65,9 +117,10 @@ jobs:
 
       - name: Publish Chrome Web Store extension
         env:
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
           CHROME_ACCESS_TOKEN: ${{ steps.chrome-auth.outputs.access_token }}
-          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
-          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
-          CHROME_PUBLISH_TYPE: ${{ secrets.CHROME_PUBLISH_TYPE || 'DEFAULT_PUBLISH' }}
-          CHROME_DEPLOY_PERCENTAGE: ${{ secrets.CHROME_DEPLOY_PERCENTAGE }}
-        run: bun scripts/release/publish-chrome-extension.ts "release-artifacts/jittle-lamp-extension-${GITHUB_REF_NAME}.zip"
+          CHROME_PUBLISHER_ID: ${{ vars.CHROME_PUBLISHER_ID }}
+          CHROME_EXTENSION_ID: ${{ vars.CHROME_EXTENSION_ID }}
+          CHROME_PUBLISH_TYPE: ${{ vars.CHROME_PUBLISH_TYPE || 'DEFAULT_PUBLISH' }}
+          CHROME_DEPLOY_PERCENTAGE: ${{ vars.CHROME_DEPLOY_PERCENTAGE }}
+        run: bun scripts/release/publish-chrome-extension.ts "release-artifacts/jittle-lamp-extension-${RELEASE_TAG}.zip"

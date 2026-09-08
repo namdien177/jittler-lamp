@@ -4,7 +4,7 @@ The Release workflow uses GitHub OIDC to impersonate a dedicated Google service 
 
 ## Security boundary
 
-Only the reusable `publish-chrome.yml` workflow loaded from GitHub `main` can impersonate the service account. Before checking out code, it verifies a stable tag push in this repository and checks that its commit is the current `main` HEAD. Forks, pull requests, branches, and replacement publishing workflows on tags fail the trust condition or source check. Maintainers who can change `main` remain trusted. Protecting those accounts and reviewing workflow changes remain necessary.
+Only `publish-chrome.yml` loaded from GitHub `main` can impersonate the service account. Automatic publishing runs as a reusable workflow; manual retries also require owner ID `29449869`. Before checking out code, it verifies a stable tag push in this repository and checks that its commit is the current `main` HEAD. Forks, pull requests, branches, and replacement publishing workflows on tags fail the trust condition or source check. Maintainers who can change `main` remain trusted. Protecting those accounts and reviewing workflow changes remain necessary.
 
 Third-party release actions are pinned to full commit SHAs. Build jobs have read access; only GitHub release creation has repository write access. Checkout does not persist credentials. The publishing job runs no dependency installation and gets a 15-minute token only after artifact download. Google authentication masks its token output, writes no credential file, and exports no credentials to later steps. Only the publish step receives the access token, through its environment. The script uses Google's fixed HTTPS API origin, rejects redirects, limits request duration, and omits raw response bodies and transport errors from logs.
 
@@ -30,7 +30,7 @@ attribute.repository_id = assertion.repository_id
 Provider condition:
 
 ```text
-assertion.repository_id == '1212426518' && assertion.repository_owner_id == '29449869' && assertion.sub == 'repo:namdien177/jittle-lamp:environment:production' && assertion.event_name == 'push' && assertion.ref.startsWith('refs/tags/v') && assertion.workflow_ref == 'namdien177/jittle-lamp/.github/workflows/release.yml@' + assertion.ref && assertion.job_workflow_ref == 'namdien177/jittle-lamp/.github/workflows/publish-chrome.yml@refs/heads/main'
+assertion.repository_id == '1212426518' && assertion.repository_owner_id == '29449869' && assertion.sub == 'repo:namdien177/jittle-lamp:environment:production' && ((assertion.event_name == 'push' && assertion.ref.startsWith('refs/tags/v') && assertion.workflow_ref == 'namdien177/jittle-lamp/.github/workflows/release.yml@' + assertion.ref && assertion.job_workflow_ref == 'namdien177/jittle-lamp/.github/workflows/publish-chrome.yml@refs/heads/main') || (assertion.event_name == 'workflow_dispatch' && assertion.ref == 'refs/heads/main' && assertion.actor_id == '29449869' && assertion.workflow_ref == 'namdien177/jittle-lamp/.github/workflows/publish-chrome.yml@refs/heads/main'))
 ```
 
 The service account grants `roles/iam.workloadIdentityUser` to:
@@ -49,12 +49,22 @@ Set `CHROME_SERVICE_ACCOUNT` to the service account email above and `CHROME_WORK
 projects/660889243716/locations/global/workloadIdentityPools/github-releases/providers/jittlelamp-release
 ```
 
-Keep `CHROME_PUBLISHER_ID` and `CHROME_EXTENSION_ID` as environment secrets. The workflow no longer reads `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, or `CHROME_REFRESH_TOKEN`.
+Set `CHROME_PUBLISHER_ID` and `CHROME_EXTENSION_ID` as environment variables. These public destination identifiers are not credentials. Optional `CHROME_PUBLISH_TYPE` and `CHROME_DEPLOY_PERCENTAGE` are also variables. The workflow no longer reads `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, or `CHROME_REFRESH_TOKEN`.
+
+## Retry an existing release
+
+If publishing fails after the release assets were built, run the **Publish Chrome Web Store** workflow on `main` with the original Release workflow run ID:
+
+```sh
+gh workflow run publish-chrome.yml --repo namdien177/jittle-lamp --ref main -f release_run_id=34244741412
+```
+
+Retries require the repository owner and current `main`. The original run must be a completed tag-push Release workflow. Its lightweight stable tag must still match the release commit, which must be reachable from protected `main`. Validation and both build jobs must have succeeded. The workflow downloads the original run's extension artifact; it does not move tags or rebuild assets. Publishing runs are serialized.
 
 ## Publisher connection and verification
 
 In the Chrome Web Store Developer Dashboard, open Settings, scroll to Management, and add the service account email under Service account. Google currently permits one service account per publisher.
 
-After the workflow changes reach GitHub `main`, the next release tag must point at that same commit. The authentication step should produce an access token, followed by successful upload and submission. Google review and the selected publish type determine when the submitted version becomes public. Local tests validate the publishing configuration; they do not prove the live GitHub-to-Google token exchange.
+After the workflow changes reach GitHub `main`, the next release tag must point at that same commit. The authentication step should produce an access token, followed by successful upload and submission. Google review and the selected publish type determine when the submitted version becomes public. The v1.8.2 release confirmed the live GitHub-to-Google token exchange. Its initial publishing attempt failed before upload because destination environment secrets were empty in the reusable job; public destination IDs now use variables.
 
 References: [Google service account setup](https://developer.chrome.com/docs/webstore/service-accounts) and [GitHub authentication action](https://github.com/google-github-actions/auth).
