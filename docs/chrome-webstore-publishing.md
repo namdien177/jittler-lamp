@@ -2,6 +2,14 @@
 
 The Release workflow uses GitHub OIDC to impersonate a dedicated Google service account. It requests an access token scoped to `https://www.googleapis.com/auth/chromewebstore` after downloading the extension ZIP.
 
+## Security boundary
+
+Only the reusable `publish-chrome.yml` workflow loaded from GitHub `main` can impersonate the service account. Before checking out code, it verifies a stable tag push in this repository and checks that its commit is the current `main` HEAD. Forks, pull requests, branches, and replacement publishing workflows on tags fail the trust condition or source check. Maintainers who can change `main` remain trusted. Protecting those accounts and reviewing workflow changes remain necessary.
+
+Third-party release actions are pinned to full commit SHAs. Build jobs have read access; only GitHub release creation has repository write access. Checkout does not persist credentials. The publishing job runs no dependency installation and gets a 15-minute token only after artifact download. Google authentication masks its token output, writes no credential file, and exports no credentials to later steps. Only the publish step receives the access token, through its environment. The script uses Google's fixed HTTPS API origin, rejects redirects, limits request duration, and omits raw response bodies and transport errors from logs.
+
+The token is not available to extension or desktop build jobs or artifact uploads. No refresh token or service account key is needed. The service account can manage this publisher's extensions, so publisher membership is also part of the trust boundary.
+
 ## Google Cloud configuration
 
 - Project: `jittlelamp`, display name `JittleLamp`
@@ -22,7 +30,7 @@ attribute.repository_id = assertion.repository_id
 Provider condition:
 
 ```text
-assertion.repository_id == '1212426518' && assertion.repository_owner_id == '29449869' && assertion.sub == 'repo:namdien177/jittle-lamp:environment:production' && assertion.event_name == 'push' && assertion.ref.startsWith('refs/tags/v') && assertion.workflow_ref == 'namdien177/jittle-lamp/.github/workflows/release.yml@' + assertion.ref
+assertion.repository_id == '1212426518' && assertion.repository_owner_id == '29449869' && assertion.sub == 'repo:namdien177/jittle-lamp:environment:production' && assertion.event_name == 'push' && assertion.ref.startsWith('refs/tags/v') && assertion.workflow_ref == 'namdien177/jittle-lamp/.github/workflows/release.yml@' + assertion.ref && assertion.job_workflow_ref == 'namdien177/jittle-lamp/.github/workflows/publish-chrome.yml@refs/heads/main'
 ```
 
 The service account grants `roles/iam.workloadIdentityUser` to:
