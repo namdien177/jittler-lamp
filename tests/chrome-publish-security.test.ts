@@ -42,10 +42,10 @@ describe("Chrome publishing credential boundary", () => {
 
   test("does not expose reflected response data or transport errors", async () => {
     fetchSpy.mockResolvedValue(Response.json({ error: token }, { status: 403 }));
-    await expect(fetchChromeExtensionStatus(input)).rejects.toThrow("Chrome Web Store status fetch failed (HTTP 403).");
+    await expect(fetchChromeExtensionStatus(input)).rejects.toMatchObject({ message: "Chrome Web Store status fetch failed (HTTP 403)." });
     fetchSpy.mockRejectedValue(new Error(`request included Bearer ${token}`));
     await expect(publishChromeExtension({ ...input, publishType: "DEFAULT_PUBLISH" }))
-      .rejects.toThrow("Chrome Web Store request failed or timed out.");
+      .rejects.toMatchObject({ message: "Chrome Web Store request failed or timed out." });
   });
 
   test("never logs arbitrary upload states returned by the API", async () => {
@@ -53,7 +53,7 @@ describe("Chrome publishing credential boundary", () => {
     fetchSpy.mockResolvedValue(Response.json({ lastAsyncUploadState: token, error: token }));
     try {
       await expect(waitForChromeUpload({ ...input, initialUpload: { uploadState: "IN_PROGRESS" }, intervalMs: 0 }))
-        .rejects.toThrow("Chrome Web Store upload failed or did not finish successfully.");
+        .rejects.toMatchObject({ message: "Chrome Web Store upload failed or did not finish successfully." });
       expect(JSON.stringify(log.mock.calls)).not.toContain(token);
     } finally {
       log.mockRestore();
