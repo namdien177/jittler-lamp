@@ -9,6 +9,7 @@ import {
 import {
   CircleStop,
   Copy,
+  LogIn,
   Monitor,
   Move,
   PanelTop,
@@ -474,8 +475,11 @@ class FloatingWidgetController {
       const url = button.dataset.cloudUrl;
       if (url) {
         const copied = await copyTextToClipboard(url);
-        this.element("status").textContent = copied ? "Evidence URL copied." : "Could not copy the URL. Try again.";
-        this.element("status").hidden = false;
+        if (copied) {
+          this.element("phase").textContent = "URL copied";
+        } else {
+          this.showError("Could not copy the URL. Try again.");
+        }
       }
     });
     const drag = this.element<HTMLButtonElement>("drag");
@@ -565,7 +569,8 @@ class FloatingWidgetController {
     const message = this.element("status");
     message.textContent = status;
     message.title = status;
-    message.hidden = !failed && !this.transientError && state.activeSession?.phase !== "ready";
+    message.hidden = !failed && !this.transientError &&
+      (state.activeSession?.phase !== "ready" || isCloudSaveComplete(state));
     message.setAttribute("role", failed || this.transientError ? "alert" : "status");
     const copy = this.element<HTMLButtonElement>("copy");
     const url = state.activeSession?.phase === "ready" && state.activeSession.statusText
@@ -592,7 +597,9 @@ class FloatingWidgetController {
     const operation = this.localRecordingOperation ?? state?.recordingOperation;
     const phase = operation ?? state?.activeSession?.phase ?? "idle";
     const pill = this.element("phase");
-    pill.textContent = statusPhaseLabel(phase);
+    const savedToCloud = isCloudSaveComplete(state) && !operation && !this.transientError;
+    pill.textContent = savedToCloud ? "Saved to cloud" : statusPhaseLabel(phase);
+    pill.dataset.saved = String(savedToCloud);
     pill.dataset.phase = phase;
     pill.title = state ? widgetStatusText(state) : "Checking recorder…";
     for (const [role, control, label] of [
@@ -617,11 +624,18 @@ class FloatingWidgetController {
       button.disabled = this.actionInFlight || controls.busy;
       button.setAttribute("aria-busy", String(operation === (role === "retry" ? "retrying-upload" : "saving-local")));
     }
+    const signIn = this.element<HTMLButtonElement>("sign-in");
+    const signedIn = state?.cloud.status === "signed-in";
+    signIn.disabled = this.actionInFlight || controls.busy;
+    signIn.title = signedIn ? "Re-sign in to cloud" : "Sign in to cloud";
+    signIn.setAttribute("aria-label", signIn.title);
+    this.element("sign-in-label").hidden = signedIn;
     const target = this.element<HTMLButtonElement>("target");
     target.hidden = !controls.start.visible;
     target.disabled = this.actionInFlight || controls.busy;
     target.title = this.captureTarget === "tab" ? "Record tab. Click to record screen or window." : "Record screen or window. Click to record tab.";
     target.setAttribute("aria-label", target.title);
+    this.element("target-label").textContent = this.captureTarget === "tab" ? "Tab" : "Screen";
     hydrateButtonIcon(target, this.captureTarget === "tab" ? "PanelTop" : "Monitor");
   }
 
@@ -822,6 +836,7 @@ function clamp(value: number, min: number, max: number): number {
 const floatingWidgetIcons = {
   CircleStop,
   Copy,
+  LogIn,
   Monitor,
   Move,
   PanelTop,
@@ -885,6 +900,11 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
+function isCloudSaveComplete(state: PopupState | null): boolean {
+  return state?.activeSession?.phase === "ready" &&
+    state.activeSession.statusText?.startsWith("Saved session directly to cloud") === true;
+}
+
 function extractFirstUrl(message: string): string | undefined {
   return message.match(/https?:\/\/[^\s)]+/)?.[0];
 }
@@ -915,10 +935,15 @@ function floatingWidgetTemplate(): string {
       button:focus-visible { outline: 2px solid #8ae3b0; outline-offset: 1px; }
       .jl-icon { width: 30px; padding: 0; }
       .jl-icon-svg { width: 16px; height: 16px; display: block; }
+      .jl-target { background: #ffffff0d; border-color: #ffffff24; color: #dce6df; }
+      .jl-target .jl-switch-hint { color: #9aa69f; font-size: 12px; }
       .jl-start { background: #9fe3b7; color: #14271c; }
       .jl-stop { background: #63332f; color: #ffded8; }
       .jl-save { background: #9fe3b7; color: #14271c; }
       .jl-phase { padding: 0 7px; font-size: 10px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+      .jl-phase[data-saved="true"] { color: #bceccd; background: #9fe3b714; border: 1px solid #9fe3b72b; border-radius: 6px; padding: 4px 7px; font-size: 11px; font-weight: 500; letter-spacing: 0; }
+      .jl-phase[data-saved="true"]::before { content: "✓"; margin-right: 5px; }
+      [data-role="sign-in"] { color: #bceccd; }
       .jl-phase[data-phase="recording"] { color: #a6ecc0; }
       .jl-phase[data-phase="failed"] { color: #ffb4a7; }
       [data-role="drag"] { cursor: grab; touch-action: none; color: #9aa69f; }
@@ -937,12 +962,21 @@ function floatingWidgetTemplate(): string {
         button { padding: 0 7px; }
         .jl-divider { margin: 0; }
       }
+      @media (max-width: 380px) {
+        .jl-bar { gap: 1px; }
+        .jl-icon { width: 24px; }
+        button { padding: 0 4px; }
+        .jl-target { gap: 3px; }
+        .jl-target .jl-switch-hint { display: none; }
+        .jl-phase[data-saved="true"] { padding: 4px; font-size: 10px; }
+        .jl-phase[data-saved="true"]::before { margin-right: 3px; }
+      }
     </style>
     <section class="jl-float" aria-label="Jittle Lamp recorder">
       <div class="jl-bar" role="toolbar" aria-label="Recording controls">
         <button class="jl-icon" data-role="drag" title="Move recorder. Use arrow keys when focused." aria-label="Move recorder"><span data-icon="Move"></span></button>
-        <span class="jl-phase" data-role="phase">READY</span>
-        <button class="jl-icon" data-role="target" title="Record tab" aria-label="Recording target"><span data-icon="PanelTop"></span></button>
+        <span class="jl-phase" data-role="phase" role="status" aria-live="polite" aria-atomic="true">READY</span>
+        <button class="jl-target" data-role="target" title="Record tab. Click to record screen or window." aria-label="Record tab. Click to record screen or window."><span data-icon="PanelTop"></span><span data-role="target-label">Tab</span><span class="jl-switch-hint" aria-hidden="true">⇄</span></button>
         <button class="jl-start" data-role="start" data-action="jl/popup-start-recording" disabled><span class="jl-action-icon" data-icon="Play"></span><span class="jl-label" data-role="start-label">Start</span></button>
         <button data-role="pause" data-action="pause" hidden><span class="jl-action-icon" data-icon="Pause"></span><span class="jl-label" data-role="pause-label">Pause</span></button>
         <button class="jl-stop" data-role="stop" data-action="jl/popup-stop-recording" hidden><span class="jl-action-icon" data-icon="CircleStop"></span><span class="jl-label" data-role="stop-label">Stop</span></button>
@@ -951,6 +985,7 @@ function floatingWidgetTemplate(): string {
         <button class="jl-icon" data-role="discard" data-action="jl/popup-abort-recording" hidden><span data-icon="Trash2"></span><span hidden data-role="discard-label">Discard</span></button>
         <span class="jl-divider"></span>
         <button class="jl-icon" data-role="copy" title="Copy URL" aria-label="Copy evidence URL" disabled><span data-icon="Copy"></span></button>
+        <button data-role="sign-in" data-action="jl/popup-start-cloud-sign-in" title="Sign in to cloud" aria-label="Sign in to cloud"><span data-icon="LogIn"></span><span class="jl-label" data-role="sign-in-label">Sign in</span></button>
         <button class="jl-icon" data-role="close" title="Close overlay" aria-label="Close overlay"><span data-icon="X"></span></button>
       </div>
       <p class="jl-status" data-role="status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
