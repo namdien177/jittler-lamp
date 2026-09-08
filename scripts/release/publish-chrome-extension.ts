@@ -1,19 +1,11 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 export type ChromePublishConfig = {
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
+  accessToken: string;
   publisherId: string;
   extensionId: string;
   publishType: "DEFAULT_PUBLISH" | "STAGED_PUBLISH";
   deployPercentage?: number;
-};
-
-type TokenResponse = {
-  access_token?: string;
-  error?: string;
-  error_description?: string;
 };
 
 type UploadResponse = {
@@ -34,47 +26,19 @@ export function readChromePublishConfig(env: NodeJS.ProcessEnv = process.env): C
   }
 
   const deployPercentage = env.CHROME_DEPLOY_PERCENTAGE?.trim()
-    ? Number.parseInt(env.CHROME_DEPLOY_PERCENTAGE, 10)
+    ? Number(env.CHROME_DEPLOY_PERCENTAGE)
     : undefined;
   if (deployPercentage !== undefined && (!Number.isInteger(deployPercentage) || deployPercentage < 0 || deployPercentage > 100)) {
     throw new Error("CHROME_DEPLOY_PERCENTAGE must be an integer between 0 and 100.");
   }
 
   return {
-    clientId: readRequiredEnv(env, "CHROME_CLIENT_ID"),
-    clientSecret: readRequiredEnv(env, "CHROME_CLIENT_SECRET"),
-    refreshToken: readRequiredEnv(env, "CHROME_REFRESH_TOKEN"),
+    accessToken: readRequiredEnv(env, "CHROME_ACCESS_TOKEN"),
     publisherId: readRequiredEnv(env, "CHROME_PUBLISHER_ID"),
     extensionId: readRequiredEnv(env, "CHROME_EXTENSION_ID"),
     publishType,
     ...(deployPercentage !== undefined ? { deployPercentage } : {})
   };
-}
-
-export async function requestChromeAccessToken(config: ChromePublishConfig): Promise<string> {
-  const body = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    refresh_token: config.refreshToken,
-    grant_type: "refresh_token"
-  });
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body
-  });
-  const payload = (await response.json().catch(() => null)) as TokenResponse | null;
-
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(
-      `Chrome Web Store token request failed (${response.status}): ${
-        payload?.error_description ?? payload?.error ?? "missing access_token"
-      }`
-    );
-  }
-
-  return payload.access_token;
 }
 
 export async function uploadChromeExtension(input: {
@@ -84,7 +48,7 @@ export async function uploadChromeExtension(input: {
   zipPath: string;
 }): Promise<UploadResponse> {
   const zipBytes = readZipBytes(input.zipPath);
-  const response = await fetch(
+  const response = await chromeRequest(
     `https://chromewebstore.googleapis.com/upload/v2/${chromeItemName(input.publisherId, input.extensionId)}:upload`,
     {
       method: "POST",
@@ -98,11 +62,11 @@ export async function uploadChromeExtension(input: {
   const payload = (await response.json().catch(() => null)) as UploadResponse | null;
 
   if (!response.ok || payload?.uploadState === "FAILED") {
-    throw new Error(`Chrome Web Store upload failed (${response.status}): ${formatJson(payload)}`);
+    throw new Error(`Chrome Web Store upload failed (HTTP ${response.status}).`);
   }
 
   if (payload?.uploadState && payload.uploadState !== "SUCCEEDED" && payload.uploadState !== "IN_PROGRESS") {
-    throw new Error(`Chrome Web Store upload did not complete successfully: ${formatJson(payload)}`);
+    throw new Error("Chrome Web Store returned an unexpected upload state.");
   }
 
   return payload ?? {};
@@ -131,7 +95,7 @@ export async function waitForChromeUpload(input: {
   }
 
   if (getUploadState(current) !== "SUCCEEDED") {
-    throw new Error(`Chrome Web Store upload failed or did not finish successfully: ${formatJson(current)}`);
+    throw new Error("Chrome Web Store upload failed or did not finish successfully.");
   }
 
   return current;
@@ -142,7 +106,7 @@ export async function fetchChromeExtensionStatus(input: {
   publisherId: string;
   extensionId: string;
 }): Promise<UploadResponse> {
-  const response = await fetch(
+  const response = await chromeRequest(
     `https://chromewebstore.googleapis.com/v2/${chromeItemName(input.publisherId, input.extensionId)}:fetchStatus`,
     {
       method: "GET",
@@ -154,7 +118,7 @@ export async function fetchChromeExtensionStatus(input: {
   const payload = (await response.json().catch(() => null)) as UploadResponse | null;
 
   if (!response.ok) {
-    throw new Error(`Chrome Web Store status fetch failed (${response.status}): ${formatJson(payload)}`);
+    throw new Error(`Chrome Web Store status fetch failed (HTTP ${response.status}).`);
   }
 
   return payload ?? {};
@@ -169,7 +133,7 @@ export async function publishChromeExtension(input: {
 }): Promise<PublishResponse> {
   const deployInfos = input.deployPercentage !== undefined ? [{ deployPercentage: input.deployPercentage }] : undefined;
 
-  const response = await fetch(`https://chromewebstore.googleapis.com/v2/${chromeItemName(input.publisherId, input.extensionId)}:publish`, {
+  const response = await chromeRequest(`https://chromewebstore.googleapis.com/v2/${chromeItemName(input.publisherId, input.extensionId)}:publish`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${input.accessToken}`,
@@ -183,7 +147,7 @@ export async function publishChromeExtension(input: {
   const payload = (await response.json().catch(() => null)) as PublishResponse | null;
 
   if (!response.ok) {
-    throw new Error(`Chrome Web Store publish failed (${response.status}): ${formatJson(payload)}`);
+    throw new Error(`Chrome Web Store publish failed (HTTP ${response.status}).`);
   }
 
   return payload ?? {};
@@ -215,15 +179,25 @@ function chromeItemName(publisherId: string, extensionId: string): string {
 }
 
 function getUploadState(payload: UploadResponse): string | undefined {
-  return payload.uploadState ?? payload.lastAsyncUploadState;
+  const state = payload.uploadState ?? payload.lastAsyncUploadState;
+  return state === "SUCCEEDED" || state === "IN_PROGRESS" || state === "FAILED" ? state : "UNKNOWN";
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function formatJson(value: unknown): string {
-  return JSON.stringify(value ?? {}, null, 2);
+async function chromeRequest(url: string, options: RequestInit): Promise<Response> {
+  // Never follow redirects with a bearer token or log transport errors/response bodies.
+  try {
+    return await fetch(url, {
+      ...options,
+      redirect: "error",
+      signal: AbortSignal.timeout(120_000)
+    });
+  } catch {
+    throw new Error("Chrome Web Store request failed or timed out.");
+  }
 }
 
 if (import.meta.main) {
@@ -234,27 +208,27 @@ if (import.meta.main) {
 
   const config = readChromePublishConfig();
   console.info(`Publishing Chrome Web Store extension ${config.extensionId} from ${zipPath}`);
-  const accessToken = await requestChromeAccessToken(config);
+  const { accessToken } = config;
   const upload = await uploadChromeExtension({
     accessToken,
     publisherId: config.publisherId,
     extensionId: config.extensionId,
     zipPath
   });
-  console.info(`Chrome Web Store upload response: ${formatJson(upload)}`);
-  const uploadResult = await waitForChromeUpload({
+  console.info(`Chrome Web Store upload state: ${getUploadState(upload)}`);
+  await waitForChromeUpload({
     accessToken,
     publisherId: config.publisherId,
     extensionId: config.extensionId,
     initialUpload: upload
   });
-  console.info(`Chrome Web Store upload completed: ${formatJson(uploadResult)}`);
-  const publish = await publishChromeExtension({
+  console.info("Chrome Web Store upload completed.");
+  await publishChromeExtension({
     accessToken,
     publisherId: config.publisherId,
     extensionId: config.extensionId,
     publishType: config.publishType,
     ...(config.deployPercentage !== undefined ? { deployPercentage: config.deployPercentage } : {})
   });
-  console.info(`Chrome Web Store publish response: ${formatJson(publish)}`);
+  console.info("Chrome Web Store publish request accepted.");
 }
