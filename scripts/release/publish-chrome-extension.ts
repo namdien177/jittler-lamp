@@ -1,19 +1,11 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 export type ChromePublishConfig = {
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
+  accessToken: string;
   publisherId: string;
   extensionId: string;
   publishType: "DEFAULT_PUBLISH" | "STAGED_PUBLISH";
   deployPercentage?: number;
-};
-
-type TokenResponse = {
-  access_token?: string;
-  error?: string;
-  error_description?: string;
 };
 
 type UploadResponse = {
@@ -41,40 +33,12 @@ export function readChromePublishConfig(env: NodeJS.ProcessEnv = process.env): C
   }
 
   return {
-    clientId: readRequiredEnv(env, "CHROME_CLIENT_ID"),
-    clientSecret: readRequiredEnv(env, "CHROME_CLIENT_SECRET"),
-    refreshToken: readRequiredEnv(env, "CHROME_REFRESH_TOKEN"),
+    accessToken: readRequiredEnv(env, "CHROME_ACCESS_TOKEN"),
     publisherId: readRequiredEnv(env, "CHROME_PUBLISHER_ID"),
     extensionId: readRequiredEnv(env, "CHROME_EXTENSION_ID"),
     publishType,
     ...(deployPercentage !== undefined ? { deployPercentage } : {})
   };
-}
-
-export async function requestChromeAccessToken(config: ChromePublishConfig): Promise<string> {
-  const body = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    refresh_token: config.refreshToken,
-    grant_type: "refresh_token"
-  });
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body
-  });
-  const payload = (await response.json().catch(() => null)) as TokenResponse | null;
-
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(
-      `Chrome Web Store token request failed (${response.status}): ${
-        payload?.error_description ?? payload?.error ?? "missing access_token"
-      }`
-    );
-  }
-
-  return payload.access_token;
 }
 
 export async function uploadChromeExtension(input: {
@@ -234,7 +198,7 @@ if (import.meta.main) {
 
   const config = readChromePublishConfig();
   console.info(`Publishing Chrome Web Store extension ${config.extensionId} from ${zipPath}`);
-  const accessToken = await requestChromeAccessToken(config);
+  const { accessToken } = config;
   const upload = await uploadChromeExtension({
     accessToken,
     publisherId: config.publisherId,

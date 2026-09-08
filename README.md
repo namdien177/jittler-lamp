@@ -174,11 +174,19 @@ The release workflow builds the extension from `apps/extension/dist` and publish
 
 The same tag workflow also submits that ZIP to the Chrome Web Store after the desktop artifact build succeeds. Configure these GitHub Actions environment secrets in the `production` environment before tagging a release:
 
-- `CHROME_CLIENT_ID`
-- `CHROME_CLIENT_SECRET`
-- `CHROME_REFRESH_TOKEN`
 - `CHROME_PUBLISHER_ID`
 - `CHROME_EXTENSION_ID`
+
+Also configure these `production` environment variables:
+
+- `CHROME_WORKLOAD_IDENTITY_PROVIDER`: full Google Workload Identity Provider resource name.
+- `CHROME_SERVICE_ACCOUNT`: email of the service account linked under Settings → Management → Service account in the Chrome Web Store Developer Dashboard.
+
+The provider must trust only this repository's release workflow on release tags in the `production` environment. Grant that identity `roles/iam.workloadIdentityUser` on the publishing service account. Enable the Chrome Web Store, IAM, Security Token Service, and IAM Service Account Credentials APIs in its Google Cloud project.
+
+GitHub OIDC generates a short-lived token with the `https://www.googleapis.com/auth/chromewebstore` scope immediately before publishing. No client secret, service account key, or refresh token is needed. Local publishing requires a fresh `CHROME_ACCESS_TOKEN` with that scope, plus the publisher and extension IDs.
+
+See [Chrome Web Store publishing](docs/chrome-webstore-publishing.md) for this repository's Google project, provider condition, and verification steps.
 
 The workflow uses the Chrome Web Store v2 publish API. `CHROME_PUBLISH_TYPE` may be set to `STAGED_PUBLISH`; otherwise the workflow uses `DEFAULT_PUBLISH`. `CHROME_DEPLOY_PERCENTAGE` may be set to an integer from `0` to `100` when you want a staged rollout percentage.
 
