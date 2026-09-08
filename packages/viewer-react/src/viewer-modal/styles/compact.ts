@@ -24,7 +24,7 @@ export const compactStyles = `
 [data-compact="true"] .jl-vm-more-menu .jl-vm-btn-label { display: inline; position: static; clip: auto; clip-path: none; width: auto; height: auto; overflow: visible; }
 [data-compact="true"] .jl-vm-left { min-width: 0; }
 [data-compact="true"] .jl-vm-video-wrap { flex: 1 1 auto; }
-[data-compact="true"] .jl-vm-secondary { flex: 0 0 auto; max-height: 34%; overflow: auto; border-top: 1px solid var(--jl-vm-border); }
+[data-compact="true"] .jl-vm-secondary { flex: 0 0 auto; max-height: none; overflow: auto; border-top: 1px solid var(--jl-vm-border); }
 .jl-vm-secondary > summary { padding: 10px 16px; color: var(--jl-vm-soft); font-size: 12px; cursor: pointer; }
 .jl-vm-secondary-content { padding-bottom: 8px; }
 [data-compact="true"] .jl-vm-discussion { padding: 0 16px 8px; }
@@ -55,6 +55,7 @@ export const compactStyles = `
   [data-compact="true"] .jl-vm-header .jl-vm-btn, .jl-vm-more summary { min-width: 40px; min-height: 40px; }
   [data-compact="true"] .jl-vm-tabs-row { flex-direction: row; flex-wrap: nowrap; align-items: center; }
   [data-compact="true"] .jl-vm-search { width: 70px; min-width: 0; min-height: 36px; flex: 1 1 70px; }
+  [data-compact="true"] .jl-vm-tabs { --jl-vm-tab-size: 40px; }
   [data-compact="true"] .jl-vm-tab { min-height: 40px; }
 }
 `;

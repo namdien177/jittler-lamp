@@ -20,6 +20,8 @@ export const headerStyles = `
   min-width: 0;
 }
 
+.jl-vm-header-left > .jl-vm-btn-icon { flex: 0 0 auto; }
+
 .jl-vm-heading {
   display: flex;
   flex-direction: column;

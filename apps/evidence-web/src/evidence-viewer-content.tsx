@@ -19,6 +19,7 @@ import {
 } from "@jittle-lamp/viewer-core";
 import {
   ViewerModal,
+  seekVideo,
   buildCurl,
   getResponseBodyString,
   type ViewerContextMenuState,
@@ -260,7 +261,8 @@ export function EvidenceViewerContent(props: EvidenceViewerContentProps): React.
       }
     }
 
-    if (videoRef.current) videoRef.current.currentTime = itemOffsetMs / 1000;
+    const video = videoRef.current;
+    if (video) void seekVideo(video, itemOffsetMs / 1000).catch(() => onVideoError(video));
   };
 
   const handleTimelineItemContextMenu = (

@@ -7,7 +7,8 @@ import { ContextMenuPortal } from "./context-menu";
 import { EvidencePane } from "./evidence-pane";
 import { injectStyles } from "./inject-styles";
 import { ViewerModalHeader } from "./modal-header";
-import { VideoNotesPane } from "./notes-pane";
+import { ViewerNotesPane } from "./notes-pane";
+import { EvidenceVideoPlayer } from "./video-player";
 import type { ViewerModalProps } from "./types";
 
 export function ViewerModal(props: ViewerModalProps): React.JSX.Element | null {
@@ -58,8 +59,9 @@ export function ViewerModal(props: ViewerModalProps): React.JSX.Element | null {
     >
       <ViewerModalHeader {...props} mode={mode} />
       <div className="jl-vm-body">
-        <VideoNotesPane {...props} />
+        <div className="jl-vm-left"><EvidenceVideoPlayer {...props} /></div>
         <EvidencePane {...props} />
+        <ViewerNotesPane {...props} />
       </div>
       {props.feedback ? (
         <div className="jl-vm-feedback" data-tone={props.feedback.tone}>

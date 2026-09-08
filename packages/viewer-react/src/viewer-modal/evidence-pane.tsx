@@ -183,6 +183,10 @@ export function EvidencePane(props: ViewerModalProps): React.JSX.Element {
             >
               {activeCountLabel}
             </span>
+          </div>
+        </div> : null}
+        <div className="jl-vm-tabs-row">
+          <div className="jl-vm-tabs">
             <button
               type="button"
               className="jl-vm-icon-btn"
@@ -192,10 +196,6 @@ export function EvidencePane(props: ViewerModalProps): React.JSX.Element {
             >
               <ChevronsRight aria-hidden size={16} strokeWidth={2} />
             </button>
-          </div>
-        </div> : null}
-        <div className="jl-vm-tabs-row">
-          <div className="jl-vm-tabs">
             {(["actions", "network", "console", "about"] as const).map((section) => (
               <button
                 key={section}

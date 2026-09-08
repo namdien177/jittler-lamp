@@ -182,9 +182,24 @@ export const evidenceStyles = `
 }
 
 .jl-vm-tabs {
+  --jl-vm-tab-size: 32px;
   display: flex;
+  align-items: center;
   flex: 0 0 auto;
   gap: 4px;
+}
+
+.jl-vm-tabs > .jl-vm-tab,
+.jl-vm-tabs > .jl-vm-icon-btn {
+  box-sizing: border-box;
+  height: var(--jl-vm-tab-size);
+  min-height: var(--jl-vm-tab-size);
+}
+
+.jl-vm-tabs > .jl-vm-icon-btn {
+  flex: 0 0 var(--jl-vm-tab-size);
+  width: var(--jl-vm-tab-size);
+  padding: 0;
 }
 
 .jl-vm-tab {

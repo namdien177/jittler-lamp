@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { seekVideo } from "@jittle-lamp/viewer-react";
+
 import type { TimelineSection } from "@jittle-lamp/shared";
 
 import type {
@@ -853,7 +855,9 @@ export function useDesktopController(options: { authStatus?: string; getAuthToke
     clickTimelineItem: (itemId, offsetMs, event) => {
       const current = viewerStateRef.current;
       const video = viewerVideoRef.current;
-      if (video) video.currentTime = Math.max(0, offsetMs / 1000);
+      if (video) void seekVideo(video, offsetMs / 1000).catch((error) => {
+        patchState({ feedback: { tone: "error", text: formatErrorMessage(error, "Unable to seek recording.") } });
+      });
       updateViewer((next) => {
         next.autoFollow = false;
         if (next.activeSection === "actions" && next.payload) {

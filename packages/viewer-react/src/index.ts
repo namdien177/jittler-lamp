@@ -38,3 +38,5 @@ export type {
   ViewerModalFeedback,
   ViewerContextMenuState
 } from "./viewer-modal";
+
+export { seekVideo } from "./seek-video";

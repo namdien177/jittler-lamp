@@ -100,7 +100,9 @@ export const shellStyles = `
 }
 
 .jl-vm-body {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -118,7 +120,19 @@ export const shellStyles = `
   background: var(--jl-vm-bg-deep);
 }
 
+.jl-vm-supplemental {
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 0;
+  max-height: 34vh;
+  overflow: auto;
+  background: var(--jl-vm-bg-deep);
+  border-right: 1px solid var(--jl-vm-border);
+}
+
 .jl-vm-right {
+  grid-column: 2;
+  grid-row: 1 / 3;
   flex: 0 0 min(var(--jl-vm-stream-width, 560px), 50vw);
   width: min(var(--jl-vm-stream-width, 560px), 50vw);
   display: flex;

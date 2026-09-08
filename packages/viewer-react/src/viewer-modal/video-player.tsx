@@ -2,6 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import type * as React from "react";
 import { Maximize, Minimize, Pause, Play, Volume2, VolumeX } from "lucide-react";
 
+import { seekVideo } from "../seek-video";
+
 export type VideoPlayerProps = {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   videoSrc?: string | null;
@@ -250,7 +252,7 @@ function NativeEvidenceVideoPlayer(props: VideoPlayerProps): React.JSX.Element {
     const player = videoNodeRef.current;
     const next = Number(event.target.value);
     setCurrentTime(next);
-    if (player) player.currentTime = next;
+    if (player) void seekVideo(player, next).catch(() => latestCallbacksRef.current.onVideoError?.());
   }, []);
 
   const handleVolumeChange = useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {

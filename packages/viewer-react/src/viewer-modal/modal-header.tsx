@@ -1,5 +1,5 @@
 import type * as React from "react";
-import { ArrowRightLeft, Bot, Copy, Download, Link, Pencil, MoreHorizontal, X } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Bot, Copy, Download, Link, Pencil, MoreHorizontal, X } from "lucide-react";
 
 import type { ViewerModalProps } from "./types";
 
@@ -102,7 +102,7 @@ export function ViewerModalHeader(props: ViewerModalProps): React.JSX.Element {
   const showTransferEvidence = props.onTransferEvidence !== undefined;
   const showDownloadZip = props.onDownloadZip !== undefined;
   const isPage = (props.mode ?? "modal") === "page";
-  const closeLabel = props.closeLabel ?? "Close viewer";
+  const closeLabel = props.closeLabel ?? (isPage ? "Back to evidence" : "Close viewer");
   const actions: React.JSX.Element[] = [];
 
   if (showCopyLink) {
@@ -210,29 +210,29 @@ export function ViewerModalHeader(props: ViewerModalProps): React.JSX.Element {
     );
   }
 
-  let closeButtonLabel: React.ReactNode;
-  let closeButtonIconOnly = true;
-
-  if (isPage && props.closeLabel) {
-    closeButtonLabel = closeLabel;
-    closeButtonIconOnly = false;
+  if (!isPage) {
+    actions.push(
+      <HeaderActionButton
+        key="close"
+        label={closeLabel}
+        icon={<X aria-hidden size={16} strokeWidth={2} />}
+        iconOnly
+        onClick={props.onClose}
+      />
+    );
   }
-
-  actions.push(
-    <HeaderActionButton
-      key="close"
-      label={closeLabel}
-      icon={<X aria-hidden size={16} strokeWidth={2} />}
-      iconOnly={closeButtonIconOnly}
-      onClick={props.onClose}
-    >
-      {closeButtonLabel}
-    </HeaderActionButton>
-  );
 
   return (
     <header className="jl-vm-header">
       <div className="jl-vm-header-left">
+        {isPage ? (
+          <HeaderActionButton
+            label={closeLabel}
+            icon={<ArrowLeft aria-hidden size={18} strokeWidth={2} />}
+            iconOnly
+            onClick={props.onClose}
+          />
+        ) : null}
         <div className="jl-vm-heading">
           <span className="jl-vm-title">{props.title}</span>
           <TitleMeta value={props.titleMeta} />

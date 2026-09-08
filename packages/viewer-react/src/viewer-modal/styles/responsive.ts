@@ -56,9 +56,7 @@ export const responsiveStyles = `
     min-width: 44px;
   }
 
-  /* The whole viewer becomes one scrollable column: video first, then tags,
-     discussion, and the evidence stream. Nothing overlaps; the stream keeps
-     its own internal scroll so the tabs stay reachable. */
+  /* Narrow viewers scroll vertically; the evidence list keeps its own scroll. */
   .jl-vm-body {
     flex-direction: column;
     overflow: hidden auto;
@@ -217,6 +215,7 @@ export const responsiveStyles = `
   }
 
   .jl-vm-tabs {
+    --jl-vm-tab-size: 44px;
     max-width: 100%;
     overflow-x: auto;
     scrollbar-width: none;
@@ -251,5 +250,24 @@ export const responsiveStyles = `
   .jl-vm-pane-count {
     min-height: 36px;
   }
+}
+`;
+
+// Use the available viewer dimensions, including portrait desktop windows.
+export const stackedViewerStyles = `
+.jl-vm-modal, .jl-vm-root { container: jl-viewer / size; }
+@container jl-viewer (max-width: 900px) or (max-aspect-ratio: 1/1) {
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-body { display: flex; flex-direction: column; overflow: hidden auto; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-left { flex: 0 0 auto; width: 100%; min-width: 0; border-right: 0; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-left .jl-vm-video-wrap { flex: none; width: 100%; height: min(56.25cqw, 46cqh); min-height: 150px; max-height: none; aspect-ratio: auto; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-right { flex: 1 0 280px; width: 100%; max-width: 100%; min-height: 280px; border-top: 1px solid var(--jl-vm-border); }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-right[data-collapsed="true"] { flex: 0 0 44px; width: 100%; min-height: 44px; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-supplemental { flex: 0 0 auto; width: 100%; max-height: 240px; border-right: 0; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-supplemental .jl-vm-secondary { max-height: none; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-right .jl-vm-list { max-height: none; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-stream-resizer { display: none; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-stream-rail { grid-template-columns: auto 1fr; grid-template-rows: 1fr; width: 100%; height: 44px; padding: 0 12px; border-left: 0; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-stream-rail span { writing-mode: horizontal-tb; }
+  :is(.jl-vm-root, .jl-vm-modal) .jl-vm-stream-rail svg, .jl-vm-tabs > .jl-vm-icon-btn svg { transform: rotate(90deg); }
 }
 `;

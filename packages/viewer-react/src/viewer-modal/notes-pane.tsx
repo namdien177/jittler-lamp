@@ -4,7 +4,6 @@ import { Check, Plus, Search } from "lucide-react";
 
 import { formatCommentTime } from "./format";
 import type { ViewerEvidenceTag, ViewerModalProps } from "./types";
-import { EvidenceVideoPlayer } from "./video-player";
 
 type TagRailItem = {
   id: string;
@@ -55,7 +54,7 @@ function resizeComposerTextarea(textarea: HTMLTextAreaElement): void {
   textarea.style.overflowY = overflowY;
 }
 
-export function VideoNotesPane(props: ViewerModalProps): React.JSX.Element {
+export function ViewerNotesPane(props: ViewerModalProps): React.JSX.Element {
   const hasDiscussion = props.discussionComments !== undefined;
   const discussionValue = props.discussionValue ?? "";
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -149,8 +148,7 @@ export function VideoNotesPane(props: ViewerModalProps): React.JSX.Element {
   </>;
 
   return (
-    <div className="jl-vm-left">
-      <EvidenceVideoPlayer {...props} />
+    <div className="jl-vm-supplemental">
       {props.compact ? (
         <details className="jl-vm-secondary" onToggle={event => {
           if (event.currentTarget.open) props.onDetailsOpen?.();

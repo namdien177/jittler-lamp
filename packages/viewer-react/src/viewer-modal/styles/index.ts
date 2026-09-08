@@ -5,7 +5,7 @@ import { evidenceStyles } from "./evidence";
 import { feedbackStyles } from "./feedback";
 import { headerStyles } from "./header";
 import { notesStyles } from "./notes";
-import { responsiveStyles } from "./responsive";
+import { responsiveStyles, stackedViewerStyles } from "./responsive";
 import { shellStyles } from "./shell";
 import { videoStyles } from "./video";
 
@@ -24,5 +24,6 @@ export const viewerModalStyles = [
   contextMenuStyles,
   feedbackStyles,
   responsiveStyles,
-  compactStyles
+  compactStyles,
+  stackedViewerStyles
 ].join("\n");
