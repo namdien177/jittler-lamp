@@ -27,7 +27,7 @@ jobs:
             echo "Expected a stable release tag push in namdien177/jittle-lamp." >&2
             exit 1
           fi
-          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
           if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
             echo "Release tags must point at the current main HEAD." >&2
             exit 1

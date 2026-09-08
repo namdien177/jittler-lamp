@@ -70,7 +70,7 @@ describe("release source checks before code execution", () => {
       expect(script).toBeDefined();
       expect(text.indexOf("Verify release source")).toBeLessThan(text.indexOf("uses:"));
       const root = mkdtempSync(join(tmpdir(), "release-guard-"));
-      writeFileSync(join(root, "gh"), '#!/bin/sh\nprintf "%s\\n" "$TEST_MAIN_SHA"\n', { mode: 0o700 });
+      writeFileSync(join(root, "gh"), '#!/bin/sh\n[ "$2" = "repos/namdien177/jittle-lamp/git/ref/heads/main" ] || exit 1\nprintf "%s\\n" "$TEST_MAIN_SHA"\n', { mode: 0o700 });
       const env = {
         ...process.env, PATH: `${root}:${process.env.PATH}`, TEST_MAIN_SHA: "abc123",
         GITHUB_REPOSITORY: "namdien177/jittle-lamp", GITHUB_EVENT_NAME: "push",
